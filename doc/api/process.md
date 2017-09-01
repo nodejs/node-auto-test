@@ -645,7 +645,7 @@ If the Node.js process was not spawned with an IPC channel,
 <!-- YAML
 added: v0.1.16
 changes:
-  - version: REPLACEME
+  - version: v9.0.0
     pr-url: https://github.com/nodejs/node/pull/12794
     description: Added support for the `flags` argument.
 -->
