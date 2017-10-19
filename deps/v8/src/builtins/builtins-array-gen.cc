@@ -6,6 +6,7 @@
 #include "src/builtins/builtins-utils-gen.h"
 #include "src/builtins/builtins.h"
 #include "src/code-stub-assembler.h"
+#include "src/factory-inl.h"
 #include "src/frame-constants.h"
 
 namespace v8 {
@@ -111,8 +112,7 @@ class ArrayBuiltinCodeStubAssembler : public CodeStubAssembler {
       Label fast(this);
       Label runtime(this);
       Label object_push_pre(this), object_push(this), double_push(this);
-      BranchIfFastJSArray(a(), context(), FastJSArrayAccessMode::ANY_ACCESS,
-                          &fast, &runtime);
+      BranchIfFastJSArray(a(), context(), &fast, &runtime);
 
       BIND(&fast);
       {
@@ -305,7 +305,7 @@ class ArrayBuiltinCodeStubAssembler : public CodeStubAssembler {
 
     BIND(&slow);
     CallRuntime(Runtime::kSetProperty, context(), a(), k, mapped_value,
-                SmiConstant(STRICT));
+                SmiConstant(Smi::FromEnum(LanguageMode::kStrict)));
     Goto(&done);
 
     BIND(&detached);
@@ -534,30 +534,23 @@ class ArrayBuiltinCodeStubAssembler : public CodeStubAssembler {
     {
       if (direction == ForEachDirection::kForward) {
         // 8. Repeat, while k < len
-        GotoUnlessNumberLessThan(k(), len_, &after_loop);
+        GotoIfNumberGreaterThanOrEqual(k(), len_, &after_loop);
       } else {
         // OR
         // 10. Repeat, while k >= 0
-        GotoUnlessNumberLessThan(SmiConstant(-1), k(), &after_loop);
+        GotoIfNumberGreaterThanOrEqual(SmiConstant(-1), k(), &after_loop);
       }
 
       Label done_element(this, &to_);
       // a. Let Pk be ToString(k).
-      // We never have to perform a ToString conversion for Smi keys because
-      // they are guaranteed to be stored as elements. We easily hit this case
-      // when using any iteration builtin on a dictionary elements Array.
-      VARIABLE(p_k, MachineRepresentation::kTagged, k());
-      {
-        Label continue_with_key(this);
-        GotoIf(TaggedIsSmi(p_k.value()), &continue_with_key);
-        p_k.Bind(ToString(context(), p_k.value()));
-        Goto(&continue_with_key);
-        BIND(&continue_with_key);
-      }
+      // We never have to perform a ToString conversion as the above guards
+      // guarantee that we have a positive {k} which also is a valid array
+      // index in the range [0, 2^32-1).
+      CSA_ASSERT(this, IsNumberArrayIndex(k()));
 
       // b. Let kPresent be HasProperty(O, Pk).
       // c. ReturnIfAbrupt(kPresent).
-      Node* k_present = HasProperty(o(), p_k.value(), context(), kHasProperty);
+      Node* k_present = HasProperty(o(), k(), context(), kHasProperty);
 
       // d. If kPresent is true, then
       GotoIf(WordNotEqual(k_present, TrueConstant()), &done_element);
@@ -711,7 +704,6 @@ class ArrayBuiltinCodeStubAssembler : public CodeStubAssembler {
     GotoIf(TaggedIsNotSmi(len()), slow);
 
     BranchIfFastJSArray(o(), context(),
-                        CodeStubAssembler::FastJSArrayAccessMode::INBOUNDS_READ,
                         &switch_on_elements_kind, slow);
 
     BIND(&switch_on_elements_kind);
@@ -759,11 +751,8 @@ class ArrayBuiltinCodeStubAssembler : public CodeStubAssembler {
                           Int32Constant(JS_ARRAY_TYPE)),
            &runtime);
 
-    Node* const native_context = LoadNativeContext(context());
-    Node* const initial_array_prototype = LoadContextElement(
-        native_context, Context::INITIAL_ARRAY_PROTOTYPE_INDEX);
-    Node* proto = LoadMapPrototype(original_map);
-    GotoIf(WordNotEqual(proto, initial_array_prototype), &runtime);
+    GotoIfNot(IsPrototypeInitialArrayPrototype(context(), original_map),
+              &runtime);
 
     Node* species_protector = SpeciesProtectorConstant();
     Node* value =
@@ -780,6 +769,7 @@ class ArrayBuiltinCodeStubAssembler : public CodeStubAssembler {
     // element in the input array (maybe the callback deletes an element).
     const ElementsKind elements_kind =
         GetHoleyElementsKind(GetInitialFastElementsKind());
+    Node* const native_context = LoadNativeContext(context());
     Node* array_map = LoadJSArrayElementsMap(elements_kind, native_context);
     a_.Bind(AllocateJSArray(PACKED_SMI_ELEMENTS, array_map, len, len, nullptr,
                             CodeStubAssembler::SMI_PARAMETERS));
@@ -835,13 +825,11 @@ TF_BUILTIN(FastArrayPop, CodeStubAssembler) {
   // 4) we aren't supposed to shrink the backing store.
 
   // 1) Check that the array has fast elements.
-  BranchIfFastJSArray(receiver, context, FastJSArrayAccessMode::INBOUNDS_READ,
-                      &fast, &runtime);
+  BranchIfFastJSArray(receiver, context, &fast, &runtime);
 
   BIND(&fast);
   {
-    CSA_ASSERT(this, TaggedIsPositiveSmi(
-                         LoadObjectField(receiver, JSArray::kLengthOffset)));
+    CSA_ASSERT(this, TaggedIsPositiveSmi(LoadJSArrayLength(receiver)));
     Node* length = LoadAndUntagObjectField(receiver, JSArray::kLengthOffset);
     Label return_undefined(this), fast_elements(this);
     GotoIf(IntPtrEqual(length, IntPtrConstant(0)), &return_undefined);
@@ -939,8 +927,7 @@ TF_BUILTIN(FastArrayPush, CodeStubAssembler) {
   Node* kind = nullptr;
 
   Label fast(this);
-  BranchIfFastJSArray(receiver, context, FastJSArrayAccessMode::ANY_ACCESS,
-                      &fast, &runtime);
+  BranchIfFastJSArray(receiver, context, &fast, &runtime);
 
   BIND(&fast);
   {
@@ -966,7 +953,7 @@ TF_BUILTIN(FastArrayPush, CodeStubAssembler) {
     // TODO(danno): Use the KeyedStoreGeneric stub here when possible,
     // calling into the runtime to do the elements transition is overkill.
     CallRuntime(Runtime::kSetProperty, context, receiver, length, arg,
-                SmiConstant(STRICT));
+                SmiConstant(Smi::FromEnum(LanguageMode::kStrict)));
     Increment(&arg_index);
     // The runtime SetProperty call could have converted the array to dictionary
     // mode, which must be detected to abort the fast-path.
@@ -1013,7 +1000,7 @@ TF_BUILTIN(FastArrayPush, CodeStubAssembler) {
     // TODO(danno): Use the KeyedStoreGeneric stub here when possible,
     // calling into the runtime to do the elements transition is overkill.
     CallRuntime(Runtime::kSetProperty, context, receiver, length, arg,
-                SmiConstant(STRICT));
+                SmiConstant(Smi::FromEnum(LanguageMode::kStrict)));
     Increment(&arg_index);
     // The runtime SetProperty call could have converted the array to dictionary
     // mode, which must be detected to abort the fast-path.
@@ -1033,7 +1020,7 @@ TF_BUILTIN(FastArrayPush, CodeStubAssembler) {
         [this, receiver, context](Node* arg) {
           Node* length = LoadJSArrayLength(receiver);
           CallRuntime(Runtime::kSetProperty, context, receiver, length, arg,
-                      SmiConstant(STRICT));
+                      SmiConstant(Smi::FromEnum(LanguageMode::kStrict)));
         },
         arg_index);
     args.PopAndReturn(LoadJSArrayLength(receiver));
@@ -1068,13 +1055,11 @@ TF_BUILTIN(FastArrayShift, CodeStubAssembler) {
   // 5) we aren't supposed to left-trim the backing store.
 
   // 1) Check that the array has fast elements.
-  BranchIfFastJSArray(receiver, context, FastJSArrayAccessMode::INBOUNDS_READ,
-                      &fast, &runtime);
+  BranchIfFastJSArray(receiver, context, &fast, &runtime);
 
   BIND(&fast);
   {
-    CSA_ASSERT(this, TaggedIsPositiveSmi(
-                         LoadObjectField(receiver, JSArray::kLengthOffset)));
+    CSA_ASSERT(this, TaggedIsPositiveSmi(LoadJSArrayLength(receiver)));
     Node* length = LoadAndUntagObjectField(receiver, JSArray::kLengthOffset);
     Label return_undefined(this), fast_elements_tagged(this),
         fast_elements_smi(this);
@@ -1180,17 +1165,16 @@ TF_BUILTIN(FastArrayShift, CodeStubAssembler) {
     BIND(&fast_elements_smi);
     {
       Node* value = LoadFixedArrayElement(elements, 0);
-      int32_t header_size = FixedDoubleArray::kHeaderSize - kHeapObjectTag;
-      Node* memmove =
-          ExternalConstant(ExternalReference::libc_memmove_function(isolate()));
-      Node* start = IntPtrAdd(
-          BitcastTaggedToWord(elements),
-          ElementOffsetFromIndex(IntPtrConstant(0), HOLEY_SMI_ELEMENTS,
-                                 INTPTR_PARAMETERS, header_size));
-      CallCFunction3(MachineType::AnyTagged(), MachineType::Pointer(),
-                     MachineType::Pointer(), MachineType::UintPtr(), memmove,
-                     start, IntPtrAdd(start, IntPtrConstant(kPointerSize)),
-                     IntPtrMul(new_length, IntPtrConstant(kPointerSize)));
+      BuildFastLoop(IntPtrConstant(0), new_length,
+                    [&](Node* index) {
+                      StoreFixedArrayElement(
+                          elements, index,
+                          LoadFixedArrayElement(
+                              elements, IntPtrAdd(index, IntPtrConstant(1))),
+                          SKIP_WRITE_BARRIER);
+                    },
+                    1, ParameterMode::INTPTR_PARAMETERS,
+                    IndexAdvanceMode::kPost);
       StoreFixedArrayElement(elements, new_length, TheHoleConstant());
       GotoIf(WordEqual(value, TheHoleConstant()), &return_undefined);
       args.PopAndReturn(value);
@@ -1571,6 +1555,66 @@ TF_BUILTIN(ArrayFilterLoopContinuation, ArrayBuiltinCodeStubAssembler) {
       &ArrayBuiltinCodeStubAssembler::NullPostLoopAction);
 }
 
+TF_BUILTIN(ArrayFilterLoopEagerDeoptContinuation,
+           ArrayBuiltinCodeStubAssembler) {
+  Node* context = Parameter(Descriptor::kContext);
+  Node* receiver = Parameter(Descriptor::kReceiver);
+  Node* callbackfn = Parameter(Descriptor::kCallbackFn);
+  Node* this_arg = Parameter(Descriptor::kThisArg);
+  Node* array = Parameter(Descriptor::kArray);
+  Node* initial_k = Parameter(Descriptor::kInitialK);
+  Node* len = Parameter(Descriptor::kLength);
+  Node* to = Parameter(Descriptor::kTo);
+
+  Callable stub(
+      Builtins::CallableFor(isolate(), Builtins::kArrayFilterLoopContinuation));
+  Return(CallStub(stub, context, receiver, callbackfn, this_arg, array,
+                  receiver, initial_k, len, to));
+}
+
+TF_BUILTIN(ArrayFilterLoopLazyDeoptContinuation,
+           ArrayBuiltinCodeStubAssembler) {
+  Node* context = Parameter(Descriptor::kContext);
+  Node* receiver = Parameter(Descriptor::kReceiver);
+  Node* callbackfn = Parameter(Descriptor::kCallbackFn);
+  Node* this_arg = Parameter(Descriptor::kThisArg);
+  Node* array = Parameter(Descriptor::kArray);
+  Node* initial_k = Parameter(Descriptor::kInitialK);
+  Node* len = Parameter(Descriptor::kLength);
+  Node* value_k = Parameter(Descriptor::kValueK);
+  Node* result = Parameter(Descriptor::kResult);
+
+  VARIABLE(to, MachineRepresentation::kTagged, Parameter(Descriptor::kTo));
+
+  // This custom lazy deopt point is right after the callback. filter() needs
+  // to pick up at the next step, which is setting the callback result in
+  // the output array. After incrementing k and to, we can glide into the loop
+  // continuation builtin.
+
+  Label true_continue(this, &to), false_continue(this);
+
+  // iii. If selected is true, then...
+  BranchIfToBooleanIsTrue(result, &true_continue, &false_continue);
+  BIND(&true_continue);
+  {
+    // 1. Perform ? CreateDataPropertyOrThrow(A, ToString(to), kValue).
+    CallRuntime(Runtime::kCreateDataProperty, context, array, to.value(),
+                value_k);
+    // 2. Increase to by 1.
+    to.Bind(NumberInc(to.value()));
+    Goto(&false_continue);
+  }
+  BIND(&false_continue);
+
+  // Increment k.
+  initial_k = NumberInc(initial_k);
+
+  Callable stub(
+      Builtins::CallableFor(isolate(), Builtins::kArrayFilterLoopContinuation));
+  Return(CallStub(stub, context, receiver, callbackfn, this_arg, array,
+                  receiver, initial_k, len, to.value()));
+}
+
 TF_BUILTIN(ArrayFilter, ArrayBuiltinCodeStubAssembler) {
   Node* argc =
       ChangeInt32ToIntPtr(Parameter(BuiltinDescriptor::kArgumentsCount));
@@ -1702,12 +1746,11 @@ TF_BUILTIN(ArrayIsArray, CodeStubAssembler) {
   GotoIf(TaggedIsSmi(object), &return_false);
   TNode<Word32T> instance_type = LoadInstanceType(CAST(object));
 
-  GotoIf(Word32Equal(instance_type, Int32Constant(JS_ARRAY_TYPE)),
-         &return_true);
+  GotoIf(InstanceTypeEqual(instance_type, JS_ARRAY_TYPE), &return_true);
 
   // TODO(verwaest): Handle proxies in-place.
-  Branch(Word32Equal(instance_type, Int32Constant(JS_PROXY_TYPE)),
-         &call_runtime, &return_false);
+  Branch(InstanceTypeEqual(instance_type, JS_PROXY_TYPE), &call_runtime,
+         &return_false);
 
   BIND(&return_true);
   Return(BooleanConstant(true));
@@ -1749,8 +1792,7 @@ void ArrayIncludesIndexofAssembler::Generate(SearchVariant variant) {
 
   // Take slow path if not a JSArray, if retrieving elements requires
   // traversing prototype, or if access checks are required.
-  BranchIfFastJSArray(receiver, context, FastJSArrayAccessMode::INBOUNDS_READ,
-                      &init_index, &call_runtime);
+  BranchIfFastJSArray(receiver, context, &init_index, &call_runtime);
 
   BIND(&init_index);
   VARIABLE(index_var, MachineType::PointerRepresentation(), intptr_zero);
@@ -1819,8 +1861,8 @@ void ArrayIncludesIndexofAssembler::Generate(SearchVariant variant) {
   {
     VARIABLE(search_num, MachineRepresentation::kFloat64);
     Label ident_loop(this, &index_var), heap_num_loop(this, &search_num),
-        string_loop(this), undef_loop(this, &index_var), not_smi(this),
-        not_heap_num(this);
+        string_loop(this), bigint_loop(this, &index_var),
+        undef_loop(this, &index_var), not_smi(this), not_heap_num(this);
 
     GotoIfNot(TaggedIsSmi(search_element), &not_smi);
     search_num.Bind(SmiToFloat64(CAST(search_element)));
@@ -1838,6 +1880,7 @@ void ArrayIncludesIndexofAssembler::Generate(SearchVariant variant) {
     BIND(&not_heap_num);
     Node* search_type = LoadMapInstanceType(map);
     GotoIf(IsStringInstanceType(search_type), &string_loop);
+    GotoIf(IsBigIntInstanceType(search_type), &bigint_loop);
     Goto(&ident_loop);
 
     BIND(&ident_loop);
@@ -1941,6 +1984,18 @@ void ArrayIncludesIndexofAssembler::Generate(SearchVariant variant) {
       BIND(&continue_loop);
       Increment(&index_var);
       Goto(&next_iteration);
+    }
+
+    BIND(&bigint_loop);
+    {
+      GotoIfNot(UintPtrLessThan(index_var.value(), array_length),
+                &return_not_found);
+      Node* element_k = LoadFixedArrayElement(elements, index_var.value());
+      TNode<Object> result = CallRuntime(Runtime::kBigIntEqual, context,
+                                         search_element, element_k);
+      GotoIf(WordEqual(result, TrueConstant()), &return_found);
+      Increment(&index_var);
+      Goto(&bigint_loop);
     }
   }
 
@@ -2179,11 +2234,7 @@ TF_BUILTIN(ArrayIteratorPrototypeNext, CodeStubAssembler) {
   // (22.1.5.3), throw a TypeError exception
   GotoIf(TaggedIsSmi(iterator), &throw_bad_receiver);
   TNode<Int32T> instance_type = LoadInstanceType(iterator);
-  GotoIf(
-      Uint32LessThan(
-          Int32Constant(LAST_ARRAY_ITERATOR_TYPE - FIRST_ARRAY_ITERATOR_TYPE),
-          Int32Sub(instance_type, Int32Constant(FIRST_ARRAY_ITERATOR_TYPE))),
-      &throw_bad_receiver);
+  GotoIf(IsArrayIteratorInstanceType(instance_type), &throw_bad_receiver);
 
   // Let a be O.[[IteratedObject]].
   Node* array =
@@ -2205,7 +2256,7 @@ TF_BUILTIN(ArrayIteratorPrototypeNext, CodeStubAssembler) {
     CSA_ASSERT(this, Word32Equal(LoadMapInstanceType(array_map),
                                  Int32Constant(JS_ARRAY_TYPE)));
 
-    Node* length = LoadObjectField(array, JSArray::kLengthOffset);
+    Node* length = LoadJSArrayLength(array);
 
     CSA_ASSERT(this, TaggedIsSmi(length));
     CSA_ASSERT(this, TaggedIsSmi(index));
@@ -2295,8 +2346,8 @@ TF_BUILTIN(ArrayIteratorPrototypeNext, CodeStubAssembler) {
     GotoIf(WordEqual(array, UndefinedConstant()), &allocate_iterator_result);
 
     Node* array_type = LoadInstanceType(array);
-    Branch(Word32Equal(array_type, Int32Constant(JS_TYPED_ARRAY_TYPE)),
-           &if_istypedarray, &if_isgeneric);
+    Branch(InstanceTypeEqual(array_type, JS_TYPED_ARRAY_TYPE), &if_istypedarray,
+           &if_isgeneric);
 
     BIND(&if_isgeneric);
     {
@@ -2306,12 +2357,12 @@ TF_BUILTIN(ArrayIteratorPrototypeNext, CodeStubAssembler) {
       {
         VARIABLE(var_length, MachineRepresentation::kTagged);
         Label if_isarray(this), if_isnotarray(this), done(this);
-        Branch(Word32Equal(array_type, Int32Constant(JS_ARRAY_TYPE)),
-               &if_isarray, &if_isnotarray);
+        Branch(InstanceTypeEqual(array_type, JS_ARRAY_TYPE), &if_isarray,
+               &if_isnotarray);
 
         BIND(&if_isarray);
         {
-          var_length.Bind(LoadObjectField(array, JSArray::kLengthOffset));
+          var_length.Bind(LoadJSArrayLength(array));
 
           // Invalidate protector cell if needed
           Branch(WordNotEqual(orig_map, UndefinedConstant()), &if_wasfastarray,
@@ -2350,7 +2401,7 @@ TF_BUILTIN(ArrayIteratorPrototypeNext, CodeStubAssembler) {
         length = var_length.value();
       }
 
-      GotoUnlessNumberLessThan(index, length, &set_done);
+      GotoIfNumberGreaterThanOrEqual(index, length, &set_done);
 
       StoreObjectField(iterator, JSArrayIterator::kNextIndexOffset,
                        NumberInc(index));

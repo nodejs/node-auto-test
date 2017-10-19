@@ -9,9 +9,9 @@
 
 #include "src/builtins/builtins-arguments-gen.h"
 #include "src/builtins/builtins-constructor-gen.h"
-#include "src/builtins/builtins-forin-gen.h"
 #include "src/code-events.h"
 #include "src/code-factory.h"
+#include "src/debug/debug.h"
 #include "src/factory.h"
 #include "src/ic/accessor-assembler.h"
 #include "src/ic/binary-op-assembler.h"
@@ -277,7 +277,8 @@ class InterpreterStoreGlobalAssembler : public InterpreterAssembler {
 // Store the value in the accumulator into the global with name in constant pool
 // entry <name_index> using FeedBackVector slot <slot> in sloppy mode.
 IGNITION_HANDLER(StaGlobalSloppy, InterpreterStoreGlobalAssembler) {
-  Callable ic = CodeFactory::StoreGlobalICInOptimizedCode(isolate(), SLOPPY);
+  Callable ic = CodeFactory::StoreGlobalICInOptimizedCode(
+      isolate(), LanguageMode::kSloppy);
   StaGlobal(ic);
 }
 
@@ -286,7 +287,8 @@ IGNITION_HANDLER(StaGlobalSloppy, InterpreterStoreGlobalAssembler) {
 // Store the value in the accumulator into the global with name in constant pool
 // entry <name_index> using FeedBackVector slot <slot> in strict mode.
 IGNITION_HANDLER(StaGlobalStrict, InterpreterStoreGlobalAssembler) {
-  Callable ic = CodeFactory::StoreGlobalICInOptimizedCode(isolate(), STRICT);
+  Callable ic = CodeFactory::StoreGlobalICInOptimizedCode(
+      isolate(), LanguageMode::kStrict);
   StaGlobal(ic);
 }
 
@@ -511,8 +513,8 @@ IGNITION_HANDLER(StaLookupSlot, InterpreterAssembler) {
   Variable var_result(this, MachineRepresentation::kTagged);
 
   Label sloppy(this), strict(this), end(this);
-  DCHECK_EQ(0, SLOPPY);
-  DCHECK_EQ(1, STRICT);
+  DCHECK_EQ(0, LanguageMode::kSloppy);
+  DCHECK_EQ(1, LanguageMode::kStrict);
   DCHECK_EQ(0, static_cast<int>(LookupHoistingMode::kNormal));
   DCHECK_EQ(1, static_cast<int>(LookupHoistingMode::kLegacySloppy));
   Branch(IsSetWord32<StoreLookupSlotFlags::LanguageModeBit>(bytecode_flags),
@@ -636,25 +638,13 @@ class InterpreterStoreNamedPropertyAssembler : public InterpreterAssembler {
   }
 };
 
-// StaNamedPropertySloppy <object> <name_index> <slot>
+// StaNamedProperty <object> <name_index> <slot>
 //
-// Calls the sloppy mode StoreIC at FeedBackVector slot <slot> for <object> and
+// Calls the StoreIC at FeedBackVector slot <slot> for <object> and
 // the name in constant pool entry <name_index> with the value in the
 // accumulator.
-IGNITION_HANDLER(StaNamedPropertySloppy,
-                 InterpreterStoreNamedPropertyAssembler) {
-  Callable ic = CodeFactory::StoreICInOptimizedCode(isolate(), SLOPPY);
-  StaNamedProperty(ic);
-}
-
-// StaNamedPropertyStrict <object> <name_index> <slot>
-//
-// Calls the strict mode StoreIC at FeedBackVector slot <slot> for <object> and
-// the name in constant pool entry <name_index> with the value in the
-// accumulator.
-IGNITION_HANDLER(StaNamedPropertyStrict,
-                 InterpreterStoreNamedPropertyAssembler) {
-  Callable ic = CodeFactory::StoreICInOptimizedCode(isolate(), STRICT);
+IGNITION_HANDLER(StaNamedProperty, InterpreterStoreNamedPropertyAssembler) {
+  Callable ic = Builtins::CallableFor(isolate(), Builtins::kStoreIC);
   StaNamedProperty(ic);
 }
 
@@ -668,48 +658,25 @@ IGNITION_HANDLER(StaNamedOwnProperty, InterpreterStoreNamedPropertyAssembler) {
   StaNamedProperty(ic);
 }
 
-class InterpreterStoreKeyedPropertyAssembler : public InterpreterAssembler {
- public:
-  InterpreterStoreKeyedPropertyAssembler(CodeAssemblerState* state,
-                                         Bytecode bytecode,
-                                         OperandScale operand_scale)
-      : InterpreterAssembler(state, bytecode, operand_scale) {}
-
-  void StaKeyedProperty(Callable ic) {
-    Node* code_target = HeapConstant(ic.code());
-    Node* object_reg_index = BytecodeOperandReg(0);
-    Node* object = LoadRegister(object_reg_index);
-    Node* name_reg_index = BytecodeOperandReg(1);
-    Node* name = LoadRegister(name_reg_index);
-    Node* value = GetAccumulator();
-    Node* raw_slot = BytecodeOperandIdx(2);
-    Node* smi_slot = SmiTag(raw_slot);
-    Node* feedback_vector = LoadFeedbackVector();
-    Node* context = GetContext();
-    CallStub(ic.descriptor(), code_target, context, object, name, value,
-             smi_slot, feedback_vector);
-    Dispatch();
-  }
-};
-
-// StaKeyedPropertySloppy <object> <key> <slot>
+// StaKeyedProperty <object> <key> <slot>
 //
-// Calls the sloppy mode KeyStoreIC at FeedBackVector slot <slot> for <object>
-// and the key <key> with the value in the accumulator.
-IGNITION_HANDLER(StaKeyedPropertySloppy,
-                 InterpreterStoreKeyedPropertyAssembler) {
-  Callable ic = CodeFactory::KeyedStoreICInOptimizedCode(isolate(), SLOPPY);
-  StaKeyedProperty(ic);
-}
-
-// StaKeyedPropertyStrict <object> <key> <slot>
-//
-// Calls the strict mode KeyStoreIC at FeedBackVector slot <slot> for <object>
-// and the key <key> with the value in the accumulator.
-IGNITION_HANDLER(StaKeyedPropertyStrict,
-                 InterpreterStoreKeyedPropertyAssembler) {
-  Callable ic = CodeFactory::KeyedStoreICInOptimizedCode(isolate(), STRICT);
-  StaKeyedProperty(ic);
+// Calls the KeyedStoreIC at FeedbackVector slot <slot> for <object> and
+// the key <key> with the value in the accumulator.
+IGNITION_HANDLER(StaKeyedProperty, InterpreterAssembler) {
+  Callable ic = Builtins::CallableFor(isolate(), Builtins::kKeyedStoreIC);
+  Node* code_target = HeapConstant(ic.code());
+  Node* object_reg_index = BytecodeOperandReg(0);
+  Node* object = LoadRegister(object_reg_index);
+  Node* name_reg_index = BytecodeOperandReg(1);
+  Node* name = LoadRegister(name_reg_index);
+  Node* value = GetAccumulator();
+  Node* raw_slot = BytecodeOperandIdx(2);
+  Node* smi_slot = SmiTag(raw_slot);
+  Node* feedback_vector = LoadFeedbackVector();
+  Node* context = GetContext();
+  CallStub(ic.descriptor(), code_target, context, object, name, value, smi_slot,
+           feedback_vector);
+  Dispatch();
 }
 
 // StaDataPropertyInLiteral <object> <name> <flags>
@@ -856,9 +823,11 @@ class InterpreterBinaryOpAssembler : public InterpreterAssembler {
                                OperandScale operand_scale)
       : InterpreterAssembler(state, bytecode, operand_scale) {}
 
-  typedef Node* (BinaryOpAssembler::*BinaryOpGenerator)(
-      Node* context, Node* left, Node* right, Node* slot, Node* vector,
-      Node* function, bool lhs_is_smi);
+  typedef Node* (BinaryOpAssembler::*BinaryOpGenerator)(Node* context,
+                                                        Node* left, Node* right,
+                                                        Node* slot,
+                                                        Node* vector,
+                                                        bool lhs_is_smi);
 
   void BinaryOpWithFeedback(BinaryOpGenerator generator) {
     Node* reg_index = BytecodeOperandReg(0);
@@ -867,11 +836,10 @@ class InterpreterBinaryOpAssembler : public InterpreterAssembler {
     Node* context = GetContext();
     Node* slot_index = BytecodeOperandIdx(1);
     Node* feedback_vector = LoadFeedbackVector();
-    Node* function = LoadRegister(Register::function_closure());
 
     BinaryOpAssembler binop_asm(state());
     Node* result = (binop_asm.*generator)(context, lhs, rhs, slot_index,
-                                          feedback_vector, function, false);
+                                          feedback_vector, false);
     SetAccumulator(result);
     Dispatch();
   }
@@ -882,11 +850,10 @@ class InterpreterBinaryOpAssembler : public InterpreterAssembler {
     Node* context = GetContext();
     Node* slot_index = BytecodeOperandIdx(1);
     Node* feedback_vector = LoadFeedbackVector();
-    Node* function = LoadRegister(Register::function_closure());
 
     BinaryOpAssembler binop_asm(state());
     Node* result = (binop_asm.*generator)(context, lhs, rhs, slot_index,
-                                          feedback_vector, function, true);
+                                          feedback_vector, true);
     SetAccumulator(result);
     Dispatch();
   }
@@ -971,73 +938,101 @@ class InterpreterBitwiseBinaryOpAssembler : public InterpreterAssembler {
 
   void BitwiseBinaryOpWithFeedback(Token::Value bitwise_op) {
     Node* reg_index = BytecodeOperandReg(0);
-    Node* lhs = LoadRegister(reg_index);
-    Node* rhs = GetAccumulator();
+    Node* left = LoadRegister(reg_index);
+    Node* right = GetAccumulator();
     Node* context = GetContext();
     Node* slot_index = BytecodeOperandIdx(1);
     Node* feedback_vector = LoadFeedbackVector();
 
-    Variable var_lhs_type_feedback(this, MachineRepresentation::kTaggedSigned),
-        var_rhs_type_feedback(this, MachineRepresentation::kTaggedSigned);
-    Node* lhs_value = TruncateTaggedToWord32WithFeedback(
-        context, lhs, &var_lhs_type_feedback);
-    Node* rhs_value = TruncateTaggedToWord32WithFeedback(
-        context, rhs, &var_rhs_type_feedback);
-    Node* result = nullptr;
+    VARIABLE(var_left_feedback, MachineRepresentation::kTaggedSigned);
+    VARIABLE(var_right_feedback, MachineRepresentation::kTaggedSigned);
+    VARIABLE(var_left_bigint, MachineRepresentation::kTagged, left);
+    VARIABLE(var_right_bigint, MachineRepresentation::kTagged, right);
+    Label if_left_bigint(this), do_bigint_op(this);
 
-    switch (bitwise_op) {
-      case Token::BIT_OR: {
-        Node* value = Word32Or(lhs_value, rhs_value);
-        result = ChangeInt32ToTagged(value);
-      } break;
-      case Token::BIT_AND: {
-        Node* value = Word32And(lhs_value, rhs_value);
-        result = ChangeInt32ToTagged(value);
-      } break;
-      case Token::BIT_XOR: {
-        Node* value = Word32Xor(lhs_value, rhs_value);
-        result = ChangeInt32ToTagged(value);
-      } break;
-      case Token::SHL: {
-        Node* value =
-            Word32Shl(lhs_value, Word32And(rhs_value, Int32Constant(0x1f)));
-        result = ChangeInt32ToTagged(value);
-      } break;
-      case Token::SHR: {
-        Node* value =
-            Word32Shr(lhs_value, Word32And(rhs_value, Int32Constant(0x1f)));
-        result = ChangeUint32ToTagged(value);
-      } break;
-      case Token::SAR: {
-        Node* value =
-            Word32Sar(lhs_value, Word32And(rhs_value, Int32Constant(0x1f)));
-        result = ChangeInt32ToTagged(value);
-      } break;
-      default:
-        UNREACHABLE();
-    }
+    Node* left32 = TaggedToWord32OrBigIntWithFeedback(
+        context, left, &var_left_feedback, &if_left_bigint, &var_left_bigint);
+    Node* right32 = TaggedToWord32OrBigIntWithFeedback(
+        context, right, &var_right_feedback, &do_bigint_op, &var_right_bigint);
 
+    // Numbers case.
+    Node* result = BitwiseOp(left32, right32, bitwise_op);
     Node* result_type = SelectSmiConstant(TaggedIsSmi(result),
                                           BinaryOperationFeedback::kSignedSmall,
                                           BinaryOperationFeedback::kNumber);
-
-    if (FLAG_debug_code) {
-      Label ok(this);
-      GotoIf(TaggedIsSmi(result), &ok);
-      Node* result_map = LoadMap(result);
-      AbortIfWordNotEqual(result_map, HeapNumberMapConstant(),
-                          kExpectedHeapNumber);
-      Goto(&ok);
-      BIND(&ok);
-    }
-
     Node* input_feedback =
-        SmiOr(var_lhs_type_feedback.value(), var_rhs_type_feedback.value());
-    Node* function = LoadRegister(Register::function_closure());
+        SmiOr(var_left_feedback.value(), var_right_feedback.value());
     UpdateFeedback(SmiOr(result_type, input_feedback), feedback_vector,
-                   slot_index, function);
+                   slot_index);
     SetAccumulator(result);
     Dispatch();
+
+    // BigInt cases.
+    BIND(&if_left_bigint);
+    // TODO(jkummerow): NumberBuiltinsAssembler::BitwiseOp inlines the
+    // relevant bits of this. Find a way to unify the approaches.
+    TaggedToWord32OrBigIntWithFeedback(context, right, &var_right_feedback,
+                                       &do_bigint_op, &var_right_bigint);
+    Goto(&do_bigint_op);
+
+    BIND(&do_bigint_op);
+    SetAccumulator(
+        CallRuntime(Runtime::kBigIntBinaryOp, context, var_left_bigint.value(),
+                    var_right_bigint.value(), SmiConstant(bitwise_op)));
+    UpdateFeedback(SmiOr(var_left_feedback.value(), var_right_feedback.value()),
+                   feedback_vector, slot_index);
+    Dispatch();
+  }
+
+  void BitwiseBinaryOpWithSmi(Token::Value bitwise_op) {
+    Node* left = GetAccumulator();
+    Node* right = BytecodeOperandImmSmi(0);
+    Node* slot_index = BytecodeOperandIdx(1);
+    Node* feedback_vector = LoadFeedbackVector();
+    Node* context = GetContext();
+
+    VARIABLE(var_left_feedback, MachineRepresentation::kTaggedSigned);
+    VARIABLE(var_left_bigint, MachineRepresentation::kTagged);
+    Label if_bigint_mix(this);
+
+    Node* left32 = TaggedToWord32OrBigIntWithFeedback(
+        context, left, &var_left_feedback, &if_bigint_mix, &var_left_bigint);
+    Node* result = BitwiseOp(left32, SmiToWord32(right), bitwise_op);
+    Node* result_type = SelectSmiConstant(TaggedIsSmi(result),
+                                          BinaryOperationFeedback::kSignedSmall,
+                                          BinaryOperationFeedback::kNumber);
+    UpdateFeedback(SmiOr(result_type, var_left_feedback.value()),
+                   feedback_vector, slot_index);
+    SetAccumulator(result);
+    Dispatch();
+
+    BIND(&if_bigint_mix);
+    UpdateFeedback(var_left_feedback.value(), feedback_vector, slot_index);
+    ThrowTypeError(context, MessageTemplate::kBigIntMixedTypes);
+  }
+
+ private:
+  Node* BitwiseOp(Node* left32, Node* right32, Token::Value bitwise_op) {
+    switch (bitwise_op) {
+      case Token::BIT_AND:
+        return ChangeInt32ToTagged(Word32And(left32, right32));
+      case Token::BIT_OR:
+        return ChangeInt32ToTagged(Word32Or(left32, right32));
+      case Token::BIT_XOR:
+        return ChangeInt32ToTagged(Word32Xor(left32, right32));
+      case Token::SHL:
+        return ChangeInt32ToTagged(
+            Word32Shl(left32, Word32And(right32, Int32Constant(0x1f))));
+      case Token::SAR:
+        return ChangeInt32ToTagged(
+            Word32Sar(left32, Word32And(right32, Int32Constant(0x1f))));
+      case Token::SHR:
+        return ChangeUint32ToTagged(
+            Word32Shr(left32, Word32And(right32, Int32Constant(0x1f))));
+      default:
+        break;
+    }
+    UNREACHABLE();
   }
 };
 
@@ -1095,78 +1090,56 @@ IGNITION_HANDLER(ShiftRightLogical, InterpreterBitwiseBinaryOpAssembler) {
 // BitwiseOrSmi <imm>
 //
 // BitwiseOrSmi accumulator with <imm>.
-IGNITION_HANDLER(BitwiseOrSmi, InterpreterAssembler) {
-  Node* left = GetAccumulator();
-  Node* right = BytecodeOperandImmSmi(0);
-  Node* slot_index = BytecodeOperandIdx(1);
-  Node* feedback_vector = LoadFeedbackVector();
-  Node* context = GetContext();
-
-  Variable var_lhs_type_feedback(this, MachineRepresentation::kTaggedSigned);
-  Node* lhs_value =
-      TruncateTaggedToWord32WithFeedback(context, left, &var_lhs_type_feedback);
-  Node* rhs_value = SmiToWord32(right);
-  Node* value = Word32Or(lhs_value, rhs_value);
-  Node* result = ChangeInt32ToTagged(value);
-  Node* result_type = SelectSmiConstant(TaggedIsSmi(result),
-                                        BinaryOperationFeedback::kSignedSmall,
-                                        BinaryOperationFeedback::kNumber);
-  Node* function = LoadRegister(Register::function_closure());
-  UpdateFeedback(SmiOr(result_type, var_lhs_type_feedback.value()),
-                 feedback_vector, slot_index, function);
-  SetAccumulator(result);
-  Dispatch();
+IGNITION_HANDLER(BitwiseOrSmi, InterpreterBitwiseBinaryOpAssembler) {
+  BitwiseBinaryOpWithSmi(Token::BIT_OR);
 }
 
 // BitwiseXorSmi <imm>
 //
 // BitwiseXorSmi accumulator with <imm>.
-IGNITION_HANDLER(BitwiseXorSmi, InterpreterAssembler) {
-  Node* left = GetAccumulator();
-  Node* right = BytecodeOperandImmSmi(0);
-  Node* slot_index = BytecodeOperandIdx(1);
-  Node* feedback_vector = LoadFeedbackVector();
-  Node* context = GetContext();
-
-  Variable var_lhs_type_feedback(this, MachineRepresentation::kTaggedSigned);
-  Node* lhs_value =
-      TruncateTaggedToWord32WithFeedback(context, left, &var_lhs_type_feedback);
-  Node* rhs_value = SmiToWord32(right);
-  Node* value = Word32Xor(lhs_value, rhs_value);
-  Node* result = ChangeInt32ToTagged(value);
-  Node* result_type = SelectSmiConstant(TaggedIsSmi(result),
-                                        BinaryOperationFeedback::kSignedSmall,
-                                        BinaryOperationFeedback::kNumber);
-  Node* function = LoadRegister(Register::function_closure());
-  UpdateFeedback(SmiOr(result_type, var_lhs_type_feedback.value()),
-                 feedback_vector, slot_index, function);
-  SetAccumulator(result);
-  Dispatch();
+IGNITION_HANDLER(BitwiseXorSmi, InterpreterBitwiseBinaryOpAssembler) {
+  BitwiseBinaryOpWithSmi(Token::BIT_XOR);
 }
 
 // BitwiseAndSmi <imm>
 //
 // BitwiseAndSmi accumulator with <imm>.
-IGNITION_HANDLER(BitwiseAndSmi, InterpreterAssembler) {
-  Node* left = GetAccumulator();
-  Node* right = BytecodeOperandImmSmi(0);
-  Node* slot_index = BytecodeOperandIdx(1);
+IGNITION_HANDLER(BitwiseAndSmi, InterpreterBitwiseBinaryOpAssembler) {
+  BitwiseBinaryOpWithSmi(Token::BIT_AND);
+}
+
+// BitwiseNot <feedback_slot>
+//
+// Perform bitwise-not on the accumulator.
+IGNITION_HANDLER(BitwiseNot, InterpreterAssembler) {
+  Node* operand = GetAccumulator();
+  Node* slot_index = BytecodeOperandIdx(0);
   Node* feedback_vector = LoadFeedbackVector();
   Node* context = GetContext();
 
-  Variable var_lhs_type_feedback(this, MachineRepresentation::kTaggedSigned);
-  Node* lhs_value =
-      TruncateTaggedToWord32WithFeedback(context, left, &var_lhs_type_feedback);
-  Node* rhs_value = SmiToWord32(right);
-  Node* value = Word32And(lhs_value, rhs_value);
+  VARIABLE(var_feedback, MachineRepresentation::kTaggedSigned);
+  VARIABLE(var_bigint, MachineRepresentation::kTagged);
+  Label if_bigint(this);
+  Node* truncated_value = TaggedToWord32OrBigIntWithFeedback(
+      context, operand, &var_feedback, &if_bigint, &var_bigint);
+
+  // Number case.
+  Node* value = Word32Not(truncated_value);
   Node* result = ChangeInt32ToTagged(value);
   Node* result_type = SelectSmiConstant(TaggedIsSmi(result),
                                         BinaryOperationFeedback::kSignedSmall,
                                         BinaryOperationFeedback::kNumber);
-  Node* function = LoadRegister(Register::function_closure());
-  UpdateFeedback(SmiOr(result_type, var_lhs_type_feedback.value()),
-                 feedback_vector, slot_index, function);
+  UpdateFeedback(SmiOr(result_type, var_feedback.value()), feedback_vector,
+                 slot_index);
   SetAccumulator(result);
+  Dispatch();
+
+  // BigInt case.
+  BIND(&if_bigint);
+  UpdateFeedback(SmiConstant(BinaryOperationFeedback::kBigInt), feedback_vector,
+                 slot_index);
+  SetAccumulator(CallRuntime(Runtime::kBigIntUnaryOp, context,
+                             var_bigint.value(), SmiConstant(Token::BIT_NOT)));
   Dispatch();
 }
 
@@ -1175,86 +1148,208 @@ IGNITION_HANDLER(BitwiseAndSmi, InterpreterAssembler) {
 // Left shifts accumulator by the count specified in <imm>.
 // The accumulator is converted to an int32 before the operation. The 5
 // lsb bits from <imm> are used as count i.e. <src> << (<imm> & 0x1F).
-IGNITION_HANDLER(ShiftLeftSmi, InterpreterAssembler) {
-  Node* left = GetAccumulator();
-  Node* right = BytecodeOperandImmSmi(0);
-  Node* slot_index = BytecodeOperandIdx(1);
-  Node* feedback_vector = LoadFeedbackVector();
-  Node* context = GetContext();
-
-  Variable var_lhs_type_feedback(this, MachineRepresentation::kTaggedSigned);
-  Node* lhs_value =
-      TruncateTaggedToWord32WithFeedback(context, left, &var_lhs_type_feedback);
-  Node* rhs_value = SmiToWord32(right);
-  Node* shift_count = Word32And(rhs_value, Int32Constant(0x1f));
-  Node* value = Word32Shl(lhs_value, shift_count);
-  Node* result = ChangeInt32ToTagged(value);
-  Node* result_type = SelectSmiConstant(TaggedIsSmi(result),
-                                        BinaryOperationFeedback::kSignedSmall,
-                                        BinaryOperationFeedback::kNumber);
-  Node* function = LoadRegister(Register::function_closure());
-  UpdateFeedback(SmiOr(result_type, var_lhs_type_feedback.value()),
-                 feedback_vector, slot_index, function);
-  SetAccumulator(result);
-  Dispatch();
+IGNITION_HANDLER(ShiftLeftSmi, InterpreterBitwiseBinaryOpAssembler) {
+  BitwiseBinaryOpWithSmi(Token::SHL);
 }
 
 // ShiftRightSmi <imm>
 //
 // Right shifts accumulator by the count specified in <imm>. Result is sign
 // extended. The accumulator is converted to an int32 before the operation. The
-// 5 lsb bits from <imm> are used as count i.e. <src> << (<imm> & 0x1F).
-IGNITION_HANDLER(ShiftRightSmi, InterpreterAssembler) {
-  Node* left = GetAccumulator();
-  Node* right = BytecodeOperandImmSmi(0);
-  Node* slot_index = BytecodeOperandIdx(1);
-  Node* feedback_vector = LoadFeedbackVector();
-  Node* context = GetContext();
-
-  Variable var_lhs_type_feedback(this, MachineRepresentation::kTaggedSigned);
-  Node* lhs_value =
-      TruncateTaggedToWord32WithFeedback(context, left, &var_lhs_type_feedback);
-  Node* rhs_value = SmiToWord32(right);
-  Node* shift_count = Word32And(rhs_value, Int32Constant(0x1f));
-  Node* value = Word32Sar(lhs_value, shift_count);
-  Node* result = ChangeInt32ToTagged(value);
-  Node* result_type = SelectSmiConstant(TaggedIsSmi(result),
-                                        BinaryOperationFeedback::kSignedSmall,
-                                        BinaryOperationFeedback::kNumber);
-  Node* function = LoadRegister(Register::function_closure());
-  UpdateFeedback(SmiOr(result_type, var_lhs_type_feedback.value()),
-                 feedback_vector, slot_index, function);
-  SetAccumulator(result);
-  Dispatch();
+// 5 lsb bits from <imm> are used as count i.e. <src> >> (<imm> & 0x1F).
+IGNITION_HANDLER(ShiftRightSmi, InterpreterBitwiseBinaryOpAssembler) {
+  BitwiseBinaryOpWithSmi(Token::SAR);
 }
 
 // ShiftRightLogicalSmi <imm>
 //
 // Right shifts accumulator by the count specified in <imm>. Result is zero
 // extended. The accumulator is converted to an int32 before the operation. The
-// 5 lsb bits from <imm> are used as count i.e. <src> << (<imm> & 0x1F).
-IGNITION_HANDLER(ShiftRightLogicalSmi, InterpreterAssembler) {
-  Node* left = GetAccumulator();
-  Node* right = BytecodeOperandImmSmi(0);
-  Node* slot_index = BytecodeOperandIdx(1);
-  Node* feedback_vector = LoadFeedbackVector();
-  Node* context = GetContext();
+// 5 lsb bits from <imm> are used as count i.e. <src> >>> (<imm> & 0x1F).
+IGNITION_HANDLER(ShiftRightLogicalSmi, InterpreterBitwiseBinaryOpAssembler) {
+  BitwiseBinaryOpWithSmi(Token::SHR);
+}
 
-  Variable var_lhs_type_feedback(this, MachineRepresentation::kTaggedSigned);
-  Node* lhs_value =
-      TruncateTaggedToWord32WithFeedback(context, left, &var_lhs_type_feedback);
-  Node* rhs_value = SmiToWord32(right);
-  Node* shift_count = Word32And(rhs_value, Int32Constant(0x1f));
-  Node* value = Word32Shr(lhs_value, shift_count);
-  Node* result = ChangeUint32ToTagged(value);
-  Node* result_type = SelectSmiConstant(TaggedIsSmi(result),
-                                        BinaryOperationFeedback::kSignedSmall,
-                                        BinaryOperationFeedback::kNumber);
-  Node* function = LoadRegister(Register::function_closure());
-  UpdateFeedback(SmiOr(result_type, var_lhs_type_feedback.value()),
-                 feedback_vector, slot_index, function);
-  SetAccumulator(result);
-  Dispatch();
+class UnaryNumericOpAssembler : public InterpreterAssembler {
+ public:
+  UnaryNumericOpAssembler(CodeAssemblerState* state, Bytecode bytecode,
+                          OperandScale operand_scale)
+      : InterpreterAssembler(state, bytecode, operand_scale) {}
+
+  // {smi_op} signature: (Node* smi_value, Variable* var_feedback,
+  // Label* do_float_op, Variable* var_float) => Node* tagged result.
+  // {float_op} signature: (Node* float_value) => Node* float_result.
+  // {bigint_op} signature: (Node* bigint_value) => Node* tagged_result.
+  void UnaryOpWithFeedback(
+      std::function<Node*(Node*, Variable*, Label*, Variable*)> smi_op,
+      std::function<Node*(Node*)> float_op,
+      std::function<Node*(Node*)> bigint_op) {
+    VARIABLE(var_value, MachineRepresentation::kTagged, GetAccumulator());
+    Node* slot_index = BytecodeOperandIdx(0);
+    Node* feedback_vector = LoadFeedbackVector();
+
+    VARIABLE(var_result, MachineRepresentation::kTagged);
+    VARIABLE(var_float_value, MachineRepresentation::kFloat64);
+    VARIABLE(var_feedback, MachineRepresentation::kTaggedSigned,
+             SmiConstant(BinaryOperationFeedback::kNone));
+    Variable* loop_vars[] = {&var_value, &var_feedback};
+    Label start(this, arraysize(loop_vars), loop_vars), end(this);
+    Label do_float_op(this, &var_float_value);
+    Goto(&start);
+    // We might have to try again after ToNumeric conversion.
+    BIND(&start);
+    {
+      Label if_smi(this), if_heapnumber(this), if_bigint(this);
+      Label if_oddball(this), if_other(this);
+      Node* value = var_value.value();
+      GotoIf(TaggedIsSmi(value), &if_smi);
+      Node* map = LoadMap(value);
+      GotoIf(IsHeapNumberMap(map), &if_heapnumber);
+      Node* instance_type = LoadMapInstanceType(map);
+      GotoIf(IsBigIntInstanceType(instance_type), &if_bigint);
+      Branch(Word32Equal(instance_type, Int32Constant(ODDBALL_TYPE)),
+             &if_oddball, &if_other);
+
+      BIND(&if_smi);
+      {
+        var_result.Bind(
+            smi_op(value, &var_feedback, &do_float_op, &var_float_value));
+        Goto(&end);
+      }
+
+      BIND(&if_heapnumber);
+      {
+        var_float_value.Bind(LoadHeapNumberValue(value));
+        Goto(&do_float_op);
+      }
+
+      BIND(&if_bigint);
+      {
+        var_result.Bind(bigint_op(value));
+        var_feedback.Bind(SmiOr(var_feedback.value(),
+                                SmiConstant(BinaryOperationFeedback::kBigInt)));
+        Goto(&end);
+      }
+
+      BIND(&if_oddball);
+      {
+        // We do not require an Or with earlier feedback here because once we
+        // convert the value to a number, we cannot reach this path. We can
+        // only reach this path on the first pass when the feedback is kNone.
+        CSA_ASSERT(this, SmiEqual(var_feedback.value(),
+                                  SmiConstant(BinaryOperationFeedback::kNone)));
+        var_feedback.Bind(
+            SmiConstant(BinaryOperationFeedback::kNumberOrOddball));
+        var_value.Bind(LoadObjectField(value, Oddball::kToNumberOffset));
+        Goto(&start);
+      }
+
+      BIND(&if_other);
+      {
+        // We do not require an Or with earlier feedback here because once we
+        // convert the value to a number, we cannot reach this path. We can
+        // only reach this path on the first pass when the feedback is kNone.
+        CSA_ASSERT(this, SmiEqual(var_feedback.value(),
+                                  SmiConstant(BinaryOperationFeedback::kNone)));
+        var_feedback.Bind(SmiConstant(BinaryOperationFeedback::kAny));
+        var_value.Bind(
+            CallBuiltin(Builtins::kNonNumberToNumeric, GetContext(), value));
+        Goto(&start);
+      }
+    }
+
+    BIND(&do_float_op);
+    {
+      var_feedback.Bind(SmiOr(var_feedback.value(),
+                              SmiConstant(BinaryOperationFeedback::kNumber)));
+      var_result.Bind(
+          AllocateHeapNumberWithValue(float_op(var_float_value.value())));
+      Goto(&end);
+    }
+
+    BIND(&end);
+    UpdateFeedback(var_feedback.value(), feedback_vector, slot_index);
+    SetAccumulator(var_result.value());
+    Dispatch();
+  }
+
+  void IncDecWithFeedback(Token::Value op) {
+    DCHECK(op == Token::INC || op == Token::DEC);
+    UnaryOpWithFeedback(
+        [=](Node* smi_value, Variable* var_feedback, Label* do_float_op,
+            Variable* var_float) {
+          // Try fast Smi operation first.
+          Node* value = BitcastTaggedToWord(smi_value);
+          Node* one = BitcastTaggedToWord(SmiConstant(1));
+          Node* pair = op == Token::INC ? IntPtrAddWithOverflow(value, one)
+                                        : IntPtrSubWithOverflow(value, one);
+          Node* overflow = Projection(1, pair);
+
+          // Check if the Smi operation overflowed.
+          Label if_overflow(this), if_notoverflow(this);
+          Branch(overflow, &if_overflow, &if_notoverflow);
+
+          BIND(&if_overflow);
+          {
+            var_float->Bind(SmiToFloat64(smi_value));
+            Goto(do_float_op);
+          }
+
+          BIND(&if_notoverflow);
+          var_feedback->Bind(
+              SmiOr(var_feedback->value(),
+                    SmiConstant(BinaryOperationFeedback::kSignedSmall)));
+          return BitcastWordToTaggedSigned(Projection(0, pair));
+        },
+        [=](Node* float_value) {
+          return op == Token::INC
+                     ? Float64Add(float_value, Float64Constant(1.0))
+                     : Float64Sub(float_value, Float64Constant(1.0));
+        },
+        [=](Node* bigint_value) {
+          return CallRuntime(Runtime::kBigIntUnaryOp, GetContext(),
+                             bigint_value, SmiConstant(op));
+        });
+  }
+};
+
+// Negate <feedback_slot>
+//
+// Perform arithmetic negation on the accumulator.
+IGNITION_HANDLER(Negate, UnaryNumericOpAssembler) {
+  UnaryOpWithFeedback(
+      [=](Node* operand, Variable* var_feedback, Label* do_float_op,
+          Variable* var_float) {
+        VARIABLE(var_result, MachineRepresentation::kTagged);
+        Label if_zero(this), if_min_smi(this), end(this);
+        // Return -0 if operand is 0.
+        GotoIf(SmiEqual(operand, SmiConstant(0)), &if_zero);
+
+        // Special-case the minimum Smi to avoid overflow.
+        GotoIf(SmiEqual(operand, SmiConstant(Smi::kMinValue)), &if_min_smi);
+
+        // Else simply subtract operand from 0.
+        var_feedback->Bind(SmiConstant(BinaryOperationFeedback::kSignedSmall));
+        var_result.Bind(SmiSub(SmiConstant(0), operand));
+        Goto(&end);
+
+        BIND(&if_zero);
+        var_feedback->Bind(SmiConstant(BinaryOperationFeedback::kNumber));
+        var_result.Bind(MinusZeroConstant());
+        Goto(&end);
+
+        BIND(&if_min_smi);
+        var_float->Bind(SmiToFloat64(operand));
+        Goto(do_float_op);
+
+        BIND(&end);
+        return var_result.value();
+      },
+      [=](Node* float_value) { return Float64Neg(float_value); },
+      [=](Node* bigint_value) {
+        return CallRuntime(Runtime::kBigIntUnaryOp, GetContext(), bigint_value,
+                           SmiConstant(Token::SUB));
+      });
 }
 
 // ToName <dst>
@@ -1268,55 +1363,18 @@ IGNITION_HANDLER(ToName, InterpreterAssembler) {
   Dispatch();
 }
 
-// ToNumber <dst> <slot>
+// ToNumber <slot>
 //
 // Convert the object referenced by the accumulator to a number.
 IGNITION_HANDLER(ToNumber, InterpreterAssembler) {
-  Node* object = GetAccumulator();
-  Node* context = GetContext();
+  ToNumberOrNumeric(Object::Conversion::kToNumber);
+}
 
-  // Convert the {object} to a Number and collect feedback for the {object}.
-  Variable var_type_feedback(this, MachineRepresentation::kTaggedSigned);
-  Variable var_result(this, MachineRepresentation::kTagged);
-  Label if_done(this), if_objectissmi(this), if_objectisnumber(this),
-      if_objectisother(this, Label::kDeferred);
-
-  GotoIf(TaggedIsSmi(object), &if_objectissmi);
-  Branch(IsHeapNumber(object), &if_objectisnumber, &if_objectisother);
-
-  BIND(&if_objectissmi);
-  {
-    var_result.Bind(object);
-    var_type_feedback.Bind(SmiConstant(BinaryOperationFeedback::kSignedSmall));
-    Goto(&if_done);
-  }
-
-  BIND(&if_objectisnumber);
-  {
-    var_result.Bind(object);
-    var_type_feedback.Bind(SmiConstant(BinaryOperationFeedback::kNumber));
-    Goto(&if_done);
-  }
-
-  BIND(&if_objectisother);
-  {
-    // Convert the {object} to a Number.
-    var_result.Bind(CallBuiltin(Builtins::kNonNumberToNumber, context, object));
-    var_type_feedback.Bind(SmiConstant(BinaryOperationFeedback::kAny));
-    Goto(&if_done);
-  }
-
-  BIND(&if_done);
-  StoreRegister(var_result.value(), BytecodeOperandReg(0));
-
-  // Record the type feedback collected for {object}.
-  Node* slot_index = BytecodeOperandIdx(1);
-  Node* feedback_vector = LoadFeedbackVector();
-  Node* function = LoadRegister(Register::function_closure());
-  UpdateFeedback(var_type_feedback.value(), feedback_vector, slot_index,
-                 function);
-
-  Dispatch();
+// ToNumeric <slot>
+//
+// Convert the object referenced by the accumulator to a numeric.
+IGNITION_HANDLER(ToNumeric, InterpreterAssembler) {
+  ToNumberOrNumeric(Object::Conversion::kToNumeric);
 }
 
 // ToObject <dst>
@@ -1335,251 +1393,15 @@ IGNITION_HANDLER(ToObject, InterpreterAssembler) {
 // Inc
 //
 // Increments value in the accumulator by one.
-IGNITION_HANDLER(Inc, InterpreterAssembler) {
-  Node* value = GetAccumulator();
-  Node* context = GetContext();
-  Node* slot_index = BytecodeOperandIdx(0);
-  Node* feedback_vector = LoadFeedbackVector();
-
-  // Shared entry for floating point increment.
-  Label do_finc(this), end(this);
-  Variable var_finc_value(this, MachineRepresentation::kFloat64);
-
-  // We might need to try again due to ToNumber conversion.
-  Variable value_var(this, MachineRepresentation::kTagged);
-  Variable result_var(this, MachineRepresentation::kTagged);
-  Variable var_type_feedback(this, MachineRepresentation::kTaggedSigned);
-  Variable* loop_vars[] = {&value_var, &var_type_feedback};
-  Label start(this, 2, loop_vars);
-  value_var.Bind(value);
-  var_type_feedback.Bind(SmiConstant(BinaryOperationFeedback::kNone));
-  Goto(&start);
-  BIND(&start);
-  {
-    value = value_var.value();
-
-    Label if_issmi(this), if_isnotsmi(this);
-    Branch(TaggedIsSmi(value), &if_issmi, &if_isnotsmi);
-
-    BIND(&if_issmi);
-    {
-      // Try fast Smi addition first.
-      Node* one = SmiConstant(1);
-      Node* pair = IntPtrAddWithOverflow(BitcastTaggedToWord(value),
-                                         BitcastTaggedToWord(one));
-      Node* overflow = Projection(1, pair);
-
-      // Check if the Smi addition overflowed.
-      Label if_overflow(this), if_notoverflow(this);
-      Branch(overflow, &if_overflow, &if_notoverflow);
-
-      BIND(&if_notoverflow);
-      var_type_feedback.Bind(
-          SmiOr(var_type_feedback.value(),
-                SmiConstant(BinaryOperationFeedback::kSignedSmall)));
-      result_var.Bind(BitcastWordToTaggedSigned(Projection(0, pair)));
-      Goto(&end);
-
-      BIND(&if_overflow);
-      {
-        var_finc_value.Bind(SmiToFloat64(value));
-        Goto(&do_finc);
-      }
-    }
-
-    BIND(&if_isnotsmi);
-    {
-      // Check if the value is a HeapNumber.
-      Label if_valueisnumber(this), if_valuenotnumber(this, Label::kDeferred);
-      Node* value_map = LoadMap(value);
-      Branch(IsHeapNumberMap(value_map), &if_valueisnumber, &if_valuenotnumber);
-
-      BIND(&if_valueisnumber);
-      {
-        // Load the HeapNumber value.
-        var_finc_value.Bind(LoadHeapNumberValue(value));
-        Goto(&do_finc);
-      }
-
-      BIND(&if_valuenotnumber);
-      {
-        // We do not require an Or with earlier feedback here because once we
-        // convert the value to a number, we cannot reach this path. We can
-        // only reach this path on the first pass when the feedback is kNone.
-        CSA_ASSERT(this, SmiEqual(var_type_feedback.value(),
-                                  SmiConstant(BinaryOperationFeedback::kNone)));
-
-        Label if_valueisoddball(this), if_valuenotoddball(this);
-        Node* instance_type = LoadMapInstanceType(value_map);
-        Node* is_oddball =
-            Word32Equal(instance_type, Int32Constant(ODDBALL_TYPE));
-        Branch(is_oddball, &if_valueisoddball, &if_valuenotoddball);
-
-        BIND(&if_valueisoddball);
-        {
-          // Convert Oddball to Number and check again.
-          value_var.Bind(LoadObjectField(value, Oddball::kToNumberOffset));
-          var_type_feedback.Bind(
-              SmiConstant(BinaryOperationFeedback::kNumberOrOddball));
-          Goto(&start);
-        }
-
-        BIND(&if_valuenotoddball);
-        {
-          // Convert to a Number first and try again.
-          var_type_feedback.Bind(SmiConstant(BinaryOperationFeedback::kAny));
-          value_var.Bind(
-              CallBuiltin(Builtins::kNonNumberToNumber, context, value));
-          Goto(&start);
-        }
-      }
-    }
-  }
-
-  BIND(&do_finc);
-  {
-    Node* finc_value = var_finc_value.value();
-    Node* one = Float64Constant(1.0);
-    Node* finc_result = Float64Add(finc_value, one);
-    var_type_feedback.Bind(
-        SmiOr(var_type_feedback.value(),
-              SmiConstant(BinaryOperationFeedback::kNumber)));
-    result_var.Bind(AllocateHeapNumberWithValue(finc_result));
-    Goto(&end);
-  }
-
-  BIND(&end);
-  Node* function = LoadRegister(Register::function_closure());
-  UpdateFeedback(var_type_feedback.value(), feedback_vector, slot_index,
-                 function);
-
-  SetAccumulator(result_var.value());
-  Dispatch();
+IGNITION_HANDLER(Inc, UnaryNumericOpAssembler) {
+  IncDecWithFeedback(Token::INC);
 }
 
 // Dec
 //
 // Decrements value in the accumulator by one.
-IGNITION_HANDLER(Dec, InterpreterAssembler) {
-  Node* value = GetAccumulator();
-  Node* context = GetContext();
-  Node* slot_index = BytecodeOperandIdx(0);
-  Node* feedback_vector = LoadFeedbackVector();
-
-  // Shared entry for floating point decrement.
-  Label do_fdec(this), end(this);
-  Variable var_fdec_value(this, MachineRepresentation::kFloat64);
-
-  // We might need to try again due to ToNumber conversion.
-  Variable value_var(this, MachineRepresentation::kTagged);
-  Variable result_var(this, MachineRepresentation::kTagged);
-  Variable var_type_feedback(this, MachineRepresentation::kTaggedSigned);
-  Variable* loop_vars[] = {&value_var, &var_type_feedback};
-  Label start(this, 2, loop_vars);
-  var_type_feedback.Bind(SmiConstant(BinaryOperationFeedback::kNone));
-  value_var.Bind(value);
-  Goto(&start);
-  BIND(&start);
-  {
-    value = value_var.value();
-
-    Label if_issmi(this), if_isnotsmi(this);
-    Branch(TaggedIsSmi(value), &if_issmi, &if_isnotsmi);
-
-    BIND(&if_issmi);
-    {
-      // Try fast Smi subtraction first.
-      Node* one = SmiConstant(1);
-      Node* pair = IntPtrSubWithOverflow(BitcastTaggedToWord(value),
-                                         BitcastTaggedToWord(one));
-      Node* overflow = Projection(1, pair);
-
-      // Check if the Smi subtraction overflowed.
-      Label if_overflow(this), if_notoverflow(this);
-      Branch(overflow, &if_overflow, &if_notoverflow);
-
-      BIND(&if_notoverflow);
-      var_type_feedback.Bind(
-          SmiOr(var_type_feedback.value(),
-                SmiConstant(BinaryOperationFeedback::kSignedSmall)));
-      result_var.Bind(BitcastWordToTaggedSigned(Projection(0, pair)));
-      Goto(&end);
-
-      BIND(&if_overflow);
-      {
-        var_fdec_value.Bind(SmiToFloat64(value));
-        Goto(&do_fdec);
-      }
-    }
-
-    BIND(&if_isnotsmi);
-    {
-      // Check if the value is a HeapNumber.
-      Label if_valueisnumber(this), if_valuenotnumber(this, Label::kDeferred);
-      Node* value_map = LoadMap(value);
-      Branch(IsHeapNumberMap(value_map), &if_valueisnumber, &if_valuenotnumber);
-
-      BIND(&if_valueisnumber);
-      {
-        // Load the HeapNumber value.
-        var_fdec_value.Bind(LoadHeapNumberValue(value));
-        Goto(&do_fdec);
-      }
-
-      BIND(&if_valuenotnumber);
-      {
-        // We do not require an Or with earlier feedback here because once we
-        // convert the value to a number, we cannot reach this path. We can
-        // only reach this path on the first pass when the feedback is kNone.
-        CSA_ASSERT(this, SmiEqual(var_type_feedback.value(),
-                                  SmiConstant(BinaryOperationFeedback::kNone)));
-
-        Label if_valueisoddball(this), if_valuenotoddball(this);
-        Node* instance_type = LoadMapInstanceType(value_map);
-        Node* is_oddball =
-            Word32Equal(instance_type, Int32Constant(ODDBALL_TYPE));
-        Branch(is_oddball, &if_valueisoddball, &if_valuenotoddball);
-
-        BIND(&if_valueisoddball);
-        {
-          // Convert Oddball to Number and check again.
-          value_var.Bind(LoadObjectField(value, Oddball::kToNumberOffset));
-          var_type_feedback.Bind(
-              SmiConstant(BinaryOperationFeedback::kNumberOrOddball));
-          Goto(&start);
-        }
-
-        BIND(&if_valuenotoddball);
-        {
-          // Convert to a Number first and try again.
-          var_type_feedback.Bind(SmiConstant(BinaryOperationFeedback::kAny));
-          value_var.Bind(
-              CallBuiltin(Builtins::kNonNumberToNumber, context, value));
-          Goto(&start);
-        }
-      }
-    }
-  }
-
-  BIND(&do_fdec);
-  {
-    Node* fdec_value = var_fdec_value.value();
-    Node* one = Float64Constant(1.0);
-    Node* fdec_result = Float64Sub(fdec_value, one);
-    var_type_feedback.Bind(
-        SmiOr(var_type_feedback.value(),
-              SmiConstant(BinaryOperationFeedback::kNumber)));
-    result_var.Bind(AllocateHeapNumberWithValue(fdec_result));
-    Goto(&end);
-  }
-
-  BIND(&end);
-  Node* function = LoadRegister(Register::function_closure());
-  UpdateFeedback(var_type_feedback.value(), feedback_vector, slot_index,
-                 function);
-
-  SetAccumulator(result_var.value());
-  Dispatch();
+IGNITION_HANDLER(Dec, UnaryNumericOpAssembler) {
+  IncDecWithFeedback(Token::DEC);
 }
 
 // LogicalNot
@@ -1660,7 +1482,7 @@ IGNITION_HANDLER(DeletePropertyStrict, InterpreterAssembler) {
   Node* key = GetAccumulator();
   Node* context = GetContext();
   Node* result = CallBuiltin(Builtins::kDeleteProperty, context, object, key,
-                             SmiConstant(STRICT));
+                             SmiConstant(Smi::FromEnum(LanguageMode::kStrict)));
   SetAccumulator(result);
   Dispatch();
 }
@@ -1675,7 +1497,7 @@ IGNITION_HANDLER(DeletePropertySloppy, InterpreterAssembler) {
   Node* key = GetAccumulator();
   Node* context = GetContext();
   Node* result = CallBuiltin(Builtins::kDeleteProperty, context, object, key,
-                             SmiConstant(SLOPPY));
+                             SmiConstant(Smi::FromEnum(LanguageMode::kSloppy)));
   SetAccumulator(result);
   Dispatch();
 }
@@ -1878,12 +1700,10 @@ IGNITION_HANDLER(CallRuntimeForPair, InterpreterAssembler) {
 // Call the JS runtime function that has the |context_index| with the receiver
 // in register |receiver| and |arg_count| arguments in subsequent registers.
 IGNITION_HANDLER(CallJSRuntime, InterpreterAssembler) {
-  Node* context_index = BytecodeOperandIdx(0);
+  Node* context_index = BytecodeOperandNativeContextIndex(0);
   Node* receiver_reg = BytecodeOperandReg(1);
   Node* first_arg = RegisterLocation(receiver_reg);
-  Node* receiver_args_count = BytecodeOperandCount(2);
-  Node* receiver_count = Int32Constant(1);
-  Node* args_count = Int32Sub(receiver_args_count, receiver_count);
+  Node* args_count = BytecodeOperandCount(2);
 
   // Get the function to call from the native context.
   Node* context = GetContext();
@@ -1892,7 +1712,7 @@ IGNITION_HANDLER(CallJSRuntime, InterpreterAssembler) {
 
   // Call the function.
   CallJSAndDispatch(function, context, first_arg, args_count,
-                    ConvertReceiverMode::kAny);
+                    ConvertReceiverMode::kNullOrUndefined);
 }
 
 // CallWithSpread <callable> <first_arg> <arg_count>
@@ -2006,9 +1826,7 @@ class InterpreterCompareOpAssembler : public InterpreterAssembler {
 
     Node* slot_index = BytecodeOperandIdx(1);
     Node* feedback_vector = LoadFeedbackVector();
-    Node* function = LoadRegister(Register::function_closure());
-    UpdateFeedback(var_type_feedback.value(), feedback_vector, slot_index,
-                   function);
+    UpdateFeedback(var_type_feedback.value(), feedback_vector, slot_index);
     SetAccumulator(result);
     Dispatch();
   }
@@ -2598,15 +2416,15 @@ IGNITION_HANDLER(SwitchOnSmiNoFeedback, InterpreterAssembler) {
 // Creates a regular expression literal for literal index <literal_idx> with
 // <flags> and the pattern in <pattern_idx>.
 IGNITION_HANDLER(CreateRegExpLiteral, InterpreterAssembler) {
-  Node* index = BytecodeOperandIdx(0);
-  Node* pattern = LoadConstantPoolEntry(index);
-  Node* literal_index = BytecodeOperandIdxSmi(1);
+  Node* pattern_index = BytecodeOperandIdx(0);
+  Node* pattern = LoadConstantPoolEntry(pattern_index);
+  Node* feedback_vector = LoadFeedbackVector();
+  Node* slot_id = BytecodeOperandIdx(1);
   Node* flags = SmiFromWord32(BytecodeOperandFlag(2));
-  Node* closure = LoadRegister(Register::function_closure());
   Node* context = GetContext();
   ConstructorBuiltinsAssembler constructor_assembler(state());
-  Node* result = constructor_assembler.EmitFastCloneRegExp(
-      closure, literal_index, pattern, flags, context);
+  Node* result = constructor_assembler.EmitCreateRegExpLiteral(
+      feedback_vector, slot_id, pattern, flags, context);
   SetAccumulator(result);
   Dispatch();
 }
@@ -2616,8 +2434,8 @@ IGNITION_HANDLER(CreateRegExpLiteral, InterpreterAssembler) {
 // Creates an array literal for literal index <literal_idx> with
 // CreateArrayLiteral flags <flags> and constant elements in <element_idx>.
 IGNITION_HANDLER(CreateArrayLiteral, InterpreterAssembler) {
-  Node* literal_index = BytecodeOperandIdxSmi(1);
-  Node* closure = LoadRegister(Register::function_closure());
+  Node* feedback_vector = LoadFeedbackVector();
+  Node* slot_id = BytecodeOperandIdx(1);
   Node* context = GetContext();
   Node* bytecode_flags = BytecodeOperandFlag(2);
 
@@ -2629,8 +2447,9 @@ IGNITION_HANDLER(CreateArrayLiteral, InterpreterAssembler) {
   BIND(&fast_shallow_clone);
   {
     ConstructorBuiltinsAssembler constructor_assembler(state());
-    Node* result = constructor_assembler.EmitFastCloneShallowArray(
-        closure, literal_index, context, &call_runtime, TRACK_ALLOCATION_SITE);
+    Node* result = constructor_assembler.EmitCreateShallowArrayLiteral(
+        feedback_vector, slot_id, context, &call_runtime,
+        TRACK_ALLOCATION_SITE);
     SetAccumulator(result);
     Dispatch();
   }
@@ -2642,8 +2461,9 @@ IGNITION_HANDLER(CreateArrayLiteral, InterpreterAssembler) {
     Node* flags = SmiTag(flags_raw);
     Node* index = BytecodeOperandIdx(0);
     Node* constant_elements = LoadConstantPoolEntry(index);
-    Node* result = CallRuntime(Runtime::kCreateArrayLiteral, context, closure,
-                               literal_index, constant_elements, flags);
+    Node* result =
+        CallRuntime(Runtime::kCreateArrayLiteral, context, feedback_vector,
+                    SmiTag(slot_id), constant_elements, flags);
     SetAccumulator(result);
     Dispatch();
   }
@@ -2653,12 +2473,12 @@ IGNITION_HANDLER(CreateArrayLiteral, InterpreterAssembler) {
 //
 // Creates an empty JSArray literal for literal index <literal_idx>.
 IGNITION_HANDLER(CreateEmptyArrayLiteral, InterpreterAssembler) {
-  Node* literal_index = BytecodeOperandIdxSmi(0);
-  Node* closure = LoadRegister(Register::function_closure());
+  Node* feedback_vector = LoadFeedbackVector();
+  Node* slot_id = BytecodeOperandIdx(0);
   Node* context = GetContext();
   ConstructorBuiltinsAssembler constructor_assembler(state());
   Node* result = constructor_assembler.EmitCreateEmptyArrayLiteral(
-      closure, literal_index, context);
+      feedback_vector, slot_id, context);
   SetAccumulator(result);
   Dispatch();
 }
@@ -2668,9 +2488,9 @@ IGNITION_HANDLER(CreateEmptyArrayLiteral, InterpreterAssembler) {
 // Creates an object literal for literal index <literal_idx> with
 // CreateObjectLiteralFlags <flags> and constant elements in <element_idx>.
 IGNITION_HANDLER(CreateObjectLiteral, InterpreterAssembler) {
-  Node* literal_index = BytecodeOperandIdxSmi(1);
+  Node* feedback_vector = LoadFeedbackVector();
+  Node* slot_id = BytecodeOperandIdx(1);
   Node* bytecode_flags = BytecodeOperandFlag(2);
-  Node* closure = LoadRegister(Register::function_closure());
 
   // Check if we can do a fast clone or have to call the runtime.
   Label if_fast_clone(this), if_not_fast_clone(this, Label::kDeferred);
@@ -2680,10 +2500,10 @@ IGNITION_HANDLER(CreateObjectLiteral, InterpreterAssembler) {
 
   BIND(&if_fast_clone);
   {
-    // If we can do a fast clone do the fast-path in FastCloneShallowObjectStub.
+    // If we can do a fast clone do the fast-path in CreateShallowObjectLiteral.
     ConstructorBuiltinsAssembler constructor_assembler(state());
-    Node* result = constructor_assembler.EmitFastCloneShallowObject(
-        &if_not_fast_clone, closure, literal_index);
+    Node* result = constructor_assembler.EmitCreateShallowObjectLiteral(
+        feedback_vector, slot_id, &if_not_fast_clone);
     StoreRegister(result, BytecodeOperandReg(3));
     Dispatch();
   }
@@ -2699,8 +2519,9 @@ IGNITION_HANDLER(CreateObjectLiteral, InterpreterAssembler) {
         bytecode_flags);
     Node* flags = SmiTag(flags_raw);
 
-    Node* result = CallRuntime(Runtime::kCreateObjectLiteral, context, closure,
-                               literal_index, boilerplate_description, flags);
+    Node* result =
+        CallRuntime(Runtime::kCreateObjectLiteral, context, feedback_vector,
+                    SmiTag(slot_id), boilerplate_description, flags);
     StoreRegister(result, BytecodeOperandReg(3));
     // TODO(klaasb) build a single dispatch once the call is inlined
     Dispatch();
@@ -2714,6 +2535,21 @@ IGNITION_HANDLER(CreateEmptyObjectLiteral, InterpreterAssembler) {
   Node* context = GetContext();
   ConstructorBuiltinsAssembler constructor_assembler(state());
   Node* result = constructor_assembler.EmitCreateEmptyObjectLiteral(context);
+  SetAccumulator(result);
+  Dispatch();
+}
+
+// GetTemplateObject
+//
+// Creates the template to pass for tagged templates and returns it in the
+// accumulator, creating and caching the site object on-demand as per the
+// specification.
+IGNITION_HANDLER(GetTemplateObject, InterpreterAssembler) {
+  Node* description_index = BytecodeOperandIdx(0);
+  Node* description = LoadConstantPoolEntry(description_index);
+  Node* context = GetContext();
+
+  Node* result = CallRuntime(Runtime::kGetTemplateObject, context, description);
   SetAccumulator(result);
   Dispatch();
 }
@@ -2954,6 +2790,15 @@ IGNITION_HANDLER(ReThrow, InterpreterAssembler) {
   Abort(kUnexpectedReturnFromThrow);
 }
 
+// Abort <bailout_reason>
+//
+// Aborts execution (via a call to the runtime function).
+IGNITION_HANDLER(Abort, InterpreterAssembler) {
+  Node* reason = BytecodeOperandIdx(0);
+  CallRuntime(Runtime::kAbort, NoContextConstant(), SmiTag(reason));
+  Unreachable();
+}
+
 // Return
 //
 // Return the value in the accumulator.
@@ -3076,51 +2921,100 @@ class InterpreterForInPrepareAssembler : public InterpreterAssembler {
   }
 };
 
-// ForInPrepare <receiver> <cache_info_triple>
+// ForInEnumerate <receiver>
 //
-// Returns state for for..in loop execution based on the object in the register
-// |receiver|. The object must not be null or undefined and must have been
-// converted to a receiver already.
+// Enumerates the enumerable keys of the |receiver| and either returns the
+// map of the |receiver| if it has a usable enum cache or a fixed array
+// with the keys to enumerate in the accumulator.
+IGNITION_HANDLER(ForInEnumerate, InterpreterAssembler) {
+  Node* receiver_register = BytecodeOperandReg(0);
+  Node* receiver = LoadRegister(receiver_register);
+  Node* context = GetContext();
+
+  Label if_empty(this), if_runtime(this, Label::kDeferred);
+  Node* receiver_map = CheckEnumCache(receiver, &if_empty, &if_runtime);
+  SetAccumulator(receiver_map);
+  Dispatch();
+
+  BIND(&if_empty);
+  {
+    Node* result = EmptyFixedArrayConstant();
+    SetAccumulator(result);
+    Dispatch();
+  }
+
+  BIND(&if_runtime);
+  {
+    Node* result = CallRuntime(Runtime::kForInEnumerate, context, receiver);
+    SetAccumulator(result);
+    Dispatch();
+  }
+}
+
+// ForInPrepare <cache_info_triple>
+//
+// Returns state for for..in loop execution based on the enumerator in
+// the accumulator register, which is the result of calling ForInEnumerate
+// on a JSReceiver object.
 // The result is output in registers |cache_info_triple| to
 // |cache_info_triple + 2|, with the registers holding cache_type, cache_array,
 // and cache_length respectively.
 IGNITION_HANDLER(ForInPrepare, InterpreterForInPrepareAssembler) {
-  Node* object_register = BytecodeOperandReg(0);
-  Node* output_register = BytecodeOperandReg(1);
-  Node* receiver = LoadRegister(object_register);
-  Node* context = GetContext();
+  Node* enumerator = GetAccumulator();
+  Node* output_register = BytecodeOperandReg(0);
+  Node* vector_index = BytecodeOperandIdx(1);
+  Node* feedback_vector = LoadFeedbackVector();
 
-  Node* cache_type;
-  Node* cache_array;
-  Node* cache_length;
-  Label call_runtime(this, Label::kDeferred),
-      nothing_to_iterate(this, Label::kDeferred);
+  // The {enumerator} is either a Map or a FixedArray.
+  CSA_ASSERT(this, TaggedIsNotSmi(enumerator));
 
-  ForInBuiltinsAssembler forin_assembler(state());
-  std::tie(cache_type, cache_array, cache_length) =
-      forin_assembler.EmitForInPrepare(receiver, context, &call_runtime,
-                                       &nothing_to_iterate);
+  // Check if we're using an enum cache.
+  Label if_fast(this), if_slow(this);
+  Branch(IsMap(enumerator), &if_fast, &if_slow);
 
-  BuildForInPrepareResult(output_register, cache_type, cache_array,
-                          cache_length);
-  Dispatch();
-
-  BIND(&call_runtime);
+  BIND(&if_fast);
   {
-    Node* result_triple =
-        CallRuntime(Runtime::kForInPrepare, context, receiver);
-    Node* cache_type = Projection(0, result_triple);
-    Node* cache_array = Projection(1, result_triple);
-    Node* cache_length = Projection(2, result_triple);
+    // Load the enumeration length and cache from the {enumerator}.
+    Node* enum_length = LoadMapEnumLength(enumerator);
+    CSA_ASSERT(this, WordNotEqual(enum_length,
+                                  IntPtrConstant(kInvalidEnumCacheSentinel)));
+    Node* descriptors = LoadMapDescriptors(enumerator);
+    Node* enum_cache =
+        LoadObjectField(descriptors, DescriptorArray::kEnumCacheOffset);
+    Node* enum_keys = LoadObjectField(enum_cache, EnumCache::kKeysOffset);
+
+    // Check if we have enum indices available.
+    Node* enum_indices = LoadObjectField(enum_cache, EnumCache::kIndicesOffset);
+    Node* enum_indices_length = LoadAndUntagFixedArrayBaseLength(enum_indices);
+    Node* feedback = SelectSmiConstant(
+        IntPtrLessThanOrEqual(enum_length, enum_indices_length),
+        ForInFeedback::kEnumCacheKeysAndIndices, ForInFeedback::kEnumCacheKeys);
+    UpdateFeedback(feedback, feedback_vector, vector_index);
+
+    // Construct the cache info triple.
+    Node* cache_type = enumerator;
+    Node* cache_array = enum_keys;
+    Node* cache_length = SmiTag(enum_length);
     BuildForInPrepareResult(output_register, cache_type, cache_array,
                             cache_length);
     Dispatch();
   }
-  BIND(&nothing_to_iterate);
+
+  BIND(&if_slow);
   {
-    // Receiver is null or undefined or descriptors are zero length.
-    Node* zero = SmiConstant(0);
-    BuildForInPrepareResult(output_register, zero, zero, zero);
+    // The {enumerator} is a FixedArray with all the keys to iterate.
+    CSA_ASSERT(this, IsFixedArray(enumerator));
+
+    // Record the fact that we hit the for-in slow-path.
+    UpdateFeedback(SmiConstant(ForInFeedback::kAny), feedback_vector,
+                   vector_index);
+
+    // Construct the cache info triple.
+    Node* cache_type = enumerator;
+    Node* cache_array = enumerator;
+    Node* cache_length = LoadFixedArrayBaseLength(enumerator);
+    BuildForInPrepareResult(output_register, cache_type, cache_array,
+                            cache_length);
     Dispatch();
   }
 }
@@ -3150,34 +3044,15 @@ IGNITION_HANDLER(ForInNext, InterpreterAssembler) {
   Branch(WordEqual(receiver_map, cache_type), &if_fast, &if_slow);
   BIND(&if_fast);
   {
-    // Check if we need to transition to megamorphic state.
-    Node* feedback_value =
-        LoadFeedbackVectorSlot(feedback_vector, vector_index);
-    Node* uninitialized_sentinel =
-        HeapConstant(FeedbackVector::UninitializedSentinel(isolate()));
-    Label if_done(this);
-    GotoIfNot(WordEqual(feedback_value, uninitialized_sentinel), &if_done);
-    {
-      // Transition to megamorphic state.
-      Node* megamorphic_sentinel =
-          HeapConstant(FeedbackVector::MegamorphicSentinel(isolate()));
-      StoreFeedbackVectorSlot(feedback_vector, vector_index,
-                              megamorphic_sentinel, SKIP_WRITE_BARRIER);
-    }
-    Goto(&if_done);
-
     // Enum cache in use for {receiver}, the {key} is definitely valid.
-    BIND(&if_done);
     SetAccumulator(key);
     Dispatch();
   }
   BIND(&if_slow);
   {
-    // Record the fact that we hit the for-in slow path.
-    Node* generic_sentinel =
-        HeapConstant(FeedbackVector::GenericSentinel(isolate()));
-    StoreFeedbackVectorSlot(feedback_vector, vector_index, generic_sentinel,
-                            SKIP_WRITE_BARRIER);
+    // Record the fact that we hit the for-in slow-path.
+    UpdateFeedback(SmiConstant(ForInFeedback::kAny), feedback_vector,
+                   vector_index);
 
     // Need to filter the {key} for the {receiver}.
     Node* context = GetContext();
@@ -3344,7 +3219,7 @@ Handle<Code> GenerateBytecodeHandler(Isolate* isolate, Bytecode bytecode,
   Zone zone(isolate->allocator(), ZONE_NAME);
   InterpreterDispatchDescriptor descriptor(isolate);
   compiler::CodeAssemblerState state(
-      isolate, &zone, descriptor, Code::ComputeFlags(Code::BYTECODE_HANDLER),
+      isolate, &zone, descriptor, Code::BYTECODE_HANDLER,
       Bytecodes::ToString(bytecode), Bytecodes::ReturnCount(bytecode));
 
   switch (bytecode) {

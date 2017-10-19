@@ -121,7 +121,7 @@ Node* IntrinsicsGenerator::CompareInstanceType(Node* object, int type,
   if (mode == kInstanceTypeEqual) {
     return __ Word32Equal(instance_type, __ Int32Constant(type));
   } else {
-    DCHECK(mode == kInstanceTypeGreaterThanOrEqual);
+    DCHECK_EQ(mode, kInstanceTypeGreaterThanOrEqual);
     return __ Int32GreaterThanOrEqual(instance_type, __ Int32Constant(type));
   }
 }
@@ -280,11 +280,6 @@ Node* IntrinsicsGenerator::HasProperty(Node* input, Node* arg_count,
                                        Node* context) {
   return IntrinsicAsStubCall(
       input, context, Builtins::CallableFor(isolate(), Builtins::kHasProperty));
-}
-
-Node* IntrinsicsGenerator::SubString(Node* input, Node* arg_count,
-                                     Node* context) {
-  return IntrinsicAsStubCall(input, context, CodeFactory::SubString(isolate()));
 }
 
 Node* IntrinsicsGenerator::ToString(Node* input, Node* arg_count,

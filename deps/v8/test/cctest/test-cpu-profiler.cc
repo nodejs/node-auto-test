@@ -44,17 +44,9 @@
 #include "include/libplatform/v8-tracing.h"
 #include "src/tracing/trace-event.h"
 
-using i::CodeEntry;
-using i::CpuProfile;
-using i::CpuProfiler;
-using i::CpuProfilesCollection;
-using i::Heap;
-using i::ProfileGenerator;
-using i::ProfileNode;
-using i::ProfilerEventsProcessor;
-using i::ProfilerListener;
-using i::ScopedVector;
-using i::Vector;
+namespace v8 {
+namespace internal {
+namespace test_cpu_profiler {
 
 // Helper methods
 static v8::Local<v8::Function> GetFunction(v8::Local<v8::Context> env,
@@ -91,17 +83,17 @@ TEST(StartStop) {
 
 static void EnqueueTickSampleEvent(ProfilerEventsProcessor* proc,
                                    i::Address frame1,
-                                   i::Address frame2 = NULL,
-                                   i::Address frame3 = NULL) {
+                                   i::Address frame2 = nullptr,
+                                   i::Address frame3 = nullptr) {
   v8::TickSample* sample = proc->StartTickSample();
   sample->pc = frame1;
   sample->tos = frame1;
   sample->frames_count = 0;
-  if (frame2 != NULL) {
+  if (frame2 != nullptr) {
     sample->stack[0] = frame2;
     sample->frames_count = 1;
   }
-  if (frame3 != NULL) {
+  if (frame3 != nullptr) {
     sample->stack[1] = frame3;
     sample->frames_count = 2;
   }
@@ -505,7 +497,7 @@ static const v8::CpuProfileNode* FindChild(v8::Local<v8::Context> context,
       return child;
     }
   }
-  return NULL;
+  return nullptr;
 }
 
 
@@ -786,11 +778,12 @@ class TestApiCallbacks {
  private:
   void Wait() {
     if (is_warming_up_) return;
-    double start = v8::base::OS::TimeCurrentMillis();
+    v8::Platform* platform = v8::internal::V8::GetCurrentPlatform();
+    double start = platform->CurrentClockTimeMillis();
     double duration = 0;
     while (duration < min_duration_ms_) {
       v8::base::OS::Sleep(v8::base::TimeDelta::FromMilliseconds(1));
-      duration = v8::base::OS::TimeCurrentMillis() - start;
+      duration = platform->CurrentClockTimeMillis() - start;
     }
   }
 
@@ -1289,7 +1282,7 @@ TEST(CpuProfileDeepStack) {
   v8::Local<v8::Function> function = GetFunction(env, "start");
 
   v8::Local<v8::String> profile_name = v8_str("my_profile");
-  function->Call(env, env->Global(), 0, NULL).ToLocalChecked();
+  function->Call(env, env->Global(), 0, nullptr).ToLocalChecked();
   v8::CpuProfile* profile = helper.profiler()->StopProfiling(profile_name);
   CHECK(profile);
   // Dump collected profile to have a better diagnostic in case of failure.
@@ -1622,7 +1615,7 @@ TEST(Inlining) {
   v8::Local<v8::Function> function = GetFunction(env, "start");
 
   v8::Local<v8::String> profile_name = v8_str("my_profile");
-  function->Call(env, env->Global(), 0, NULL).ToLocalChecked();
+  function->Call(env, env->Global(), 0, nullptr).ToLocalChecked();
   v8::CpuProfile* profile = helper.profiler()->StopProfiling(profile_name);
   CHECK(profile);
   // Dump collected profile to have a better diagnostic in case of failure.
@@ -1767,14 +1760,14 @@ TEST(DontStopOnFinishedProfileDelete) {
   CHECK(inner_profile);
   CHECK_EQ(1, iprofiler->GetProfilesCount());
   inner_profile->Delete();
-  inner_profile = NULL;
+  inner_profile = nullptr;
   CHECK_EQ(0, iprofiler->GetProfilesCount());
 
   v8::CpuProfile* outer_profile = profiler->StopProfiling(outer);
   CHECK(outer_profile);
   CHECK_EQ(1, iprofiler->GetProfilesCount());
   outer_profile->Delete();
-  outer_profile = NULL;
+  outer_profile = nullptr;
   CHECK_EQ(0, iprofiler->GetProfilesCount());
   profiler->Dispose();
 }
@@ -1784,7 +1777,7 @@ const char* GetBranchDeoptReason(v8::Local<v8::Context> context,
                                  i::CpuProfile* iprofile, const char* branch[],
                                  int length) {
   v8::CpuProfile* profile = reinterpret_cast<v8::CpuProfile*>(iprofile);
-  const ProfileNode* iopt_function = NULL;
+  const ProfileNode* iopt_function = nullptr;
   iopt_function = GetSimpleBranch(context, profile, branch, length);
   CHECK_EQ(1U, iopt_function->deopt_infos().size());
   return iopt_function->deopt_infos()[0].deopt_reason;
@@ -2191,3 +2184,59 @@ TEST(TracingCpuProfiler) {
 
   i::V8::SetPlatformForTesting(old_platform);
 }
+
+TEST(Issue763073) {
+  class AllowNativesSyntax {
+   public:
+    AllowNativesSyntax()
+        : allow_natives_syntax_(i::FLAG_allow_natives_syntax),
+          trace_deopt_(i::FLAG_trace_deopt) {
+      i::FLAG_allow_natives_syntax = true;
+      i::FLAG_trace_deopt = true;
+    }
+
+    ~AllowNativesSyntax() {
+      i::FLAG_allow_natives_syntax = allow_natives_syntax_;
+      i::FLAG_trace_deopt = trace_deopt_;
+    }
+
+   private:
+    bool allow_natives_syntax_;
+    bool trace_deopt_;
+  };
+
+  AllowNativesSyntax allow_natives_syntax_scope;
+  LocalContext env;
+  v8::HandleScope scope(env->GetIsolate());
+
+  CompileRun(
+      "function f() { return function g(x) { }; }"
+      // Create first closure, optimize it, and deoptimize it.
+      "var g = f();"
+      "g(1);"
+      "%OptimizeFunctionOnNextCall(g);"
+      "g(1);"
+      "%DeoptimizeFunction(g);"
+      // Create second closure, and optimize it. This will create another
+      // optimized code object and put in the (shared) type feedback vector.
+      "var h = f();"
+      "h(1);"
+      "%OptimizeFunctionOnNextCall(h);"
+      "h(1);");
+
+  // Start profiling.
+  v8::CpuProfiler* cpu_profiler = v8::CpuProfiler::New(env->GetIsolate());
+  v8::Local<v8::String> profile_name = v8_str("test");
+
+  // Here we test that the heap iteration upon profiling start is not
+  // confused by having a deoptimized code object for a closure while
+  // having a different optimized code object in the type feedback vector.
+  cpu_profiler->StartProfiling(profile_name);
+  v8::CpuProfile* p = cpu_profiler->StopProfiling(profile_name);
+  p->Delete();
+  cpu_profiler->Dispose();
+}
+
+}  // namespace test_cpu_profiler
+}  // namespace internal
+}  // namespace v8

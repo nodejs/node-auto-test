@@ -323,7 +323,7 @@ compiler::Node* InterpreterAssembler::BytecodeOperandReadUnaligned(
 
   // Read the most signicant bytecode into bytes[0] and then in order
   // down to least significant in bytes[count - 1].
-  DCHECK(count <= kMaxCount);
+  DCHECK_LE(count, kMaxCount);
   compiler::Node* bytes[kMaxCount];
   for (int i = 0; i < count; i++) {
     MachineType machine_type = (i == 0) ? msb_type : MachineType::Uint8();
@@ -484,8 +484,8 @@ Node* InterpreterAssembler::BytecodeOperandImmSmi(int operand_index) {
 }
 
 Node* InterpreterAssembler::BytecodeOperandIdxInt32(int operand_index) {
-  DCHECK(OperandType::kIdx ==
-         Bytecodes::GetOperandType(bytecode_, operand_index));
+  DCHECK_EQ(OperandType::kIdx,
+            Bytecodes::GetOperandType(bytecode_, operand_index));
   OperandSize operand_size =
       Bytecodes::GetOperandSize(bytecode_, operand_index, operand_scale());
   return BytecodeUnsignedOperand(operand_index, operand_size);
@@ -509,17 +509,27 @@ Node* InterpreterAssembler::BytecodeOperandReg(int operand_index) {
 }
 
 Node* InterpreterAssembler::BytecodeOperandRuntimeId(int operand_index) {
-  DCHECK(OperandType::kRuntimeId ==
-         Bytecodes::GetOperandType(bytecode_, operand_index));
+  DCHECK_EQ(OperandType::kRuntimeId,
+            Bytecodes::GetOperandType(bytecode_, operand_index));
   OperandSize operand_size =
       Bytecodes::GetOperandSize(bytecode_, operand_index, operand_scale());
   DCHECK_EQ(operand_size, OperandSize::kShort);
   return BytecodeUnsignedOperand(operand_index, operand_size);
 }
 
+Node* InterpreterAssembler::BytecodeOperandNativeContextIndex(
+    int operand_index) {
+  DCHECK_EQ(OperandType::kNativeContextIndex,
+            Bytecodes::GetOperandType(bytecode_, operand_index));
+  OperandSize operand_size =
+      Bytecodes::GetOperandSize(bytecode_, operand_index, operand_scale());
+  return ChangeUint32ToWord(
+      BytecodeUnsignedOperand(operand_index, operand_size));
+}
+
 Node* InterpreterAssembler::BytecodeOperandIntrinsicId(int operand_index) {
-  DCHECK(OperandType::kIntrinsicId ==
-         Bytecodes::GetOperandType(bytecode_, operand_index));
+  DCHECK_EQ(OperandType::kIntrinsicId,
+            Bytecodes::GetOperandType(bytecode_, operand_index));
   OperandSize operand_size =
       Bytecodes::GetOperandSize(bytecode_, operand_index, operand_scale());
   DCHECK_EQ(operand_size, OperandSize::kByte);
@@ -554,7 +564,7 @@ void InterpreterAssembler::CallPrologue() {
   }
 
   if (FLAG_debug_code && !disable_stack_check_across_call_) {
-    DCHECK(stack_pointer_before_call_ == nullptr);
+    DCHECK_NULL(stack_pointer_before_call_);
     stack_pointer_before_call_ = LoadStackPointer();
   }
   bytecode_array_valid_ = false;
@@ -1027,7 +1037,8 @@ Node* InterpreterAssembler::CallRuntimeN(Node* function_id, Node* context,
 }
 
 void InterpreterAssembler::UpdateInterruptBudget(Node* weight, bool backward) {
-  Label ok(this), interrupt_check(this, Label::kDeferred), end(this);
+  Comment("[ UpdateInterruptBudget");
+
   Node* budget_offset =
       IntPtrConstant(BytecodeArray::kInterruptBudgetOffset - kHeapObjectTag);
 
@@ -1042,28 +1053,35 @@ void InterpreterAssembler::UpdateInterruptBudget(Node* weight, bool backward) {
   // Make sure we include the current bytecode in the budget calculation.
   Node* budget_after_bytecode =
       Int32Sub(old_budget, Int32Constant(CurrentBytecodeSize()));
+
   if (backward) {
     new_budget.Bind(Int32Sub(budget_after_bytecode, weight));
-  } else {
-    new_budget.Bind(Int32Add(budget_after_bytecode, weight));
-  }
-  Node* condition =
-      Int32GreaterThanOrEqual(new_budget.value(), Int32Constant(0));
-  Branch(condition, &ok, &interrupt_check);
 
-  // Perform interrupt and reset budget.
-  BIND(&interrupt_check);
-  {
-    CallRuntime(Runtime::kInterrupt, GetContext());
-    new_budget.Bind(Int32Constant(Interpreter::InterruptBudget()));
-    Goto(&ok);
+    Node* condition =
+        Int32GreaterThanOrEqual(new_budget.value(), Int32Constant(0));
+    Label ok(this), interrupt_check(this, Label::kDeferred);
+    Branch(condition, &ok, &interrupt_check);
+
+    // Perform interrupt and reset budget.
+    BIND(&interrupt_check);
+    {
+      CallRuntime(Runtime::kInterrupt, GetContext());
+      new_budget.Bind(Int32Constant(Interpreter::kInterruptBudget));
+      Goto(&ok);
+    }
+
+    BIND(&ok);
+  } else {
+    // For a forward jump, we know we only increase the interrupt budget, so
+    // no need to check if it's below zero.
+    new_budget.Bind(Int32Add(budget_after_bytecode, weight));
   }
 
   // Update budget.
-  BIND(&ok);
   StoreNoWriteBarrier(MachineRepresentation::kWord32,
                       BytecodeArrayTaggedPointer(), budget_offset,
                       new_budget.value());
+  Comment("] UpdateInterruptBudget");
 }
 
 Node* InterpreterAssembler::Advance() { return Advance(CurrentBytecodeSize()); }
@@ -1239,89 +1257,74 @@ void InterpreterAssembler::DispatchWide(OperandScale operand_scale) {
   DispatchToBytecodeHandlerEntry(target_code_entry, next_bytecode_offset);
 }
 
-Node* InterpreterAssembler::TruncateTaggedToWord32WithFeedback(
-    Node* context, Node* value, Variable* var_type_feedback) {
-  // We might need to loop once due to ToNumber conversion.
-  Variable var_value(this, MachineRepresentation::kTagged),
-      var_result(this, MachineRepresentation::kWord32);
+// Like NumberBuiltinsAssembler::TaggedToWord32OrBigInt, but with feedback.
+Node* InterpreterAssembler::TaggedToWord32OrBigIntWithFeedback(
+    Node* context, Node* value, Variable* var_type_feedback, Label* bigint,
+    Variable* var_bigint_result) {
+  // We might need to loop once due to ToNumeric conversion.
+  VARIABLE(var_value, MachineRepresentation::kTagged, value);
+  VARIABLE(var_result, MachineRepresentation::kWord32);
   Variable* loop_vars[] = {&var_value, var_type_feedback};
-  Label loop(this, 2, loop_vars), done_loop(this, &var_result);
-  var_value.Bind(value);
+  Label loop(this, arraysize(loop_vars), loop_vars), done(this, &var_result);
   var_type_feedback->Bind(SmiConstant(BinaryOperationFeedback::kNone));
   Goto(&loop);
   BIND(&loop);
   {
-    // Load the current {value}.
     value = var_value.value();
+    Label not_smi(this), is_heap_number(this), is_oddball(this),
+        is_bigint(this);
+    GotoIf(TaggedIsNotSmi(value), &not_smi);
+    // {value} is a Smi.
+    var_result.Bind(SmiToWord32(value));
+    var_type_feedback->Bind(
+        SmiOr(var_type_feedback->value(),
+              SmiConstant(BinaryOperationFeedback::kSignedSmall)));
+    Goto(&done);
 
-    // Check if the {value} is a Smi or a HeapObject.
-    Label if_valueissmi(this), if_valueisnotsmi(this);
-    Branch(TaggedIsSmi(value), &if_valueissmi, &if_valueisnotsmi);
+    BIND(&not_smi);
+    Node* map = LoadMap(value);
+    GotoIf(IsHeapNumberMap(map), &is_heap_number);
+    Node* instance_type = LoadMapInstanceType(map);
+    GotoIf(IsBigIntInstanceType(instance_type), &is_bigint);
 
-    BIND(&if_valueissmi);
+    // Not HeapNumber or BigInt.
     {
-      // Convert the Smi {value}.
-      var_result.Bind(SmiToWord32(value));
+      // We do not require an Or with earlier feedback here because once we
+      // convert the value to a Numeric, we cannot reach this path. We can
+      // only reach this path on the first pass when the feedback is kNone.
+      CSA_ASSERT(this, SmiEqual(var_type_feedback->value(),
+                                SmiConstant(BinaryOperationFeedback::kNone)));
+      GotoIf(Word32Equal(instance_type, Int32Constant(ODDBALL_TYPE)),
+             &is_oddball);
+
+      // Not an oddball either -> convert to Numeric.
+      var_value.Bind(
+          CallBuiltin(Builtins::kNonNumberToNumeric, context, value));
+      var_type_feedback->Bind(SmiConstant(BinaryOperationFeedback::kAny));
+      Goto(&loop);
+
+      BIND(&is_oddball);
+      var_value.Bind(LoadObjectField(value, Oddball::kToNumberOffset));
       var_type_feedback->Bind(
-          SmiOr(var_type_feedback->value(),
-                SmiConstant(BinaryOperationFeedback::kSignedSmall)));
-      Goto(&done_loop);
+          SmiConstant(BinaryOperationFeedback::kNumberOrOddball));
+      Goto(&loop);
     }
 
-    BIND(&if_valueisnotsmi);
-    {
-      // Check if {value} is a HeapNumber.
-      Label if_valueisheapnumber(this),
-          if_valueisnotheapnumber(this, Label::kDeferred);
-      Node* value_map = LoadMap(value);
-      Branch(IsHeapNumberMap(value_map), &if_valueisheapnumber,
-             &if_valueisnotheapnumber);
+    BIND(&is_heap_number);
+    var_result.Bind(TruncateHeapNumberValueToWord32(value));
+    var_type_feedback->Bind(
+        SmiOr(var_type_feedback->value(),
+              SmiConstant(BinaryOperationFeedback::kNumber)));
+    Goto(&done);
 
-      BIND(&if_valueisheapnumber);
-      {
-        // Truncate the floating point value.
-        var_result.Bind(TruncateHeapNumberValueToWord32(value));
-        var_type_feedback->Bind(
-            SmiOr(var_type_feedback->value(),
-                  SmiConstant(BinaryOperationFeedback::kNumber)));
-        Goto(&done_loop);
-      }
-
-      BIND(&if_valueisnotheapnumber);
-      {
-        // We do not require an Or with earlier feedback here because once we
-        // convert the value to a number, we cannot reach this path. We can
-        // only reach this path on the first pass when the feedback is kNone.
-        CSA_ASSERT(this, SmiEqual(var_type_feedback->value(),
-                                  SmiConstant(BinaryOperationFeedback::kNone)));
-
-        Label if_valueisoddball(this),
-            if_valueisnotoddball(this, Label::kDeferred);
-        Node* is_oddball = Word32Equal(LoadMapInstanceType(value_map),
-                                       Int32Constant(ODDBALL_TYPE));
-        Branch(is_oddball, &if_valueisoddball, &if_valueisnotoddball);
-
-        BIND(&if_valueisoddball);
-        {
-          // Convert Oddball to a Number and perform checks again.
-          var_value.Bind(LoadObjectField(value, Oddball::kToNumberOffset));
-          var_type_feedback->Bind(
-              SmiConstant(BinaryOperationFeedback::kNumberOrOddball));
-          Goto(&loop);
-        }
-
-        BIND(&if_valueisnotoddball);
-        {
-          // Convert the {value} to a Number first.
-          var_value.Bind(
-              CallBuiltin(Builtins::kNonNumberToNumber, context, value));
-          var_type_feedback->Bind(SmiConstant(BinaryOperationFeedback::kAny));
-          Goto(&loop);
-        }
-      }
-    }
+    BIND(&is_bigint);
+    var_bigint_result->Bind(value);
+    var_type_feedback->Bind(
+        SmiOr(var_type_feedback->value(),
+              SmiConstant(BinaryOperationFeedback::kBigInt)));
+    Goto(bigint);
   }
-  BIND(&done_loop);
+  BIND(&done);
   return var_result.value();
 }
 
@@ -1529,6 +1532,65 @@ Node* InterpreterAssembler::ImportRegisterFile(Node* array,
 
 int InterpreterAssembler::CurrentBytecodeSize() const {
   return Bytecodes::Size(bytecode_, operand_scale_);
+}
+
+void InterpreterAssembler::ToNumberOrNumeric(Object::Conversion mode) {
+  Node* object = GetAccumulator();
+  Node* context = GetContext();
+
+  Variable var_type_feedback(this, MachineRepresentation::kTaggedSigned);
+  Variable var_result(this, MachineRepresentation::kTagged);
+  Label if_done(this), if_objectissmi(this), if_objectisheapnumber(this),
+      if_objectisother(this, Label::kDeferred);
+
+  GotoIf(TaggedIsSmi(object), &if_objectissmi);
+  Branch(IsHeapNumber(object), &if_objectisheapnumber, &if_objectisother);
+
+  BIND(&if_objectissmi);
+  {
+    var_result.Bind(object);
+    var_type_feedback.Bind(SmiConstant(BinaryOperationFeedback::kSignedSmall));
+    Goto(&if_done);
+  }
+
+  BIND(&if_objectisheapnumber);
+  {
+    var_result.Bind(object);
+    var_type_feedback.Bind(SmiConstant(BinaryOperationFeedback::kNumber));
+    Goto(&if_done);
+  }
+
+  BIND(&if_objectisother);
+  {
+    auto builtin = Builtins::kNonNumberToNumber;
+    if (mode == Object::Conversion::kToNumeric) {
+      builtin = Builtins::kNonNumberToNumeric;
+      // Special case for collecting BigInt feedback.
+      Label not_bigint(this);
+      GotoIfNot(IsBigInt(object), &not_bigint);
+      {
+        var_result.Bind(object);
+        var_type_feedback.Bind(SmiConstant(BinaryOperationFeedback::kBigInt));
+        Goto(&if_done);
+      }
+      BIND(&not_bigint);
+    }
+
+    // Convert {object} by calling out to the appropriate builtin.
+    var_result.Bind(CallBuiltin(builtin, context, object));
+    var_type_feedback.Bind(SmiConstant(BinaryOperationFeedback::kAny));
+    Goto(&if_done);
+  }
+
+  BIND(&if_done);
+
+  // Record the type feedback collected for {object}.
+  Node* slot_index = BytecodeOperandIdx(0);
+  Node* feedback_vector = LoadFeedbackVector();
+  UpdateFeedback(var_type_feedback.value(), feedback_vector, slot_index);
+
+  SetAccumulator(var_result.value());
+  Dispatch();
 }
 
 }  // namespace interpreter

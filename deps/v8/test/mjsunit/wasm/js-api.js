@@ -2,21 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --expose-wasm --allow-natives-syntax
+// Flags: --expose-wasm
 
 load('test/mjsunit/wasm/wasm-constants.js');
 load('test/mjsunit/wasm/wasm-module-builder.js');
 
-function unexpectedSuccess() {
-  %AbortJS('unexpected success');
-}
-
-function unexpectedFail(error) {
-  %AbortJS('unexpected fail: ' + error);
-}
-
 function assertEq(val, expected) {
-  assertEquals(expected, val);
+  assertSame(expected, val);
 }
 function assertArrayBuffer(val, expected) {
   assertTrue(val instanceof ArrayBuffer);
@@ -512,13 +504,40 @@ assertTrue(buf !== mem.buffer);
 assertEq(buf.byteLength, 0);
 buf = mem.buffer;
 assertEq(buf.byteLength, kPageSize);
-assertEq(mem.grow(1), 1);
+assertEq(mem.grow(1, 23), 1);
+assertTrue(buf !== mem.buffer);
+assertEq(buf.byteLength, 0);
+buf = mem.buffer;
+assertEq(buf.byteLength, 2 * kPageSize);
+assertEq(mem.grow(), 2);
 assertTrue(buf !== mem.buffer);
 assertEq(buf.byteLength, 0);
 buf = mem.buffer;
 assertEq(buf.byteLength, 2 * kPageSize);
 assertErrorMessage(() => mem.grow(1), Error, /failed to grow memory/);
+assertErrorMessage(() => mem.grow(Infinity), Error, /failed to grow memory/);
+assertErrorMessage(() => mem.grow(-Infinity), Error, /failed to grow memory/);
 assertEq(buf, mem.buffer);
+let throwOnValueOf = {
+  valueOf: function() {
+    throw Error('throwOnValueOf')
+  }
+};
+assertErrorMessage(() => mem.grow(throwOnValueOf), Error, /throwOnValueOf/);
+assertEq(buf, mem.buffer);
+let zero_wrapper = {
+  valueOf: function() {
+    ++this.call_counter;
+    return 0;
+  },
+  call_counter: 0
+};
+assertEq(mem.grow(zero_wrapper), 2);
+assertEq(zero_wrapper.call_counter, 1);
+assertTrue(buf !== mem.buffer);
+assertEq(buf.byteLength, 0);
+buf = mem.buffer;
+assertEq(buf.byteLength, 2 * kPageSize);
 
 let empty_mem = new Memory({initial: 0, maximum: 5});
 let empty_buf = empty_mem.buffer;
@@ -571,8 +590,9 @@ assertTrue(new Table({initial: 1, element: 'anyfunc'}) instanceof Table);
 assertTrue(new Table({initial: 1.5, element: 'anyfunc'}) instanceof Table);
 assertTrue(
     new Table({initial: 1, maximum: 1.5, element: 'anyfunc'}) instanceof Table);
-// TODO:maximum assertTrue(new Table({initial:1, maximum:Math.pow(2,32)-1,
-// element:"anyfunc"}) instanceof Table);
+assertTrue(
+    new Table({initial: 1, maximum: Math.pow(2, 32) - 1, element: 'anyfunc'})
+        instanceof Table);
 
 // 'WebAssembly.Table.prototype' data property
 let tableProtoDesc = Object.getOwnPropertyDescriptor(Table, 'prototype');
@@ -623,15 +643,17 @@ assertErrorMessage(
     () => get.call(), TypeError, /called on incompatible undefined/);
 assertErrorMessage(
     () => get.call({}), TypeError, /called on incompatible Object/);
+assertEq(get.call(tbl1), null);
 assertEq(get.call(tbl1, 0), null);
+assertEq(get.call(tbl1, 0, Infinity), null);
 assertEq(get.call(tbl1, 1), null);
 assertEq(get.call(tbl1, 1.5), null);
 assertErrorMessage(() => get.call(tbl1, 2), RangeError, /bad Table get index/);
 assertErrorMessage(
     () => get.call(tbl1, 2.5), RangeError, /bad Table get index/);
 assertErrorMessage(() => get.call(tbl1, -1), RangeError, /bad Table get index/);
-// TODO assertErrorMessage(() => get.call(tbl1, Math.pow(2,33)), RangeError,
-// /bad Table get index/);
+assertErrorMessage(
+    () => get.call(tbl1, Math.pow(2, 33)), RangeError, /bad Table get index/);
 assertErrorMessage(
     () => get.call(tbl1, {valueOf() { throw new Error('hi') }}), Error, 'hi');
 
@@ -651,13 +673,24 @@ assertErrorMessage(
 assertErrorMessage(
     () => set.call(tbl1, 0), TypeError, /requires more than 1 argument/);
 assertErrorMessage(
+    () => set.call(tbl1, undefined), TypeError,
+    /requires more than 1 argument/);
+assertErrorMessage(
     () => set.call(tbl1, 2, null), RangeError, /bad Table set index/);
 assertErrorMessage(
     () => set.call(tbl1, -1, null), RangeError, /bad Table set index/);
-// TODO assertErrorMessage(() => set.call(tbl1, Math.pow(2,33), null),
-// RangeError, /bad Table set index/);
+assertErrorMessage(
+    () => set.call(tbl1, Math.pow(2, 33), null), RangeError,
+    /bad Table set index/);
+assertErrorMessage(
+    () => set.call(tbl1, Infinity, null), RangeError, /bad Table set index/);
+assertErrorMessage(
+    () => set.call(tbl1, -Infinity, null), RangeError, /bad Table set index/);
 assertErrorMessage(
     () => set.call(tbl1, 0, undefined), TypeError,
+    /can only assign WebAssembly exported functions to Table/);
+assertErrorMessage(
+    () => set.call(tbl1, undefined, undefined), TypeError,
     /can only assign WebAssembly exported functions to Table/);
 assertErrorMessage(
     () => set.call(tbl1, 0, {}), TypeError,
@@ -672,6 +705,7 @@ assertErrorMessage(
     'hai');
 assertEq(set.call(tbl1, 0, null), undefined);
 assertEq(set.call(tbl1, 1, null), undefined);
+assertEq(set.call(tbl1, undefined, null), undefined);
 
 // 'WebAssembly.Table.prototype.grow' data property
 let tblGrowDesc = Object.getOwnPropertyDescriptor(tableProto, 'grow');
@@ -693,11 +727,21 @@ assertErrorMessage(
     /bad Table grow delta/);
 var tbl = new Table({element: 'anyfunc', initial: 1, maximum: 2});
 assertEq(tbl.length, 1);
+assertErrorMessage(
+    () => tbl.grow(Infinity), RangeError, /failed to grow table/);
+assertErrorMessage(
+    () => tbl.grow(-Infinity), RangeError, /failed to grow table/);
 assertEq(tbl.grow(0), 1);
 assertEq(tbl.length, 1);
-assertEq(tbl.grow(1), 1);
+assertEq(tbl.grow(1, 4), 1);
+assertEq(tbl.length, 2);
+assertEq(tbl.grow(), 2);
 assertEq(tbl.length, 2);
 assertErrorMessage(() => tbl.grow(1), Error, /failed to grow table/);
+assertErrorMessage(
+    () => tbl.grow(Infinity), RangeError, /failed to grow table/);
+assertErrorMessage(
+    () => tbl.grow(-Infinity), RangeError, /failed to grow table/);
 
 // 'WebAssembly.validate' function
 assertErrorMessage(() => WebAssembly.validate(), TypeError);
@@ -721,10 +765,11 @@ assertEq(compile.length, 1);
 assertEq(compile.name, 'compile');
 function assertCompileError(args, err, msg) {
   var error = null;
-  assertPromiseResult(compile(...args), unexpectedSuccess, error => {
-    assertTrue(error instanceof err);
-    // TODO  assertTrue(Boolean(error.message.match(msg)));
-  });
+  assertPromiseRejects(compile(...args))
+    .then(error => {
+      assertTrue(error instanceof err);
+        // TODO  assertTrue(Boolean(error.message.match(msg)));
+      });
 }
 assertCompileError([], TypeError, /requires more than 0 arguments/);
 assertCompileError(
@@ -747,7 +792,8 @@ assertCompileError(
 
 function assertCompileSuccess(bytes) {
   var module = null;
-  assertPromiseResult(compile(bytes), m => assertTrue(m instanceof Module));
+  assertPromiseFulfills(compile(bytes))
+    .then(m => assertTrue(m instanceof Module));
 }
 assertCompileSuccess(emptyModuleBinary);
 assertCompileSuccess(emptyModuleBinary.buffer);
@@ -767,10 +813,11 @@ assertEq(instantiate.length, 1);
 assertEq(instantiate.name, 'instantiate');
 function assertInstantiateError(args, err, msg) {
   var error = null;
-  assertPromiseResult(instantiate(...args), unexpectedSuccess, error => {
-    assertTrue(error instanceof err);
-    // TODO assertTrue(Boolean(error.message.match(msg)));
-  });
+  assertPromiseRejects(instantiate(...args))
+    .then(error => {
+      assertTrue(error instanceof err);
+      // TODO assertTrue(Boolean(error.message.match(msg)));
+    });
 }
 var scratch_memory = new WebAssembly.Memory(new ArrayBuffer(10));
 assertInstantiateError([], TypeError, /requires more than 0 arguments/);
@@ -824,14 +871,15 @@ assertInstantiateError(
 
 function assertInstantiateSuccess(module_or_bytes, imports) {
   var result = null;
-  assertPromiseResult(instantiate(module_or_bytes, imports), result => {
-    if (module_or_bytes instanceof Module) {
-      assertTrue(result instanceof Instance);
-    } else {
-      assertTrue(result.module instanceof Module);
-      assertTrue(result.instance instanceof Instance);
-    }
-  });
+  assertPromiseFulfills(instantiate(module_or_bytes, imports))
+    .then(result => {
+      if (module_or_bytes instanceof Module) {
+        assertTrue(result instanceof Instance);
+      } else {
+        assertTrue(result.module instanceof Module);
+        assertTrue(result.instance instanceof Instance);
+      }
+    });
 }
 assertInstantiateSuccess(emptyModule);
 assertInstantiateSuccess(emptyModuleBinary);

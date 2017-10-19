@@ -428,13 +428,26 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::BinaryOperationSmiLiteral(
   return *this;
 }
 
-BytecodeArrayBuilder& BytecodeArrayBuilder::CountOperation(Token::Value op,
+BytecodeArrayBuilder& BytecodeArrayBuilder::UnaryOperation(Token::Value op,
                                                            int feedback_slot) {
-  if (op == Token::Value::ADD) {
-    OutputInc(feedback_slot);
-  } else {
-    DCHECK_EQ(op, Token::Value::SUB);
-    OutputDec(feedback_slot);
+  switch (op) {
+    case Token::Value::INC:
+      OutputInc(feedback_slot);
+      break;
+    case Token::Value::DEC:
+      OutputDec(feedback_slot);
+      break;
+    case Token::Value::ADD:
+      OutputToNumber(feedback_slot);
+      break;
+    case Token::Value::SUB:
+      OutputNegate(feedback_slot);
+      break;
+    case Token::Value::BIT_NOT:
+      OutputBitwiseNot(feedback_slot);
+      break;
+    default:
+      UNREACHABLE();
   }
   return *this;
 }
@@ -536,7 +549,7 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::CompareNil(Token::Value op,
 
 BytecodeArrayBuilder& BytecodeArrayBuilder::CompareTypeOf(
     TestTypeOfFlags::LiteralFlag literal_flag) {
-  DCHECK(literal_flag != TestTypeOfFlags::LiteralFlag::kOther);
+  DCHECK_NE(literal_flag, TestTypeOfFlags::LiteralFlag::kOther);
   OutputTestTypeOf(TestTypeOfFlags::Encode(literal_flag));
   return *this;
 }
@@ -587,7 +600,7 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::LoadLiteral(
     return LoadTheHole();
   } else if (ast_value->IsString()) {
     return LoadLiteral(ast_value->AsString());
-  } else if (ast_value->IsHeapNumber()) {
+  } else if (ast_value->IsHeapNumber() || ast_value->IsBigInt()) {
     size_t entry = GetConstantPoolEntry(ast_value);
     OutputLdaConstant(entry);
     return *this;
@@ -699,10 +712,10 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::LoadGlobal(const AstRawString* name,
 BytecodeArrayBuilder& BytecodeArrayBuilder::StoreGlobal(
     const AstRawString* name, int feedback_slot, LanguageMode language_mode) {
   size_t name_index = GetConstantPoolEntry(name);
-  if (language_mode == SLOPPY) {
+  if (language_mode == LanguageMode::kSloppy) {
     OutputStaGlobalSloppy(name_index, feedback_slot);
   } else {
-    DCHECK_EQ(language_mode, STRICT);
+    DCHECK_EQ(language_mode, LanguageMode::kStrict);
     OutputStaGlobalStrict(name_index, feedback_slot);
   }
   return *this;
@@ -821,7 +834,6 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::StoreDataPropertyInLiteral(
 }
 
 BytecodeArrayBuilder& BytecodeArrayBuilder::CollectTypeProfile(int position) {
-  DCHECK(FLAG_type_profile);
   OutputCollectTypeProfile(position);
   return *this;
 }
@@ -829,20 +841,17 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::CollectTypeProfile(int position) {
 BytecodeArrayBuilder& BytecodeArrayBuilder::StoreNamedProperty(
     Register object, size_t name_index, int feedback_slot,
     LanguageMode language_mode) {
+#if DEBUG
   // Ensure that language mode is in sync with the IC slot kind if the function
   // literal is available (not a unit test case).
-  // TODO(ishell): check only in debug mode.
   if (literal_) {
     FeedbackSlot slot = FeedbackVector::ToSlot(feedback_slot);
-    CHECK_EQ(GetLanguageModeFromSlotKind(feedback_vector_spec()->GetKind(slot)),
-             language_mode);
+    DCHECK_EQ(
+        GetLanguageModeFromSlotKind(feedback_vector_spec()->GetKind(slot)),
+        language_mode);
   }
-  if (language_mode == SLOPPY) {
-    OutputStaNamedPropertySloppy(object, name_index, feedback_slot);
-  } else {
-    DCHECK_EQ(language_mode, STRICT);
-    OutputStaNamedPropertyStrict(object, name_index, feedback_slot);
-  }
+#endif
+  OutputStaNamedProperty(object, name_index, feedback_slot);
   return *this;
 }
 
@@ -856,14 +865,15 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::StoreNamedProperty(
 BytecodeArrayBuilder& BytecodeArrayBuilder::StoreNamedOwnProperty(
     Register object, const AstRawString* name, int feedback_slot) {
   size_t name_index = GetConstantPoolEntry(name);
+#if DEBUG
   // Ensure that the store operation is in sync with the IC slot kind if
   // the function literal is available (not a unit test case).
-  // TODO(ishell): check only in debug mode.
   if (literal_) {
     FeedbackSlot slot = FeedbackVector::ToSlot(feedback_slot);
-    CHECK_EQ(FeedbackSlotKind::kStoreOwnNamed,
-             feedback_vector_spec()->GetKind(slot));
+    DCHECK_EQ(FeedbackSlotKind::kStoreOwnNamed,
+              feedback_vector_spec()->GetKind(slot));
   }
+#endif
   OutputStaNamedOwnProperty(object, name_index, feedback_slot);
   return *this;
 }
@@ -871,20 +881,17 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::StoreNamedOwnProperty(
 BytecodeArrayBuilder& BytecodeArrayBuilder::StoreKeyedProperty(
     Register object, Register key, int feedback_slot,
     LanguageMode language_mode) {
+#if DEBUG
   // Ensure that language mode is in sync with the IC slot kind if the function
   // literal is available (not a unit test case).
-  // TODO(ishell): check only in debug mode.
   if (literal_) {
     FeedbackSlot slot = FeedbackVector::ToSlot(feedback_slot);
-    CHECK_EQ(GetLanguageModeFromSlotKind(feedback_vector_spec()->GetKind(slot)),
-             language_mode);
+    DCHECK_EQ(
+        GetLanguageModeFromSlotKind(feedback_vector_spec()->GetKind(slot)),
+        language_mode);
   }
-  if (language_mode == SLOPPY) {
-    OutputStaKeyedPropertySloppy(object, key, feedback_slot);
-  } else {
-    DCHECK_EQ(language_mode, STRICT);
-    OutputStaKeyedPropertyStrict(object, key, feedback_slot);
-  }
+#endif
+  OutputStaKeyedProperty(object, key, feedback_slot);
   return *this;
 }
 
@@ -982,6 +989,12 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::CreateEmptyObjectLiteral() {
   return *this;
 }
 
+BytecodeArrayBuilder& BytecodeArrayBuilder::GetTemplateObject(
+    size_t template_object_description_entry) {
+  OutputGetTemplateObject(template_object_description_entry);
+  return *this;
+}
+
 BytecodeArrayBuilder& BytecodeArrayBuilder::PushContext(Register context) {
   OutputPushContext(context);
   return *this;
@@ -1002,9 +1015,13 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::ToName(Register out) {
   return *this;
 }
 
-BytecodeArrayBuilder& BytecodeArrayBuilder::ToNumber(Register out,
-                                                     int feedback_slot) {
-  OutputToNumber(out, feedback_slot);
+BytecodeArrayBuilder& BytecodeArrayBuilder::ToNumber(int feedback_slot) {
+  OutputToNumber(feedback_slot);
+  return *this;
+}
+
+BytecodeArrayBuilder& BytecodeArrayBuilder::ToNumeric(int feedback_slot) {
+  OutputToNumeric(feedback_slot);
   return *this;
 }
 
@@ -1180,6 +1197,11 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::ReThrow() {
   return *this;
 }
 
+BytecodeArrayBuilder& BytecodeArrayBuilder::Abort(BailoutReason reason) {
+  OutputAbort(reason);
+  return *this;
+}
+
 BytecodeArrayBuilder& BytecodeArrayBuilder::Return() {
   OutputReturn();
   return_seen_in_block_ = true;
@@ -1214,10 +1236,15 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::IncBlockCounter(
   return *this;
 }
 
+BytecodeArrayBuilder& BytecodeArrayBuilder::ForInEnumerate(Register receiver) {
+  OutputForInEnumerate(receiver);
+  return *this;
+}
+
 BytecodeArrayBuilder& BytecodeArrayBuilder::ForInPrepare(
-    Register receiver, RegisterList cache_info_triple) {
+    RegisterList cache_info_triple, int feedback_slot) {
   DCHECK_EQ(3, cache_info_triple.register_count());
-  OutputForInPrepare(receiver, cache_info_triple);
+  OutputForInPrepare(cache_info_triple, feedback_slot);
   return *this;
 }
 
@@ -1358,7 +1385,8 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::ConstructWithSpread(
 BytecodeArrayBuilder& BytecodeArrayBuilder::CallRuntime(
     Runtime::FunctionId function_id, RegisterList args) {
   DCHECK_EQ(1, Runtime::FunctionForId(function_id)->result_size);
-  DCHECK(Bytecodes::SizeForUnsignedOperand(function_id) <= OperandSize::kShort);
+  DCHECK_LE(Bytecodes::SizeForUnsignedOperand(function_id),
+            OperandSize::kShort);
   if (IntrinsicsHelper::IsSupported(function_id)) {
     IntrinsicsHelper::IntrinsicId intrinsic_id =
         IntrinsicsHelper::FromRuntimeId(function_id);
@@ -1385,7 +1413,8 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::CallRuntimeForPair(
     Runtime::FunctionId function_id, RegisterList args,
     RegisterList return_pair) {
   DCHECK_EQ(2, Runtime::FunctionForId(function_id)->result_size);
-  DCHECK(Bytecodes::SizeForUnsignedOperand(function_id) <= OperandSize::kShort);
+  DCHECK_LE(Bytecodes::SizeForUnsignedOperand(function_id),
+            OperandSize::kShort);
   DCHECK_EQ(2, return_pair.register_count());
   OutputCallRuntimeForPair(static_cast<uint16_t>(function_id), args,
                            args.register_count(), return_pair);
@@ -1406,10 +1435,10 @@ BytecodeArrayBuilder& BytecodeArrayBuilder::CallJSRuntime(int context_index,
 
 BytecodeArrayBuilder& BytecodeArrayBuilder::Delete(Register object,
                                                    LanguageMode language_mode) {
-  if (language_mode == SLOPPY) {
+  if (language_mode == LanguageMode::kSloppy) {
     OutputDeletePropertySloppy(object);
   } else {
-    DCHECK_EQ(language_mode, STRICT);
+    DCHECK_EQ(language_mode, LanguageMode::kStrict);
     OutputDeletePropertyStrict(object);
   }
   return *this;
@@ -1421,7 +1450,7 @@ size_t BytecodeArrayBuilder::GetConstantPoolEntry(
 }
 
 size_t BytecodeArrayBuilder::GetConstantPoolEntry(const AstValue* heap_number) {
-  DCHECK(heap_number->IsHeapNumber());
+  DCHECK(heap_number->IsHeapNumber() || heap_number->IsBigInt());
   return constant_array_builder()->Insert(heap_number);
 }
 

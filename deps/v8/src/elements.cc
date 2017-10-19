@@ -615,6 +615,16 @@ class ElementsAccessorBase : public ElementsAccessor {
                                           filter) != kMaxUInt32;
   }
 
+  bool HasEntry(JSObject* holder, uint32_t entry) final {
+    return Subclass::HasEntryImpl(holder->GetIsolate(), holder->elements(),
+                                  entry);
+  }
+
+  static bool HasEntryImpl(Isolate* isolate, FixedArrayBase* backing_store,
+                           uint32_t entry) {
+    UNIMPLEMENTED();
+  }
+
   bool HasAccessors(JSObject* holder) final {
     return Subclass::HasAccessorsImpl(holder, holder->elements());
   }
@@ -1317,13 +1327,15 @@ class ElementsAccessorBase : public ElementsAccessor {
     return Subclass::GetDetailsImpl(holder, entry);
   }
 
-  Handle<FixedArray> CreateListFromArray(Isolate* isolate,
-                                         Handle<JSArray> array) final {
-    return Subclass::CreateListFromArrayImpl(isolate, array);
+  Handle<FixedArray> CreateListFromArrayLike(Isolate* isolate,
+                                             Handle<JSObject> object,
+                                             uint32_t length) final {
+    return Subclass::CreateListFromArrayLikeImpl(isolate, object, length);
   };
 
-  static Handle<FixedArray> CreateListFromArrayImpl(Isolate* isolate,
-                                                    Handle<JSArray> array) {
+  static Handle<FixedArray> CreateListFromArrayLikeImpl(Isolate* isolate,
+                                                        Handle<JSObject> object,
+                                                        uint32_t length) {
     UNREACHABLE();
   }
 
@@ -2366,14 +2378,13 @@ class FastElementsAccessor : public ElementsAccessorBase<Subclass, KindTraits> {
     }
   }
 
-  static Handle<FixedArray> CreateListFromArrayImpl(Isolate* isolate,
-                                                    Handle<JSArray> array) {
-    uint32_t length = 0;
-    array->length()->ToArrayLength(&length);
+  static Handle<FixedArray> CreateListFromArrayLikeImpl(Isolate* isolate,
+                                                        Handle<JSObject> object,
+                                                        uint32_t length) {
     Handle<FixedArray> result = isolate->factory()->NewFixedArray(length);
-    Handle<FixedArrayBase> elements(array->elements(), isolate);
+    Handle<FixedArrayBase> elements(object->elements(), isolate);
     for (uint32_t i = 0; i < length; i++) {
-      if (!Subclass::HasElementImpl(isolate, *array, i, *elements)) continue;
+      if (!Subclass::HasElementImpl(isolate, *object, i, *elements)) continue;
       Handle<Object> value;
       value = Subclass::GetImpl(isolate, *elements, i);
       if (value->IsName()) {
@@ -2438,7 +2449,7 @@ class FastElementsAccessor : public ElementsAccessorBase<Subclass, KindTraits> {
     }
     Handle<FixedArrayBase> backing_store(receiver->elements(), isolate);
     uint32_t length = static_cast<uint32_t>(Smi::ToInt(receiver->length()));
-    DCHECK(length > 0);
+    DCHECK_GT(length, 0);
     int new_length = length - 1;
     int remove_index = remove_position == AT_START ? 0 : new_length;
     Handle<Object> result =
@@ -2460,7 +2471,7 @@ class FastElementsAccessor : public ElementsAccessorBase<Subclass, KindTraits> {
                                Arguments* args, uint32_t add_size,
                                Where add_position) {
     uint32_t length = Smi::ToInt(receiver->length());
-    DCHECK(0 < add_size);
+    DCHECK_LT(0, add_size);
     uint32_t elms_len = backing_store->length();
     // Check we do not overflow the new_length.
     DCHECK(add_size <= static_cast<uint32_t>(Smi::kMaxValue - length));
@@ -3082,6 +3093,20 @@ class TypedElementsAccessor
 
     ctype* data = static_cast<ctype*>(elements->DataPtr());
     std::reverse(data, data + len);
+  }
+
+  static Handle<FixedArray> CreateListFromArrayLikeImpl(Isolate* isolate,
+                                                        Handle<JSObject> object,
+                                                        uint32_t length) {
+    DCHECK(!WasNeutered(*object));
+    DCHECK(object->IsJSTypedArray());
+    Handle<FixedArray> result = isolate->factory()->NewFixedArray(length);
+    Handle<BackingStore> elements(BackingStore::cast(object->elements()));
+    for (uint32_t i = 0; i < length; i++) {
+      Handle<Object> value = AccessorClass::GetImpl(isolate, *elements, i);
+      result->set(i, *value);
+    }
+    return result;
   }
 
   static Handle<JSObject> SliceWithResultImpl(Handle<JSObject> receiver,
@@ -4156,7 +4181,7 @@ class SlowStringWrapperElementsAccessor
 void CheckArrayAbuse(Handle<JSObject> obj, const char* op, uint32_t index,
                      bool allow_appending) {
   DisallowHeapAllocation no_allocation;
-  Object* raw_length = NULL;
+  Object* raw_length = nullptr;
   const char* elements_type = "array";
   if (obj->IsJSArray()) {
     JSArray* array = JSArray::cast(*obj);
@@ -4298,11 +4323,11 @@ void ElementsAccessor::InitializeOncePerProcess() {
 
 
 void ElementsAccessor::TearDown() {
-  if (elements_accessors_ == NULL) return;
+  if (elements_accessors_ == nullptr) return;
 #define ACCESSOR_DELETE(Class, Kind, Store) delete elements_accessors_[Kind];
   ELEMENTS_LIST(ACCESSOR_DELETE)
 #undef ACCESSOR_DELETE
-  elements_accessors_ = NULL;
+  elements_accessors_ = nullptr;
 }
 
 Handle<JSArray> ElementsAccessor::Concat(Isolate* isolate, Arguments* args,
@@ -4357,6 +4382,6 @@ Handle<JSArray> ElementsAccessor::Concat(Isolate* isolate, Arguments* args,
   return result_array;
 }
 
-ElementsAccessor** ElementsAccessor::elements_accessors_ = NULL;
+ElementsAccessor** ElementsAccessor::elements_accessors_ = nullptr;
 }  // namespace internal
 }  // namespace v8

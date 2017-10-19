@@ -424,9 +424,9 @@ static Node* Int32Input(RawMachineAssemblerTester<int32_t>* m, int index) {
     case 6:
       return m->Int32Constant(0x01234567);
     case 7:
-      return m->Load(MachineType::Int32(), m->PointerConstant(NULL));
+      return m->Load(MachineType::Int32(), m->PointerConstant(nullptr));
     default:
-      return NULL;
+      return nullptr;
   }
 }
 
@@ -486,9 +486,9 @@ static Node* Int64Input(RawMachineAssemblerTester<int64_t>* m, int index) {
     case 6:
       return m->Int64Constant(0x0123456789abcdefLL);
     case 7:
-      return m->Load(MachineType::Int64(), m->PointerConstant(NULL));
+      return m->Load(MachineType::Int64(), m->PointerConstant(nullptr));
     default:
-      return NULL;
+      return nullptr;
   }
 }
 
@@ -3700,9 +3700,9 @@ TEST(RunDeadFloat32Binops) {
 
   const Operator* ops[] = {m.machine()->Float32Add(), m.machine()->Float32Sub(),
                            m.machine()->Float32Mul(), m.machine()->Float32Div(),
-                           NULL};
+                           nullptr};
 
-  for (int i = 0; ops[i] != NULL; i++) {
+  for (int i = 0; ops[i] != nullptr; i++) {
     RawMachineAssemblerTester<int32_t> m;
     int constant = 0x53355 + i;
     m.AddNode(ops[i], m.Float32Constant(0.1f), m.Float32Constant(1.11f));
@@ -3717,9 +3717,9 @@ TEST(RunDeadFloat64Binops) {
 
   const Operator* ops[] = {m.machine()->Float64Add(), m.machine()->Float64Sub(),
                            m.machine()->Float64Mul(), m.machine()->Float64Div(),
-                           m.machine()->Float64Mod(), NULL};
+                           m.machine()->Float64Mod(), nullptr};
 
-  for (int i = 0; ops[i] != NULL; i++) {
+  for (int i = 0; ops[i] != nullptr; i++) {
     RawMachineAssemblerTester<int32_t> m;
     int constant = 0x53355 + i;
     m.AddNode(ops[i], m.Float64Constant(0.1), m.Float64Constant(1.11));
@@ -4924,7 +4924,7 @@ static int Float64CompareHelper(RawMachineAssemblerTester<int32_t>* m,
   Node* b =
       load_b ? m->Load(MachineType::Float64(), m->PointerConstant(&buffer[1]))
              : m->Float64Constant(y);
-  Node* cmp = NULL;
+  Node* cmp = nullptr;
   bool expected = false;
   switch (test_case) {
     // Equal tests.
@@ -5093,7 +5093,7 @@ static void IntPtrCompare(intptr_t left, intptr_t right) {
                                       MachineType::Pointer());
     Node* p0 = m.Parameter(0);
     Node* p1 = m.Parameter(1);
-    Node* res = NULL;
+    Node* res = nullptr;
     bool expected = false;
     switch (test) {
       case 0:
@@ -6902,16 +6902,17 @@ TEST(Regression6640) {
 
   int32_t old_value = 0;
   int32_t new_value = 1;
-  Node* c = m.RelocatableInt32Constant(old_value,
-                                       RelocInfo::WASM_MEMORY_SIZE_REFERENCE);
+  Node* c = m.RelocatableInt32Constant(
+      old_value, RelocInfo::WASM_FUNCTION_TABLE_SIZE_REFERENCE);
   m.Return(m.Word32Equal(c, c));
 
   // Patch the code.
   Handle<Code> code = m.GetCode();
-  for (RelocIterator it(*code, 1 << RelocInfo::WASM_MEMORY_SIZE_REFERENCE);
+  for (RelocIterator it(*code,
+                        1 << RelocInfo::WASM_FUNCTION_TABLE_SIZE_REFERENCE);
        !it.done(); it.next()) {
-    it.rinfo()->update_wasm_memory_size(code->GetIsolate(), old_value,
-                                        new_value, FLUSH_ICACHE_IF_NEEDED);
+    it.rinfo()->update_wasm_function_table_size_reference(
+        code->GetIsolate(), old_value, new_value, FLUSH_ICACHE_IF_NEEDED);
   }
 
   CHECK(m.Call());

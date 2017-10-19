@@ -211,11 +211,6 @@ void AstTraversalVisitor<Subclass>::VisitSwitchStatement(
 }
 
 template <class Subclass>
-void AstTraversalVisitor<Subclass>::VisitCaseClause(CaseClause* clause) {
-  UNREACHABLE();
-}
-
-template <class Subclass>
 void AstTraversalVisitor<Subclass>::VisitDoWhileStatement(
     DoWhileStatement* stmt) {
   PROCESS_NODE(stmt);
@@ -233,13 +228,13 @@ void AstTraversalVisitor<Subclass>::VisitWhileStatement(WhileStatement* stmt) {
 template <class Subclass>
 void AstTraversalVisitor<Subclass>::VisitForStatement(ForStatement* stmt) {
   PROCESS_NODE(stmt);
-  if (stmt->init() != NULL) {
+  if (stmt->init() != nullptr) {
     RECURSE(Visit(stmt->init()));
   }
-  if (stmt->cond() != NULL) {
+  if (stmt->cond() != nullptr) {
     RECURSE(Visit(stmt->cond()));
   }
-  if (stmt->next() != NULL) {
+  if (stmt->next() != nullptr) {
     RECURSE(Visit(stmt->next()));
   }
   RECURSE(Visit(stmt->body()));
@@ -494,6 +489,12 @@ template <class Subclass>
 void AstTraversalVisitor<Subclass>::VisitGetIterator(GetIterator* expr) {
   PROCESS_EXPRESSION(expr);
   RECURSE_EXPRESSION(Visit(expr->iterable()));
+}
+
+template <class Subclass>
+void AstTraversalVisitor<Subclass>::VisitGetTemplateObject(
+    GetTemplateObject* expr) {
+  PROCESS_EXPRESSION(expr);
 }
 
 template <class Subclass>

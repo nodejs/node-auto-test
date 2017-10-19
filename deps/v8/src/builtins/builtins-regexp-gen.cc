@@ -9,6 +9,9 @@
 #include "src/builtins/builtins.h"
 #include "src/code-factory.h"
 #include "src/code-stub-assembler.h"
+#include "src/counters.h"
+#include "src/factory-inl.h"
+#include "src/objects/js-regexp.h"
 #include "src/objects/regexp-match-info.h"
 #include "src/regexp/regexp-macro-assembler.h"
 
@@ -116,7 +119,7 @@ void RegExpBuiltinsAssembler::SlowStoreLastIndex(Node* context, Node* regexp,
   // Store through runtime.
   // TODO(ishell): Use SetPropertyStub here once available.
   Node* const name = HeapConstant(isolate()->factory()->lastIndex_string());
-  Node* const language_mode = SmiConstant(STRICT);
+  Node* const language_mode = SmiConstant(Smi::FromEnum(LanguageMode::kStrict));
   CallRuntime(Runtime::kSetProperty, context, regexp, name, value,
               language_mode);
 }
@@ -308,7 +311,7 @@ Node* RegExpBuiltinsAssembler::RegExpExecInternal(Node* const context,
 #ifdef V8_INTERPRETED_REGEXP
   return CallRuntime(Runtime::kRegExpExec, context, regexp, string, last_index,
                      match_info);
-#else   // V8_INTERPRETED_REGEXP
+#else  // V8_INTERPRETED_REGEXP
   CSA_ASSERT(this, TaggedIsNotSmi(regexp));
   CSA_ASSERT(this, IsJSRegExp(regexp));
 
@@ -1704,7 +1707,7 @@ Node* RegExpBuiltinsAssembler::RegExpExec(Node* context, Node* regexp,
     GotoIf(WordEqual(result, NullConstant()), &out);
 
     ThrowIfNotJSReceiver(context, result,
-                         MessageTemplate::kInvalidRegExpExecResult, "unused");
+                         MessageTemplate::kInvalidRegExpExecResult, "");
 
     Goto(&out);
   }
@@ -1904,7 +1907,7 @@ class GrowableFixedArray {
 
     Node* const result_length = a->SmiTag(length());
     Node* const result = a->AllocateUninitializedJSArrayWithoutElements(
-        kind, array_map, result_length, nullptr);
+        array_map, result_length, nullptr);
 
     // Note: We do not currently shrink the fixed array.
 
@@ -1954,18 +1957,13 @@ class GrowableFixedArray {
     CSA_ASSERT(a, a->IntPtrGreaterThan(new_capacity, a->IntPtrConstant(0)));
     CSA_ASSERT(a, a->IntPtrGreaterThanOrEqual(new_capacity, element_count));
 
-    const ElementsKind kind = PACKED_ELEMENTS;
-    const WriteBarrierMode barrier_mode = UPDATE_WRITE_BARRIER;
-    const CodeStubAssembler::ParameterMode mode =
-        CodeStubAssembler::INTPTR_PARAMETERS;
-    const CodeStubAssembler::AllocationFlags flags =
-        CodeStubAssembler::kAllowLargeObjectAllocation;
-
     Node* const from_array = var_array_.value();
-    Node* const to_array =
-        a->AllocateFixedArray(kind, new_capacity, mode, flags);
-    a->CopyFixedArrayElements(kind, from_array, kind, to_array, element_count,
-                              new_capacity, barrier_mode, mode);
+
+    CodeStubAssembler::ExtractFixedArrayFlags flags;
+    flags |= CodeStubAssembler::ExtractFixedArrayFlag::kFixedArrays;
+    flags |= CodeStubAssembler::ExtractFixedArrayFlag::kForceCOWCopy;
+    Node* to_array = a->ExtractFixedArray(from_array, nullptr, element_count,
+                                          new_capacity, flags);
 
     return to_array;
   }
@@ -2061,7 +2059,7 @@ void RegExpBuiltinsAssembler::RegExpPrototypeMatchBody(Node* const context,
             Node* const match = LoadFixedArrayElement(result_fixed_array, 0);
 
             // The match is guaranteed to be a string on the fast path.
-            CSA_ASSERT(this, IsStringInstanceType(LoadInstanceType(match)));
+            CSA_ASSERT(this, IsString(match));
 
             var_match.Bind(match);
             Goto(&if_didmatch);
@@ -2151,10 +2149,23 @@ TF_BUILTIN(RegExpPrototypeMatch, RegExpBuiltinsAssembler) {
   BranchIfFastRegExp(context, receiver, &fast_path, &slow_path);
 
   BIND(&fast_path);
-  RegExpPrototypeMatchBody(context, receiver, string, true);
+  // TODO(pwong): Could be optimized to remove the overhead of calling the
+  //              builtin (at the cost of a larger builtin).
+  Return(CallBuiltin(Builtins::kRegExpMatchFast, context, receiver, string));
 
   BIND(&slow_path);
   RegExpPrototypeMatchBody(context, receiver, string, false);
+}
+
+// Helper that skips a few initial checks. and assumes...
+// 1) receiver is a "fast" RegExp
+// 2) pattern is a string
+TF_BUILTIN(RegExpMatchFast, RegExpBuiltinsAssembler) {
+  Node* const receiver = Parameter(Descriptor::kReceiver);
+  Node* const string = Parameter(Descriptor::kPattern);
+  Node* const context = Parameter(Descriptor::kContext);
+
+  RegExpPrototypeMatchBody(context, receiver, string, true);
 }
 
 void RegExpBuiltinsAssembler::RegExpPrototypeSearchBodyFast(
@@ -2206,9 +2217,10 @@ void RegExpBuiltinsAssembler::RegExpPrototypeSearchBodySlow(
 
   // Ensure last index is 0.
   {
-    Label next(this);
-    GotoIf(SameValue(previous_last_index, smi_zero), &next);
+    Label next(this), slow(this, Label::kDeferred);
+    BranchIfSameValue(previous_last_index, smi_zero, &next, &slow);
 
+    BIND(&slow);
     SlowStoreLastIndex(context, regexp, smi_zero);
     Goto(&next);
     BIND(&next);
@@ -2219,14 +2231,14 @@ void RegExpBuiltinsAssembler::RegExpPrototypeSearchBodySlow(
 
   // Reset last index if necessary.
   {
-    Label next(this);
+    Label next(this), slow(this, Label::kDeferred);
     Node* const current_last_index = SlowLoadLastIndex(context, regexp);
 
-    GotoIf(SameValue(current_last_index, previous_last_index), &next);
+    BranchIfSameValue(current_last_index, previous_last_index, &next, &slow);
 
+    BIND(&slow);
     SlowStoreLastIndex(context, regexp, previous_last_index);
     Goto(&next);
-
     BIND(&next);
   }
 
@@ -2278,10 +2290,23 @@ TF_BUILTIN(RegExpPrototypeSearch, RegExpBuiltinsAssembler) {
   BranchIfFastRegExp(context, receiver, &fast_path, &slow_path);
 
   BIND(&fast_path);
-  RegExpPrototypeSearchBodyFast(context, receiver, string);
+  // TODO(pwong): Could be optimized to remove the overhead of calling the
+  //              builtin (at the cost of a larger builtin).
+  Return(CallBuiltin(Builtins::kRegExpSearchFast, context, receiver, string));
 
   BIND(&slow_path);
   RegExpPrototypeSearchBodySlow(context, receiver, string);
+}
+
+// Helper that skips a few initial checks. and assumes...
+// 1) receiver is a "fast" RegExp
+// 2) pattern is a string
+TF_BUILTIN(RegExpSearchFast, RegExpBuiltinsAssembler) {
+  Node* const receiver = Parameter(Descriptor::kReceiver);
+  Node* const string = Parameter(Descriptor::kPattern);
+  Node* const context = Parameter(Descriptor::kContext);
+
+  RegExpPrototypeSearchBodyFast(context, receiver, string);
 }
 
 // Generates the fast path for @@split. {regexp} is an unmodified, non-sticky

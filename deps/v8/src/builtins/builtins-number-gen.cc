@@ -6,6 +6,7 @@
 #include "src/builtins/builtins.h"
 #include "src/code-stub-assembler.h"
 #include "src/ic/binary-op-assembler.h"
+#include "src/parsing/token.h"
 
 namespace v8 {
 namespace internal {
@@ -20,29 +21,63 @@ class NumberBuiltinsAssembler : public CodeStubAssembler {
 
  protected:
   template <typename Descriptor>
-  void BitwiseOp(std::function<Node*(Node* lhs, Node* rhs)> body,
-                 Signedness signed_result = kSigned) {
+  void BitwiseOp(Token::Value op) {
     Node* left = Parameter(Descriptor::kLeft);
     Node* right = Parameter(Descriptor::kRight);
     Node* context = Parameter(Descriptor::kContext);
 
-    Node* lhs_value = TruncateTaggedToWord32(context, left);
-    Node* rhs_value = TruncateTaggedToWord32(context, right);
-    Node* value = body(lhs_value, rhs_value);
-    Node* result = signed_result == kSigned ? ChangeInt32ToTagged(value)
-                                            : ChangeUint32ToTagged(value);
-    Return(result);
-  }
+    VARIABLE(var_left_bigint, MachineRepresentation::kTagged, left);
+    VARIABLE(var_right_bigint, MachineRepresentation::kTagged, right);
+    Label if_left_bigint(this), do_bigint_op(this);
 
-  template <typename Descriptor>
-  void BitwiseShiftOp(std::function<Node*(Node* lhs, Node* shift_count)> body,
-                      Signedness signed_result = kSigned) {
-    BitwiseOp<Descriptor>(
-        [=](Node* lhs, Node* rhs) {
-          Node* shift_count = Word32And(rhs, Int32Constant(0x1f));
-          return body(lhs, shift_count);
-        },
-        signed_result);
+    Node* left32 = TaggedToWord32OrBigInt(context, left, &if_left_bigint,
+                                          &var_left_bigint);
+    Node* right32 = TaggedToWord32OrBigInt(context, right, &do_bigint_op,
+                                           &var_right_bigint);
+    // Number case.
+    Node* result;
+    switch (op) {
+      case Token::BIT_AND:
+        result = ChangeInt32ToTagged(Word32And(left32, right32));
+        break;
+      case Token::BIT_OR:
+        result = ChangeInt32ToTagged(Word32Or(left32, right32));
+        break;
+      case Token::BIT_XOR:
+        result = ChangeInt32ToTagged(Word32Xor(left32, right32));
+        break;
+      case Token::SHL:
+        result = ChangeInt32ToTagged(
+            Word32Shl(left32, Word32And(right32, Int32Constant(0x1f))));
+        break;
+      case Token::SAR:
+        result = ChangeInt32ToTagged(
+            Word32Sar(left32, Word32And(right32, Int32Constant(0x1f))));
+        break;
+      case Token::SHR:
+        result = ChangeUint32ToTagged(
+            Word32Shr(left32, Word32And(right32, Int32Constant(0x1f))));
+        break;
+      default:
+        UNREACHABLE();
+    }
+    Return(result);
+
+    // BigInt cases.
+    BIND(&if_left_bigint);
+    GotoIf(TaggedIsSmi(right), &do_bigint_op);
+    Node* right_map = LoadMap(right);
+    GotoIf(IsHeapNumberMap(right_map), &do_bigint_op);
+    Node* right_type = LoadMapInstanceType(right_map);
+    GotoIf(IsBigIntInstanceType(right_type), &do_bigint_op);
+    var_right_bigint.Bind(
+        CallBuiltin(Builtins::kNonNumberToNumeric, context, right));
+    Goto(&do_bigint_op);
+
+    BIND(&do_bigint_op);
+    Return(CallRuntime(Runtime::kBigIntBinaryOp, context,
+                       var_left_bigint.value(), var_right_bigint.value(),
+                       SmiConstant(op)));
   }
 
   template <typename Descriptor>
@@ -57,7 +92,48 @@ class NumberBuiltinsAssembler : public CodeStubAssembler {
   template <typename Descriptor>
   void BinaryOp(Label* smis, Variable* var_left, Variable* var_right,
                 Label* doubles, Variable* var_left_double,
-                Variable* var_right_double);
+                Variable* var_right_double, Label* bigints);
+
+  // Similar to CodeStubAssembler::TruncateTaggedToWord32, but BigInt aware.
+  // Jumps to {bigint} with {var_bigint_result} populated if it encounters
+  // a BigInt.
+  Node* TaggedToWord32OrBigInt(Node* context, Node* value, Label* bigint,
+                               Variable* var_bigint_result) {
+    // We might need to loop once due to ToNumeric conversion.
+    VARIABLE(var_value, MachineRepresentation::kTagged, value);
+    VARIABLE(var_result, MachineRepresentation::kWord32);
+    Label loop(this, &var_value), done(this, &var_result);
+    Goto(&loop);
+    BIND(&loop);
+    {
+      value = var_value.value();
+      Label not_smi(this), is_heap_number(this), is_bigint(this);
+      GotoIf(TaggedIsNotSmi(value), &not_smi);
+      // {value} is a Smi.
+      var_result.Bind(SmiToWord32(value));
+      Goto(&done);
+
+      BIND(&not_smi);
+      Node* map = LoadMap(value);
+      GotoIf(IsHeapNumberMap(map), &is_heap_number);
+      Node* instance_type = LoadMapInstanceType(map);
+      GotoIf(IsBigIntInstanceType(instance_type), &is_bigint);
+      // Neither HeapNumber nor BigInt -> convert to Numeric.
+      var_value.Bind(
+          CallBuiltin(Builtins::kNonNumberToNumeric, context, value));
+      Goto(&loop);
+
+      BIND(&is_heap_number);
+      var_result.Bind(TruncateHeapNumberValueToWord32(value));
+      Goto(&done);
+
+      BIND(&is_bigint);
+      var_bigint_result->Bind(value);
+      Goto(bigint);
+    }
+    BIND(&done);
+    return var_result.value();
+  }
 };
 
 // ES6 #sec-number.isfinite
@@ -82,6 +158,11 @@ TF_BUILTIN(NumberIsFinite, CodeStubAssembler) {
 
   BIND(&return_false);
   Return(BooleanConstant(false));
+}
+
+TF_BUILTIN(AllocateHeapNumber, CodeStubAssembler) {
+  Node* result = AllocateHeapNumber();
+  Return(result);
 }
 
 // ES6 #sec-number.isinteger
@@ -366,8 +447,8 @@ class AddStubAssembler : public CodeStubAssembler {
 
   void ConvertNonReceiverAndLoop(Variable* var_value, Label* loop,
                                  Node* context) {
-    var_value->Bind(
-        CallBuiltin(Builtins::kNonNumberToNumber, context, var_value->value()));
+    var_value->Bind(CallBuiltin(Builtins::kNonNumberToNumeric, context,
+                                var_value->value()));
     Goto(loop);
   }
 
@@ -396,12 +477,13 @@ TF_BUILTIN(Add, AddStubAssembler) {
   VARIABLE(var_right_double, MachineRepresentation::kFloat64);
 
   // We might need to loop several times due to ToPrimitive, ToString and/or
-  // ToNumber conversions.
+  // ToNumeric conversions.
   VARIABLE(var_result, MachineRepresentation::kTagged);
   Variable* loop_vars[2] = {&var_left, &var_right};
   Label loop(this, 2, loop_vars),
       string_add_convert_left(this, Label::kDeferred),
-      string_add_convert_right(this, Label::kDeferred);
+      string_add_convert_right(this, Label::kDeferred),
+      do_bigint_add(this, Label::kDeferred);
   Goto(&loop);
   BIND(&loop);
   {
@@ -451,6 +533,7 @@ TF_BUILTIN(Add, AddStubAssembler) {
           Node* right_instance_type = LoadMapInstanceType(right_map);
           GotoIf(IsStringInstanceType(right_instance_type),
                  &string_add_convert_left);
+          GotoIf(IsBigIntInstanceType(right_instance_type), &do_bigint_add);
           ConvertAndLoop(&var_right, right_instance_type, &loop, context);
         }
       }  // if_right_heapobject
@@ -477,7 +560,8 @@ TF_BUILTIN(Add, AddStubAssembler) {
           Node* left_instance_type = LoadMapInstanceType(left_map);
           GotoIf(IsStringInstanceType(left_instance_type),
                  &string_add_convert_right);
-          // {left} is neither a Number nor a String, and {right} is a Smi.
+          GotoIf(IsBigIntInstanceType(left_instance_type), &do_bigint_add);
+          // {left} is neither a Numeric nor a String, and {right} is a Smi.
           ConvertAndLoop(&var_left, left_instance_type, &loop, context);
         }
       }  // if_right_smi
@@ -504,6 +588,7 @@ TF_BUILTIN(Add, AddStubAssembler) {
             Node* right_instance_type = LoadMapInstanceType(right_map);
             GotoIf(IsStringInstanceType(right_instance_type),
                    &string_add_convert_left);
+            GotoIf(IsBigIntInstanceType(right_instance_type), &do_bigint_add);
             // {left} is a HeapNumber, {right} is neither Number nor String.
             ConvertAndLoop(&var_right, right_instance_type, &loop, context);
           }
@@ -511,18 +596,29 @@ TF_BUILTIN(Add, AddStubAssembler) {
 
         BIND(&if_left_not_number);
         {
+          Label if_left_bigint(this);
           Node* left_instance_type = LoadMapInstanceType(left_map);
           GotoIf(IsStringInstanceType(left_instance_type),
                  &string_add_convert_right);
           Node* right_instance_type = LoadMapInstanceType(right_map);
           GotoIf(IsStringInstanceType(right_instance_type),
                  &string_add_convert_left);
+          GotoIf(IsBigIntInstanceType(left_instance_type), &if_left_bigint);
           Label if_left_not_receiver(this, Label::kDeferred);
           Label if_right_not_receiver(this, Label::kDeferred);
           GotoIfNot(IsJSReceiverInstanceType(left_instance_type),
                     &if_left_not_receiver);
           // {left} is a JSReceiver, convert it first.
           ConvertReceiverAndLoop(&var_left, &loop, context);
+
+          BIND(&if_left_bigint);
+          {
+            // {right} is a HeapObject, but not a String. Jump to
+            // {do_bigint_add} if {right} is already a Numeric.
+            GotoIf(IsBigIntInstanceType(right_instance_type), &do_bigint_add);
+            GotoIf(IsHeapNumberMap(right_map), &do_bigint_add);
+            ConvertAndLoop(&var_right, right_instance_type, &loop, context);
+          }
 
           BIND(&if_left_not_receiver);
           GotoIfNot(IsJSReceiverInstanceType(right_instance_type),
@@ -554,6 +650,12 @@ TF_BUILTIN(Add, AddStubAssembler) {
     Return(CallStub(callable, context, var_left.value(), var_right.value()));
   }
 
+  BIND(&do_bigint_add);
+  {
+    Return(CallRuntime(Runtime::kBigIntBinaryOp, context, var_left.value(),
+                       var_right.value(), SmiConstant(Token::ADD)));
+  }
+
   BIND(&do_double_add);
   {
     Node* value = Float64Add(var_left_double.value(), var_right_double.value());
@@ -565,9 +667,10 @@ template <typename Descriptor>
 void NumberBuiltinsAssembler::BinaryOp(Label* smis, Variable* var_left,
                                        Variable* var_right, Label* doubles,
                                        Variable* var_left_double,
-                                       Variable* var_right_double) {
-  DCHECK(var_left->rep() == MachineRepresentation::kTagged);
-  DCHECK(var_right->rep() == MachineRepresentation::kTagged);
+                                       Variable* var_right_double,
+                                       Label* bigints) {
+  DCHECK_EQ(var_left->rep(), MachineRepresentation::kTagged);
+  DCHECK_EQ(var_right->rep(), MachineRepresentation::kTagged);
 
   Node* context = Parameter(Descriptor::kContext);
   var_left->Bind(Parameter(Descriptor::kLeft));
@@ -610,15 +713,29 @@ void NumberBuiltinsAssembler::BinaryOp(Label* smis, Variable* var_left,
 
   BIND(&left_not_number);
   {
+    Label left_bigint(this);
+    GotoIf(IsBigInt(var_left->value()), &left_bigint);
     var_left->Bind(
-        CallBuiltin(Builtins::kNonNumberToNumber, context, var_left->value()));
+        CallBuiltin(Builtins::kNonNumberToNumeric, context, var_left->value()));
     Goto(&loop);
+
+    BIND(&left_bigint);
+    {
+      // Jump to {bigints} if {var_right} is already a Numeric.
+      GotoIf(TaggedIsSmi(var_right->value()), bigints);
+      GotoIf(IsBigInt(var_right->value()), bigints);
+      GotoIf(IsHeapNumber(var_right->value()), bigints);
+      var_right->Bind(CallBuiltin(Builtins::kNonNumberToNumeric, context,
+                                  var_right->value()));
+      Goto(&loop);
+    }
   }
 
   BIND(&right_not_number);
   {
-    var_right->Bind(
-        CallBuiltin(Builtins::kNonNumberToNumber, context, var_right->value()));
+    GotoIf(IsBigInt(var_right->value()), bigints);
+    var_right->Bind(CallBuiltin(Builtins::kNonNumberToNumeric, context,
+                                var_right->value()));
     Goto(&loop);
   }
 }
@@ -628,10 +745,10 @@ TF_BUILTIN(Subtract, NumberBuiltinsAssembler) {
   VARIABLE(var_right, MachineRepresentation::kTagged);
   VARIABLE(var_left_double, MachineRepresentation::kFloat64);
   VARIABLE(var_right_double, MachineRepresentation::kFloat64);
-  Label do_smi_sub(this), do_double_sub(this);
+  Label do_smi_sub(this), do_double_sub(this), do_bigint_sub(this);
 
   BinaryOp<Descriptor>(&do_smi_sub, &var_left, &var_right, &do_double_sub,
-                       &var_left_double, &var_right_double);
+                       &var_left_double, &var_right_double, &do_bigint_sub);
 
   BIND(&do_smi_sub);
   {
@@ -658,6 +775,13 @@ TF_BUILTIN(Subtract, NumberBuiltinsAssembler) {
     Node* value = Float64Sub(var_left_double.value(), var_right_double.value());
     Return(AllocateHeapNumberWithValue(value));
   }
+
+  BIND(&do_bigint_sub);
+  {
+    Node* context = Parameter(Descriptor::kContext);
+    Return(CallRuntime(Runtime::kBigIntBinaryOp, context, var_left.value(),
+                       var_right.value(), SmiConstant(Token::SUB)));
+  }
 }
 
 TF_BUILTIN(Multiply, NumberBuiltinsAssembler) {
@@ -665,10 +789,10 @@ TF_BUILTIN(Multiply, NumberBuiltinsAssembler) {
   VARIABLE(var_right, MachineRepresentation::kTagged);
   VARIABLE(var_left_double, MachineRepresentation::kFloat64);
   VARIABLE(var_right_double, MachineRepresentation::kFloat64);
-  Label do_smi_mul(this), do_double_mul(this);
+  Label do_smi_mul(this), do_double_mul(this), do_bigint_mul(this);
 
   BinaryOp<Descriptor>(&do_smi_mul, &var_left, &var_right, &do_double_mul,
-                       &var_left_double, &var_right_double);
+                       &var_left_double, &var_right_double, &do_bigint_mul);
 
   BIND(&do_smi_mul);
   // The result is not necessarily a smi, in case of overflow.
@@ -677,6 +801,13 @@ TF_BUILTIN(Multiply, NumberBuiltinsAssembler) {
   BIND(&do_double_mul);
   Node* value = Float64Mul(var_left_double.value(), var_right_double.value());
   Return(AllocateHeapNumberWithValue(value));
+
+  BIND(&do_bigint_mul);
+  {
+    Node* context = Parameter(Descriptor::kContext);
+    Return(CallRuntime(Runtime::kBigIntBinaryOp, context, var_left.value(),
+                       var_right.value(), SmiConstant(Token::MUL)));
+  }
 }
 
 TF_BUILTIN(Divide, NumberBuiltinsAssembler) {
@@ -684,10 +815,10 @@ TF_BUILTIN(Divide, NumberBuiltinsAssembler) {
   VARIABLE(var_right, MachineRepresentation::kTagged);
   VARIABLE(var_left_double, MachineRepresentation::kFloat64);
   VARIABLE(var_right_double, MachineRepresentation::kFloat64);
-  Label do_smi_div(this), do_double_div(this);
+  Label do_smi_div(this), do_double_div(this), do_bigint_div(this);
 
   BinaryOp<Descriptor>(&do_smi_div, &var_left, &var_right, &do_double_div,
-                       &var_left_double, &var_right_double);
+                       &var_left_double, &var_right_double, &do_bigint_div);
 
   BIND(&do_smi_div);
   {
@@ -754,6 +885,13 @@ TF_BUILTIN(Divide, NumberBuiltinsAssembler) {
     Node* value = Float64Div(var_left_double.value(), var_right_double.value());
     Return(AllocateHeapNumberWithValue(value));
   }
+
+  BIND(&do_bigint_div);
+  {
+    Node* context = Parameter(Descriptor::kContext);
+    Return(CallRuntime(Runtime::kBigIntBinaryOp, context, var_left.value(),
+                       var_right.value(), SmiConstant(Token::DIV)));
+  }
 }
 
 TF_BUILTIN(Modulus, NumberBuiltinsAssembler) {
@@ -761,10 +899,10 @@ TF_BUILTIN(Modulus, NumberBuiltinsAssembler) {
   VARIABLE(var_right, MachineRepresentation::kTagged);
   VARIABLE(var_left_double, MachineRepresentation::kFloat64);
   VARIABLE(var_right_double, MachineRepresentation::kFloat64);
-  Label do_smi_mod(this), do_double_mod(this);
+  Label do_smi_mod(this), do_double_mod(this), do_bigint_mod(this);
 
   BinaryOp<Descriptor>(&do_smi_mod, &var_left, &var_right, &do_double_mod,
-                       &var_left_double, &var_right_double);
+                       &var_left_double, &var_right_double, &do_bigint_mod);
 
   BIND(&do_smi_mod);
   Return(SmiMod(var_left.value(), var_right.value()));
@@ -772,39 +910,37 @@ TF_BUILTIN(Modulus, NumberBuiltinsAssembler) {
   BIND(&do_double_mod);
   Node* value = Float64Mod(var_left_double.value(), var_right_double.value());
   Return(AllocateHeapNumberWithValue(value));
+
+  BIND(&do_bigint_mod);
+  {
+    Node* context = Parameter(Descriptor::kContext);
+    Return(CallRuntime(Runtime::kBigIntBinaryOp, context, var_left.value(),
+                       var_right.value(), SmiConstant(Token::MOD)));
+  }
 }
 
 TF_BUILTIN(ShiftLeft, NumberBuiltinsAssembler) {
-  BitwiseShiftOp<Descriptor>([=](Node* lhs, Node* shift_count) {
-    return Word32Shl(lhs, shift_count);
-  });
+  BitwiseOp<Descriptor>(Token::SHL);
 }
 
 TF_BUILTIN(ShiftRight, NumberBuiltinsAssembler) {
-  BitwiseShiftOp<Descriptor>([=](Node* lhs, Node* shift_count) {
-    return Word32Sar(lhs, shift_count);
-  });
+  BitwiseOp<Descriptor>(Token::SAR);
 }
 
 TF_BUILTIN(ShiftRightLogical, NumberBuiltinsAssembler) {
-  BitwiseShiftOp<Descriptor>(
-      [=](Node* lhs, Node* shift_count) { return Word32Shr(lhs, shift_count); },
-      kUnsigned);
+  BitwiseOp<Descriptor>(Token::SHR);
 }
 
 TF_BUILTIN(BitwiseAnd, NumberBuiltinsAssembler) {
-  BitwiseOp<Descriptor>(
-      [=](Node* lhs, Node* rhs) { return Word32And(lhs, rhs); });
+  BitwiseOp<Descriptor>(Token::BIT_AND);
 }
 
 TF_BUILTIN(BitwiseOr, NumberBuiltinsAssembler) {
-  BitwiseOp<Descriptor>(
-      [=](Node* lhs, Node* rhs) { return Word32Or(lhs, rhs); });
+  BitwiseOp<Descriptor>(Token::BIT_OR);
 }
 
 TF_BUILTIN(BitwiseXor, NumberBuiltinsAssembler) {
-  BitwiseOp<Descriptor>(
-      [=](Node* lhs, Node* rhs) { return Word32Xor(lhs, rhs); });
+  BitwiseOp<Descriptor>(Token::BIT_XOR);
 }
 
 TF_BUILTIN(LessThan, NumberBuiltinsAssembler) {

@@ -32,15 +32,8 @@ class V8_EXPORT_PRIVATE CodeFactory final {
   static Callable StoreGlobalIC(Isolate* isolate, LanguageMode mode);
   static Callable StoreGlobalICInOptimizedCode(Isolate* isolate,
                                                LanguageMode mode);
-  static Callable StoreIC(Isolate* isolate, LanguageMode mode);
-  static Callable StoreICInOptimizedCode(Isolate* isolate, LanguageMode mode);
-  static Callable StoreIC_Uninitialized(Isolate* isolate, LanguageMode mode);
   static Callable StoreOwnIC(Isolate* isolate);
   static Callable StoreOwnICInOptimizedCode(Isolate* isolate);
-  static Callable KeyedStoreIC(Isolate* isolate, LanguageMode mode);
-  static Callable KeyedStoreICInOptimizedCode(Isolate* isolate,
-                                              LanguageMode mode);
-  static Callable KeyedStoreIC_Megamorphic(Isolate* isolate, LanguageMode mode);
 
   static Callable ResumeGenerator(Isolate* isolate);
 
@@ -65,15 +58,9 @@ class V8_EXPORT_PRIVATE CodeFactory final {
                             StringAddFlags flags = STRING_ADD_CHECK_NONE,
                             PretenureFlag pretenure_flag = NOT_TENURED);
   static Callable StringCompare(Isolate* isolate, Token::Value token);
-  static Callable SubString(Isolate* isolate);
-
-  static Callable FastCloneShallowArray(Isolate* isolate,
-                                        AllocationSiteMode allocation_mode);
 
   static Callable FastNewFunctionContext(Isolate* isolate,
                                          ScopeType scope_type);
-
-  static Callable AllocateHeapNumber(Isolate* isolate);
 
   static Callable ArgumentAdaptor(Isolate* isolate);
   static Callable Call(Isolate* isolate,

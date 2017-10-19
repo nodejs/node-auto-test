@@ -16,8 +16,8 @@ namespace internal {
 
 Handle<String> PendingCompilationErrorHandler::ArgumentString(
     Isolate* isolate) {
-  if (arg_ != NULL) return arg_->string();
-  if (char_arg_ != NULL) {
+  if (arg_ != nullptr) return arg_->string();
+  if (char_arg_ != nullptr) {
     return isolate->factory()
         ->NewStringFromUtf8(CStrVector(char_arg_))
         .ToHandleChecked();
@@ -61,15 +61,18 @@ void PendingCompilationErrorHandler::ThrowPendingError(Isolate* isolate,
   Handle<Name> key_start_pos = factory->error_start_pos_symbol();
   JSObject::SetProperty(jserror, key_start_pos,
                         handle(Smi::FromInt(location.start_pos()), isolate),
-                        SLOPPY).Check();
+                        LanguageMode::kSloppy)
+      .Check();
 
   Handle<Name> key_end_pos = factory->error_end_pos_symbol();
   JSObject::SetProperty(jserror, key_end_pos,
                         handle(Smi::FromInt(location.end_pos()), isolate),
-                        SLOPPY).Check();
+                        LanguageMode::kSloppy)
+      .Check();
 
   Handle<Name> key_script = factory->error_script_symbol();
-  JSObject::SetProperty(jserror, key_script, script, SLOPPY).Check();
+  JSObject::SetProperty(jserror, key_script, script, LanguageMode::kSloppy)
+      .Check();
 
   isolate->Throw(*error, &location);
 }

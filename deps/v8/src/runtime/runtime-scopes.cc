@@ -82,7 +82,7 @@ Object* DeclareGlobal(
     if ((old_attributes & DONT_DELETE) != 0) {
       // Only allow reconfiguring globals to functions in user code (no
       // natives, which are marked as read-only).
-      DCHECK((attr & READ_ONLY) == 0);
+      DCHECK_EQ(attr & READ_ONLY, 0);
 
       // Check whether we can reconfigure the existing property into a
       // function.
@@ -387,7 +387,10 @@ std::unique_ptr<Handle<Object>[]> GetCallerArguments(Isolate* isolate,
 
     return param_data;
   } else {
-    it.AdvanceToArgumentsFrame();
+    if (it.frame()->has_adapted_arguments()) {
+      it.AdvanceOneFrame();
+      DCHECK(it.frame()->is_arguments_adaptor());
+    }
     frame = it.frame();
     int args_count = frame->ComputeParametersCount();
 
@@ -467,7 +470,7 @@ Handle<JSObject> NewSloppyArguments(Isolate* isolate, Handle<JSFunction> callee,
             }
           }
 
-          DCHECK(context_index >= 0);
+          DCHECK_GE(context_index, 0);
           arguments->set_the_hole(index);
           parameter_map->set(
               index + 2,
@@ -607,15 +610,20 @@ RUNTIME_FUNCTION(Runtime_NewSloppyArguments) {
 
 RUNTIME_FUNCTION(Runtime_NewArgumentsElements) {
   HandleScope scope(isolate);
-  DCHECK_EQ(2, args.length());
+  DCHECK_EQ(3, args.length());
   Object** frame = reinterpret_cast<Object**>(args[0]);
   CONVERT_SMI_ARG_CHECKED(length, 1);
+  CONVERT_SMI_ARG_CHECKED(mapped_count, 2);
   Handle<FixedArray> result =
       isolate->factory()->NewUninitializedFixedArray(length);
   int const offset = length + 1;
   DisallowHeapAllocation no_gc;
   WriteBarrierMode mode = result->GetWriteBarrierMode(no_gc);
-  for (int index = 0; index < length; ++index) {
+  int number_of_holes = Min(mapped_count, length);
+  for (int index = 0; index < number_of_holes; ++index) {
+    result->set_the_hole(isolate, index);
+  }
+  for (int index = number_of_holes; index < length; ++index) {
     result->set(index, frame[offset - index], mode);
   }
   return *result;
@@ -1004,7 +1012,8 @@ RUNTIME_FUNCTION(Runtime_StoreLookupSlot_Sloppy) {
   DCHECK_EQ(2, args.length());
   CONVERT_ARG_HANDLE_CHECKED(String, name, 0);
   CONVERT_ARG_HANDLE_CHECKED(Object, value, 1);
-  RETURN_RESULT_OR_FAILURE(isolate, StoreLookupSlot(name, value, SLOPPY));
+  RETURN_RESULT_OR_FAILURE(isolate,
+                           StoreLookupSlot(name, value, LanguageMode::kSloppy));
 }
 
 // Store into a dynamic context for sloppy-mode block-scoped function hoisting
@@ -1017,8 +1026,9 @@ RUNTIME_FUNCTION(Runtime_StoreLookupSlot_SloppyHoisting) {
   CONVERT_ARG_HANDLE_CHECKED(Object, value, 1);
   const ContextLookupFlags lookup_flags = static_cast<ContextLookupFlags>(
       FOLLOW_CONTEXT_CHAIN | STOP_AT_DECLARATION_SCOPE | SKIP_WITH_CONTEXT);
-  RETURN_RESULT_OR_FAILURE(isolate,
-                           StoreLookupSlot(name, value, SLOPPY, lookup_flags));
+  RETURN_RESULT_OR_FAILURE(
+      isolate,
+      StoreLookupSlot(name, value, LanguageMode::kSloppy, lookup_flags));
 }
 
 RUNTIME_FUNCTION(Runtime_StoreLookupSlot_Strict) {
@@ -1026,7 +1036,8 @@ RUNTIME_FUNCTION(Runtime_StoreLookupSlot_Strict) {
   DCHECK_EQ(2, args.length());
   CONVERT_ARG_HANDLE_CHECKED(String, name, 0);
   CONVERT_ARG_HANDLE_CHECKED(Object, value, 1);
-  RETURN_RESULT_OR_FAILURE(isolate, StoreLookupSlot(name, value, STRICT));
+  RETURN_RESULT_OR_FAILURE(isolate,
+                           StoreLookupSlot(name, value, LanguageMode::kStrict));
 }
 
 }  // namespace internal

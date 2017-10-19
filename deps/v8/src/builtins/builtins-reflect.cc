@@ -67,7 +67,7 @@ BUILTIN(ReflectDeleteProperty) {
                                      Object::ToName(isolate, key));
 
   Maybe<bool> result = JSReceiver::DeletePropertyOrElement(
-      Handle<JSReceiver>::cast(target), name, SLOPPY);
+      Handle<JSReceiver>::cast(target), name, LanguageMode::kSloppy);
   MAYBE_RETURN(result, isolate->heap()->exception());
   return *isolate->factory()->ToBoolean(result.FromJust());
 }
@@ -136,30 +136,6 @@ BUILTIN(ReflectGetPrototypeOf) {
   Handle<JSReceiver> receiver = Handle<JSReceiver>::cast(target);
   RETURN_RESULT_OR_FAILURE(isolate,
                            JSReceiver::GetPrototype(isolate, receiver));
-}
-
-// ES6 section 26.1.9 Reflect.has
-BUILTIN(ReflectHas) {
-  HandleScope scope(isolate);
-  DCHECK_EQ(3, args.length());
-  Handle<Object> target = args.at(1);
-  Handle<Object> key = args.at(2);
-
-  if (!target->IsJSReceiver()) {
-    THROW_NEW_ERROR_RETURN_FAILURE(
-        isolate, NewTypeError(MessageTemplate::kCalledOnNonObject,
-                              isolate->factory()->NewStringFromAsciiChecked(
-                                  "Reflect.has")));
-  }
-
-  Handle<Name> name;
-  ASSIGN_RETURN_FAILURE_ON_EXCEPTION(isolate, name,
-                                     Object::ToName(isolate, key));
-
-  Maybe<bool> result =
-      JSReceiver::HasProperty(Handle<JSReceiver>::cast(target), name);
-  return result.IsJust() ? *isolate->factory()->ToBoolean(result.FromJust())
-                         : isolate->heap()->exception();
 }
 
 // ES6 section 26.1.10 Reflect.isExtensible
@@ -244,7 +220,7 @@ BUILTIN(ReflectSet) {
   LookupIterator it = LookupIterator::PropertyOrElement(
       isolate, receiver, name, Handle<JSReceiver>::cast(target));
   Maybe<bool> result = Object::SetSuperProperty(
-      &it, value, SLOPPY, Object::MAY_BE_STORE_FROM_KEYED);
+      &it, value, LanguageMode::kSloppy, Object::MAY_BE_STORE_FROM_KEYED);
   MAYBE_RETURN(result, isolate->heap()->exception());
   return *isolate->factory()->ToBoolean(result.FromJust());
 }

@@ -811,8 +811,8 @@ TEST(InterpreterUnaryOpFeedback) {
     Handle<Object> any_feedback_value;
   };
   TestCase const kTestCases[] = {
-      {Token::Value::ADD, smi_one, smi_max, number, str},
-      {Token::Value::SUB, smi_one, smi_min, number, str}};
+      {Token::Value::INC, smi_one, smi_max, number, str},
+      {Token::Value::DEC, smi_one, smi_min, number, str}};
   for (TestCase const& test_case : kTestCases) {
     BytecodeArrayBuilder builder(isolate, zone, 4, 0);
 
@@ -826,13 +826,13 @@ TEST(InterpreterUnaryOpFeedback) {
         i::NewFeedbackMetadata(isolate, &feedback_spec);
 
     builder.LoadAccumulatorWithRegister(builder.Receiver())
-        .CountOperation(test_case.op, GetIndex(slot0))
+        .UnaryOperation(test_case.op, GetIndex(slot0))
         .LoadAccumulatorWithRegister(builder.Parameter(0))
-        .CountOperation(test_case.op, GetIndex(slot1))
+        .UnaryOperation(test_case.op, GetIndex(slot1))
         .LoadAccumulatorWithRegister(builder.Parameter(1))
-        .CountOperation(test_case.op, GetIndex(slot2))
+        .UnaryOperation(test_case.op, GetIndex(slot2))
         .LoadAccumulatorWithRegister(builder.Parameter(2))
-        .CountOperation(test_case.op, GetIndex(slot3))
+        .UnaryOperation(test_case.op, GetIndex(slot3))
         .Return();
 
     Handle<BytecodeArray> bytecode_array = builder.ToBytecodeArray(isolate);
@@ -1141,7 +1141,7 @@ TEST(InterpreterStoreNamedProperty) {
                               isolate->heap()->HashSeed());
 
   FeedbackVectorSpec feedback_spec(zone);
-  FeedbackSlot slot = feedback_spec.AddStoreICSlot(SLOPPY);
+  FeedbackSlot slot = feedback_spec.AddStoreICSlot(LanguageMode::kSloppy);
 
   Handle<i::FeedbackMetadata> metadata =
       NewFeedbackMetadata(isolate, &feedback_spec);
@@ -1151,7 +1151,8 @@ TEST(InterpreterStoreNamedProperty) {
   BytecodeArrayBuilder builder(isolate, zone, 1, 0);
 
   builder.LoadLiteral(Smi::FromInt(999))
-      .StoreNamedProperty(builder.Receiver(), name, GetIndex(slot), STRICT)
+      .StoreNamedProperty(builder.Receiver(), name, GetIndex(slot),
+                          LanguageMode::kStrict)
       .Return();
   ast_factory.Internalize(isolate);
   Handle<BytecodeArray> bytecode_array = builder.ToBytecodeArray(isolate);
@@ -1203,7 +1204,7 @@ TEST(InterpreterStoreKeyedProperty) {
                               isolate->heap()->HashSeed());
 
   FeedbackVectorSpec feedback_spec(zone);
-  FeedbackSlot slot = feedback_spec.AddKeyedStoreICSlot(SLOPPY);
+  FeedbackSlot slot = feedback_spec.AddKeyedStoreICSlot(LanguageMode::kSloppy);
 
   Handle<i::FeedbackMetadata> metadata =
       NewFeedbackMetadata(isolate, &feedback_spec);
@@ -1216,7 +1217,7 @@ TEST(InterpreterStoreKeyedProperty) {
       .StoreAccumulatorInRegister(Register(0))
       .LoadLiteral(Smi::FromInt(999))
       .StoreKeyedProperty(builder.Receiver(), Register(0), GetIndex(slot),
-                          i::SLOPPY)
+                          i::LanguageMode::kSloppy)
       .Return();
   ast_factory.Internalize(isolate);
   Handle<BytecodeArray> bytecode_array = builder.ToBytecodeArray(isolate);

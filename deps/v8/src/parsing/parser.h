@@ -85,7 +85,7 @@ class ParseData {
     if (pd->IsSane()) return pd;
     cached_data->Reject();
     delete pd;
-    return NULL;
+    return nullptr;
   }
 
   void Initialize();
@@ -190,9 +190,9 @@ class V8_EXPORT_PRIVATE Parser : public NON_EXPORTED_BASE(ParserBase<Parser>) {
   explicit Parser(ParseInfo* info);
   ~Parser() {
     delete reusable_preparser_;
-    reusable_preparser_ = NULL;
+    reusable_preparser_ = nullptr;
     delete cached_parse_data_;
-    cached_parse_data_ = NULL;
+    cached_parse_data_ = nullptr;
   }
 
   static bool IsPreParser() { return false; }
@@ -257,7 +257,7 @@ class V8_EXPORT_PRIVATE Parser : public NON_EXPORTED_BASE(ParserBase<Parser>) {
 
   void PrepareGeneratorVariables();
 
-  // Returns NULL if parsing failed.
+  // Returns nullptr if parsing failed.
   FunctionLiteral* ParseProgram(Isolate* isolate, ParseInfo* info);
 
   FunctionLiteral* ParseFunction(Isolate* isolate, ParseInfo* info,
@@ -283,7 +283,7 @@ class V8_EXPORT_PRIVATE Parser : public NON_EXPORTED_BASE(ParserBase<Parser>) {
   }
 
   PreParser* reusable_preparser() {
-    if (reusable_preparser_ == NULL) {
+    if (reusable_preparser_ == nullptr) {
       reusable_preparser_ =
           new PreParser(zone(), &scanner_, stack_limit_, ast_value_factory(),
                         &pending_error_handler_, runtime_call_stats_,
@@ -295,8 +295,11 @@ class V8_EXPORT_PRIVATE Parser : public NON_EXPORTED_BASE(ParserBase<Parser>) {
       SET_ALLOW(harmony_class_fields);
       SET_ALLOW(harmony_object_rest_spread);
       SET_ALLOW(harmony_dynamic_import);
+      SET_ALLOW(harmony_import_meta);
       SET_ALLOW(harmony_async_iteration);
       SET_ALLOW(harmony_template_escapes);
+      SET_ALLOW(harmony_restrictive_generators);
+      SET_ALLOW(harmony_bigint);
 #undef SET_ALLOW
     }
     return reusable_preparser_;
@@ -331,9 +334,8 @@ class V8_EXPORT_PRIVATE Parser : public NON_EXPORTED_BASE(ParserBase<Parser>) {
   bool ContainsLabel(ZoneList<const AstRawString*>* labels,
                      const AstRawString* label);
   Expression* RewriteReturn(Expression* return_value, int pos);
-  Statement* RewriteSwitchStatement(Expression* tag,
-                                    SwitchStatement* switch_statement,
-                                    ZoneList<CaseClause*>* cases, Scope* scope);
+  Statement* RewriteSwitchStatement(SwitchStatement* switch_statement,
+                                    Scope* scope);
   void RewriteCatchPattern(CatchInfo* catch_info, bool* ok);
   void ValidateCatchBlock(const CatchInfo& catch_info, bool* ok);
   Statement* RewriteTryStatement(Block* try_block, Block* catch_block,
@@ -425,9 +427,6 @@ class V8_EXPORT_PRIVATE Parser : public NON_EXPORTED_BASE(ParserBase<Parser>) {
       int function_token_position, FunctionLiteral::FunctionType type,
       LanguageMode language_mode, bool* ok);
 
-  // Get odd-ball literals.
-  Literal* GetLiteralUndefined(int position);
-
   // Check if the scope has conflicting var/let declarations from different
   // scopes. This covers for example
   //
@@ -498,8 +497,8 @@ class V8_EXPORT_PRIVATE Parser : public NON_EXPORTED_BASE(ParserBase<Parser>) {
     TemplateLiteral(Zone* zone, int pos)
         : cooked_(8, zone), raw_(8, zone), expressions_(8, zone), pos_(pos) {}
 
-    const ZoneList<Expression*>* cooked() const { return &cooked_; }
-    const ZoneList<Expression*>* raw() const { return &raw_; }
+    const ZoneList<Literal*>* cooked() const { return &cooked_; }
+    const ZoneList<Literal*>* raw() const { return &raw_; }
     const ZoneList<Expression*>* expressions() const { return &expressions_; }
     int position() const { return pos_; }
 
@@ -516,8 +515,8 @@ class V8_EXPORT_PRIVATE Parser : public NON_EXPORTED_BASE(ParserBase<Parser>) {
     }
 
    private:
-    ZoneList<Expression*> cooked_;
-    ZoneList<Expression*> raw_;
+    ZoneList<Literal*> cooked_;
+    ZoneList<Literal*> raw_;
     ZoneList<Expression*> expressions_;
     int pos_;
   };
@@ -538,7 +537,7 @@ class V8_EXPORT_PRIVATE Parser : public NON_EXPORTED_BASE(ParserBase<Parser>) {
                              Expression* expression);
   Expression* CloseTemplateLiteral(TemplateLiteralState* state, int start,
                                    Expression* tag);
-  uint32_t ComputeTemplateLiteralHash(const TemplateLiteral* lit);
+  int32_t ComputeTemplateLiteralHash(const TemplateLiteral* lit);
 
   ZoneList<Expression*>* PrepareSpreadArguments(ZoneList<Expression*>* list);
   Expression* SpreadCall(Expression* function, ZoneList<Expression*>* args,
@@ -622,9 +621,9 @@ class V8_EXPORT_PRIVATE Parser : public NON_EXPORTED_BASE(ParserBase<Parser>) {
 
   // Returns true if the expression is of type "this.foo".
   V8_INLINE static bool IsThisProperty(Expression* expression) {
-    DCHECK(expression != NULL);
+    DCHECK_NOT_NULL(expression);
     Property* property = expression->AsProperty();
-    return property != NULL && property->obj()->IsVariableProxy() &&
+    return property != nullptr && property->obj()->IsVariableProxy() &&
            property->obj()->AsVariableProxy()->is_this();
   }
 
@@ -739,7 +738,7 @@ class V8_EXPORT_PRIVATE Parser : public NON_EXPORTED_BASE(ParserBase<Parser>) {
   // literal so it can be added as a constant function property.
   V8_INLINE static void CheckAssigningFunctionLiteralToProperty(
       Expression* left, Expression* right) {
-    DCHECK(left != NULL);
+    DCHECK_NOT_NULL(left);
     if (left->IsProperty() && right->IsFunctionLiteral()) {
       right->AsFunctionLiteral()->set_pretenure();
     }
@@ -799,7 +798,7 @@ class V8_EXPORT_PRIVATE Parser : public NON_EXPORTED_BASE(ParserBase<Parser>) {
   // Reporting errors.
   V8_INLINE void ReportMessageAt(Scanner::Location source_location,
                                  MessageTemplate::Template message,
-                                 const char* arg = NULL,
+                                 const char* arg = nullptr,
                                  ParseErrorType error_type = kSyntaxError) {
     if (stack_overflow()) {
       // Suppress the error message (syntax error or such) in the presence of a
@@ -844,20 +843,15 @@ class V8_EXPORT_PRIVATE Parser : public NON_EXPORTED_BASE(ParserBase<Parser>) {
     return subject == nullptr;
   }
 
-  // Non-NULL empty string.
+  // Non-null empty string.
   V8_INLINE const AstRawString* EmptyIdentifierString() const {
     return ast_value_factory()->empty_string();
-  }
-
-  // Odd-ball literal creators.
-  V8_INLINE Literal* GetLiteralTheHole(int position) {
-    return factory()->NewTheHoleLiteral(kNoSourcePosition);
   }
 
   // Producing data during the recursive descent.
   V8_INLINE const AstRawString* GetSymbol() const {
     const AstRawString* result = scanner()->CurrentSymbol(ast_value_factory());
-    DCHECK(result != NULL);
+    DCHECK_NOT_NULL(result);
     return result;
   }
 
@@ -881,6 +875,7 @@ class V8_EXPORT_PRIVATE Parser : public NON_EXPORTED_BASE(ParserBase<Parser>) {
   Expression* NewSuperCallReference(int pos);
   Expression* NewTargetExpression(int pos);
   Expression* FunctionSentExpression(int pos);
+  Expression* ImportMetaExpression(int pos);
 
   Literal* ExpressionFromLiteral(Token::Value token, int pos);
 
@@ -912,9 +907,6 @@ class V8_EXPORT_PRIVATE Parser : public NON_EXPORTED_BASE(ParserBase<Parser>) {
   }
   V8_INLINE ZoneList<Statement*>* NewStatementList(int size) const {
     return new (zone()) ZoneList<Statement*>(size, zone());
-  }
-  V8_INLINE ZoneList<CaseClause*>* NewCaseClauseList(int size) const {
-    return new (zone()) ZoneList<CaseClause*>(size, zone());
   }
 
   V8_INLINE Expression* NewV8Intrinsic(const AstRawString* name,
