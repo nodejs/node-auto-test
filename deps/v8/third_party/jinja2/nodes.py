@@ -226,7 +226,7 @@ class Node(with_metaclass(NodeType, object)):
         return self
 
     def __eq__(self, other):
-        return type(self) is type(other) and \
+        return isinstance(self, type(other)) and \
                tuple(self.iter_fields()) == tuple(other.iter_fields())
 
     def __ne__(self, other):
@@ -492,7 +492,7 @@ class Const(Literal):
 
     def as_const(self, eval_ctx=None):
         rv = self.value
-        if PY2 and type(rv) is text_type and \
+        if PY2 and isinstance(rv, text_type) and \
            self.environment.policies['compiler.ascii_str']:
             try:
                 rv = rv.encode('ascii')

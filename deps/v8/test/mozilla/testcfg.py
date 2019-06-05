@@ -31,6 +31,7 @@ import os
 from testrunner.local import testsuite
 from testrunner.objects import testcase
 from testrunner.outproc import mozilla
+from functools import reduce
 
 EXCLUDED = ["CVS", ".svn"]
 

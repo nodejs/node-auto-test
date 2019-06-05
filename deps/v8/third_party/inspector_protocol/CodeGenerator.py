@@ -130,7 +130,7 @@ def dash_to_camelcase(word):
 
 
 def to_snake_case(name):
-    return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name, sys.maxint).lower()
+    return re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name, sys.maxsize).lower()
 
 
 def to_method_case(config, name):

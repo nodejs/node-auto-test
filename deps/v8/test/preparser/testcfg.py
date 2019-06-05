@@ -64,8 +64,7 @@ class TestSuite(testsuite.TestSuite):
     result = []
 
     # Find all .pyt files in this directory.
-    filenames = [f[:-4] for f in os.listdir(self.root) if f.endswith(".pyt")]
-    filenames.sort()
+    filenames = sorted([f[:-4] for f in os.listdir(self.root) if f.endswith(".pyt")])
     for f in filenames:
       self._ParsePythonTestTemplates(result, f)
     return result

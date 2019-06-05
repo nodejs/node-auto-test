@@ -44,7 +44,7 @@ def wrap_generate_func(original_generate):
     def _convert_generator(self, loop, args, kwargs):
         async_gen = self.generate_async(*args, **kwargs)
         try:
-            while 1:
+            while True:
                 yield loop.run_until_complete(async_gen.__anext__())
         except StopAsyncIteration:
             pass

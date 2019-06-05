@@ -16,6 +16,7 @@ are represented as 1/0. E.g.
   target_cpu="x64"
   v8_enable_disassembler=0
 """
+from __future__ import print_function
 
 import argparse
 import os
@@ -46,7 +47,7 @@ def FindGn(options):
   return os.path.join(options.v8_path, "buildtools", os_path, "gn")
 
 def GenerateBuildFiles(options):
-  print "Setting GN args."
+  print("Setting GN args.")
   gn = FindGn(options)
   gn_args = []
   gn_args.extend(GN_ARGS)
@@ -68,7 +69,7 @@ def GenerateBuildFiles(options):
                         cwd=options.v8_path)
 
 def Build(options):
-  print "Building."
+  print("Building.")
   depot_tools = node_common.EnsureDepotTools(options.v8_path, False)
   ninja = os.path.join(depot_tools, "ninja")
   subprocess.check_call([ninja, "-v", "-C", options.build_path, BUILD_TARGET],

@@ -10,6 +10,7 @@ Examples:
   %prog -t "ia32 results" Result,../result.json Master,/path-to/master.json -o results.html
   %prog -t "x64 results" ../result.json master.json -o results.html
 '''
+from __future__ import print_function
 
 from collections import OrderedDict
 import json
@@ -158,8 +159,7 @@ class BenchmarkSuite:
     self.benchmarks_ = {}
 
   def SortedTestKeys(self):
-    keys = self.benchmarks_.keys()
-    keys.sort()
+    keys = sorted(self.benchmarks_.keys())
     t = "Total"
     if t in keys:
       keys.remove(t)
@@ -418,7 +418,7 @@ def Render(args):
       run_names[run_name] = 0
 
       for error in data["errors"]:
-        print "Error:", error
+        print("Error:", error)
 
       for trace in data["traces"]:
         suite_name = trace["graphs"][0]

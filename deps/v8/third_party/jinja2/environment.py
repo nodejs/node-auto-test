@@ -70,7 +70,7 @@ def copy_cache(cache):
     """Create an empty copy of the given cache."""
     if cache is None:
         return None
-    elif type(cache) is dict:
+    elif isinstance(cache, dict):
         return {}
     return LRUCache(cache.capacity)
 
@@ -1242,7 +1242,7 @@ class TemplateStream(object):
         c_size = 0
         push = buf.append
 
-        while 1:
+        while True:
             try:
                 while c_size < size:
                     c = next(self._gen)

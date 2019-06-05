@@ -10,6 +10,7 @@
 # gclient sync --with_branch_heads
 # gclient fetch
 
+from __future__ import print_function
 import argparse
 import csv
 import itertools
@@ -260,7 +261,7 @@ class RetrieveV8Releases(Step):
     try:
       if (VERSION_FILE not in self.GitChangedFiles(revision) or
           not self.GitCheckoutFileSafe(VERSION_FILE, revision)):
-        print "Skipping revision %s" % revision
+        print("Skipping revision %s" % revision)
         return []  # pragma: no cover
 
       branches = map(
@@ -276,7 +277,7 @@ class RetrieveV8Releases(Step):
           branch = b.split("branch-heads/")[1]
           break
       else:
-        print "Could not determine branch for %s" % revision
+        print("Could not determine branch for %s" % revision)
 
       release, _ = self.GetRelease(revision, branch)
       releases.append(release)
@@ -530,7 +531,7 @@ class WriteOutput(Step):
       with open(self._options.json, "w") as f:
         f.write(json.dumps(output))
     if not self._options.csv and not self._options.json:
-      print output  # pragma: no cover
+      print(output)  # pragma: no cover
 
 
 class Releases(ScriptsBase):

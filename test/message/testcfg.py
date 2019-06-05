@@ -1,3 +1,4 @@
+from __future__ import print_function
 # Copyright 2008 the V8 project authors. All rights reserved.
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
@@ -29,6 +30,7 @@ import test
 import os
 from os.path import join, exists, basename, isdir
 import re
+from functools import reduce
 
 FLAGS_PATTERN = re.compile(r"//\s+Flags:(.*)")
 
@@ -67,22 +69,22 @@ class MessageTestCase(test.TestCase):
     raw_lines = (output.stdout + output.stderr).split('\n')
     outlines = [ s for s in raw_lines if not self.IgnoreLine(s) ]
     if len(outlines) != len(patterns):
-      print "length differs."
-      print "expect=%d" % len(patterns)
-      print "actual=%d" % len(outlines)
-      print "patterns:"
+      print("length differs.")
+      print("expect=%d" % len(patterns))
+      print("actual=%d" % len(outlines))
+      print("patterns:")
       for i in xrange(len(patterns)):
-        print "pattern = %s" % patterns[i]
-      print "outlines:"
+        print("pattern = %s" % patterns[i])
+      print("outlines:")
       for i in xrange(len(outlines)):
-        print "outline = %s" % outlines[i]
+        print("outline = %s" % outlines[i])
       return True
     for i in xrange(len(patterns)):
       if not re.match(patterns[i], outlines[i]):
-        print "match failed"
-        print "line=%d" % i
-        print "expect=%s" % patterns[i]
-        print "actual=%s" % outlines[i]
+        print("match failed")
+        print("line=%d" % i)
+        print("expect=%s" % patterns[i])
+        print("actual=%s" % outlines[i])
         return True
     return False
 

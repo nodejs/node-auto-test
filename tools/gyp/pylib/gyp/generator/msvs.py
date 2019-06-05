@@ -1,3 +1,4 @@
+from __future__ import print_function
 # Copyright (c) 2012 Google Inc. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -252,7 +253,7 @@ def _ToolAppend(tools, tool_name, setting, value, only_if_unset=False):
 def _ToolSetOrAppend(tools, tool_name, setting, value, only_if_unset=False):
   # TODO(bradnelson): ugly hack, fix this more generally!!!
   if 'Directories' in setting or 'Dependencies' in setting:
-    if type(value) == str:
+    if isinstance(value, str):
       value = value.replace('/', '\\')
     else:
       value = [i.replace('/', '\\') for i in value]
@@ -263,7 +264,7 @@ def _ToolSetOrAppend(tools, tool_name, setting, value, only_if_unset=False):
     return
   if tool.get(setting):
     if only_if_unset: return
-    if type(tool[setting]) == list and type(value) == list:
+    if isinstance(tool[setting], list) and isinstance(value, list):
       tool[setting] += value
     else:
       raise TypeError(
@@ -315,10 +316,10 @@ def _ConfigWindowsTargetPlatformVersion(config_data, version):
       if names:
         return names[0]
       else:
-        print >> sys.stdout, (
+        print((
           'Warning: No include files found for '
           'detected Windows SDK version %s' % (version)
-        )
+        ), file=sys.stdout)
 
 
 def _BuildCommandLineForRuleRaw(spec, cmd, cygwin_shell, has_input_path,
@@ -775,8 +776,8 @@ def _EscapeVCProjCommandLineArgListItem(s):
     # the VCProj but cause the same problem on the final command-line. Moving
     # the item to the end of the list does works, but that's only possible if
     # there's only one such item. Let's just warn the user.
-    print >> sys.stderr, ('Warning: MSVS may misinterpret the odd number of ' +
-                          'quotes in ' + s)
+    print(('Warning: MSVS may misinterpret the odd number of ' +
+                          'quotes in ' + s), file=sys.stderr)
   return s
 
 
@@ -1356,7 +1357,7 @@ def _GetDefines(config):
   """
   defines = []
   for d in config.get('defines', []):
-    if type(d) == list:
+    if isinstance(d, list):
       fd = '='.join([str(dpart) for dpart in d])
     else:
       fd = str(d)
@@ -1396,7 +1397,7 @@ def _ConvertToolsToExpectedForm(tools):
     # Collapse settings with lists.
     settings_fixed = {}
     for setting, value in settings.iteritems():
-      if type(value) == list:
+      if isinstance(value, list):
         if ((tool == 'VCLinkerTool' and
              setting == 'AdditionalDependencies') or
             setting == 'AdditionalOptions'):
@@ -1757,7 +1758,7 @@ def _DictsToFolders(base_path, bucket, flat):
   # Convert to folders recursively.
   children = []
   for folder, contents in bucket.iteritems():
-    if type(contents) == dict:
+    if isinstance(contents, dict):
       folder_children = _DictsToFolders(os.path.join(base_path, folder),
                                         contents, flat)
       if flat:
@@ -1776,11 +1777,11 @@ def _CollapseSingles(parent, node):
   # Recursively explorer the tree of dicts looking for projects which are
   # the sole item in a folder which has the same name as the project. Bring
   # such projects up one level.
-  if (type(node) == dict and
+  if (isinstance(node, dict) and
       len(node) == 1 and
       node.keys()[0] == parent + '.vcproj'):
     return node[node.keys()[0]]
-  if type(node) != dict:
+  if not isinstance(node, dict):
     return node
   for child in node:
     node[child] = _CollapseSingles(child, node[child])
@@ -1798,7 +1799,7 @@ def _GatherSolutionFolders(sln_projects, project_objects, flat):
   # Walk down from the top until we hit a folder that has more than one entry.
   # In practice, this strips the top-level "src/" dir from the hierarchy in
   # the solution.
-  while len(root) == 1 and type(root[root.keys()[0]]) == dict:
+  while len(root) == 1 and isinstance(root[root.keys()[0]], dict):
     root = root[root.keys()[0]]
   # Collapse singles.
   root = _CollapseSingles('', root)
@@ -1977,7 +1978,7 @@ def PerformBuild(data, configurations, params):
 
   for config in configurations:
     arguments = [devenv, sln_path, '/Build', config]
-    print 'Building [%s]: %s' % (config, arguments)
+    print('Building [%s]: %s' % (config, arguments))
     rtn = subprocess.check_call(arguments)
 
 
@@ -2072,7 +2073,7 @@ def GenerateOutput(target_list, target_dicts, data, params):
     if generator_flags.get('msvs_error_on_missing_sources', False):
       raise GypError(error_message)
     else:
-      print >> sys.stdout, "Warning: " + error_message
+      print("Warning: " + error_message, file=sys.stdout)
 
 
 def _GenerateMSBuildFiltersFile(filters_path, source_files,
@@ -2778,7 +2779,7 @@ def _GetMSBuildPropertySheets(configurations):
   props_specified = False
   for name, settings in sorted(configurations.iteritems()):
     configuration = _GetConfigurationCondition(name, settings)
-    if settings.has_key('msbuild_props'):
+    if 'msbuild_props' in settings:
       additional_props[configuration] = _FixPaths(settings['msbuild_props'])
       props_specified = True
     else:
@@ -2831,7 +2832,7 @@ def _ConvertMSVSBuildAttributes(spec, config, build_file):
     elif a == 'ConfigurationType':
       msbuild_attributes[a] = _ConvertMSVSConfigurationType(msvs_attributes[a])
     else:
-      print 'Warning: Do not know how to convert MSVS attribute ' + a
+      print('Warning: Do not know how to convert MSVS attribute ' + a)
   return msbuild_attributes
 
 
@@ -3148,7 +3149,7 @@ def _FinalizeMSBuildSettings(spec, configuration):
 
 
 def _GetValueFormattedForMSBuild(tool_name, name, value):
-  if type(value) == list:
+  if isinstance(value, list):
     # For some settings, VS2010 does not automatically extends the settings
     # TODO(jeanluc) Is this what we want?
     if name in ['AdditionalIncludeDirectories',

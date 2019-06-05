@@ -4,6 +4,7 @@
 
 import re
 import os
+from functools import reduce
 
 
 def XmlToString(content, encoding='utf-8', pretty=False):

@@ -67,7 +67,7 @@ def Worker(fn, work_queue, done_queue,
       except command.AbortException:
         # SIGINT, SIGTERM or internal hard timeout.
         break
-      except Exception, e:
+      except Exception as e:
         traceback.print_exc()
         print(">>> EXCEPTION: %s" % e)
         done_queue.put(ExceptionResult(e))
@@ -195,7 +195,7 @@ class Pool():
   def _advance_more(self, gen):
     while self.processing_count < self.num_workers * self.BUFFER_FACTOR:
       try:
-        self.work_queue.put(gen.next())
+        self.work_queue.put(next(gen))
         self.processing_count += 1
       except StopIteration:
         self.advance = self._advance_empty

@@ -127,8 +127,7 @@ class Benchmark:
     return self.tests_
 
   def SortedTestKeys(self):
-    keys = self.tests_.keys()
-    keys.sort()
+    keys = sorted(self.tests_.keys())
     t = "Total"
     if t in keys:
       keys.remove(t)

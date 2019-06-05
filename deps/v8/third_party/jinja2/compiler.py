@@ -95,7 +95,7 @@ def has_safe_repr(value):
             if not has_safe_repr(item):
                 return False
         return True
-    elif type(value) is dict:
+    elif isinstance(value, dict):
         for key, value in iteritems(value):
             if not has_safe_repr(key):
                 return False

@@ -5,6 +5,7 @@
 # found in the LICENSE file.
 
 
+from __future__ import print_function
 import os
 import re
 import sys
@@ -22,6 +23,7 @@ from testrunner.testproc.progress import ResultsTracker, TestsCounter
 from testrunner.testproc.seed import SeedProc
 from testrunner.testproc.variant import VariantProc
 from testrunner.utils import random_utils
+from functools import reduce
 
 
 ARCH_GUESS = utils.DefaultArch()
@@ -212,7 +214,7 @@ class StandardTestRunner(base_runner.BaseTestRunner):
 
       def CheckTestMode(name, option):  # pragma: no cover
         if not option in ["run", "skip", "dontcare"]:
-          print "Unknown %s mode %s" % (name, option)
+          print("Unknown %s mode %s" % (name, option))
           raise base_runner.TestRunnerError()
       CheckTestMode("slow test", options.slow_tests)
       CheckTestMode("pass|fail test", options.pass_fail_tests)
@@ -235,7 +237,7 @@ class StandardTestRunner(base_runner.BaseTestRunner):
 
       for v in user_variants:
         if v not in ALL_VARIANTS:
-          print 'Unknown variant: %s' % v
+          print('Unknown variant: %s' % v)
           raise base_runner.TestRunnerError()
       assert False, 'Unreachable'
 
@@ -274,7 +276,7 @@ class StandardTestRunner(base_runner.BaseTestRunner):
     def _do_execute(self, tests, args, options):
       jobs = options.j
 
-      print '>>> Running with test processors'
+      print('>>> Running with test processors')
       loader = LoadProc()
       tests_counter = TestsCounter()
       results = ResultsTracker()
@@ -309,7 +311,7 @@ class StandardTestRunner(base_runner.BaseTestRunner):
 
       loader.load_tests(tests)
 
-      print '>>> Running %d base tests' % tests_counter.total
+      print('>>> Running %d base tests' % tests_counter.total)
       tests_counter.remove_from_chain()
 
       # This starts up worker processes and blocks until all tests are
@@ -319,7 +321,7 @@ class StandardTestRunner(base_runner.BaseTestRunner):
       for indicator in indicators:
         indicator.finished()
 
-      print '>>> %d tests ran' % (results.total - results.remaining)
+      print('>>> %d tests ran' % (results.total - results.remaining))
 
       exit_code = utils.EXIT_CODE_PASS
       if results.failed:

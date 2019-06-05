@@ -33,6 +33,7 @@
 The stats viewer reads counters from a binary file and displays them
 in a window, re-reading and re-displaying with regular intervals.
 """
+from __future__ import print_function
 
 import mmap
 import optparse
@@ -100,7 +101,7 @@ class StatsViewer(object):
     if not os.path.exists(self.data_name):
       maps_name = "/proc/%s/maps" % self.data_name
       if not os.path.exists(maps_name):
-        print "\"%s\" is neither a counter file nor a PID." % self.data_name
+        print("\"%s\" is neither a counter file nor a PID." % self.data_name)
         sys.exit(1)
       maps_file = open(maps_name, "r")
       try:
@@ -110,7 +111,7 @@ class StatsViewer(object):
             self.data_name = m.group(0)
             break
         if self.data_name is None:
-          print "Can't find counter file in maps for PID %s." % self.data_name
+          print("Can't find counter file in maps for PID %s." % self.data_name)
           sys.exit(1)
       finally:
         maps_file.close()
@@ -123,7 +124,7 @@ class StatsViewer(object):
       return CounterCollection(data_access)
     elif data_access.IntAt(0) == CHROME_COUNTERS_FILE_MAGIC_NUMBER:
       return ChromeCounterCollection(data_access)
-    print "File %s is not stats data." % self.data_name
+    print("File %s is not stats data." % self.data_name)
     sys.exit(1)
 
   def CleanUp(self):
@@ -196,8 +197,7 @@ class StatsViewer(object):
     # By sorting the keys we ensure that the prefixes always come in the
     # same order ("c:" before "t:") which looks more consistent in the
     # ui.
-    sorted_keys = names.keys()
-    sorted_keys.sort()
+    sorted_keys = sorted(names.keys())
 
     # Group together the names whose suffix after a ':' are the same.
     groups = {}
@@ -224,8 +224,7 @@ class StatsViewer(object):
 
     # Build new ui
     index = 0
-    sorted_groups = groups.keys()
-    sorted_groups.sort()
+    sorted_groups = sorted(groups.keys())
     for counter_name in sorted_groups:
       counter_objs = groups[counter_name]
       if self.name_filter.match(counter_name):

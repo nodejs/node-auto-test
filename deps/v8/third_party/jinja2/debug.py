@@ -124,7 +124,7 @@ class ProcessedTraceback(object):
         tb = self.frames[0]
         # the frame will be an actual traceback (or transparent proxy) if
         # we are on pypy or a python implementation with support for tproxy
-        if type(tb) is not TracebackType:
+        if not isinstance(tb, TracebackType):
             tb = tb.tb
         return self.exc_type, self.exc_value, tb
 

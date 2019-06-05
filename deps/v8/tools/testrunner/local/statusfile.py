@@ -1,3 +1,4 @@
+from __future__ import print_function
 # Copyright 2012 the V8 project authors. All rights reserved.
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
@@ -132,7 +133,7 @@ class StatusFile(object):
             variant_desc = 'variant independent'
           else:
             variant_desc = 'variant: %s' % variant
-          print 'Unused rule: %s -> %s (%s)' % (rule, value, variant_desc)
+          print('Unused rule: %s -> %s (%s)' % (rule, value, variant_desc))
 
 
 def _JoinsPassAndFail(outcomes1, outcomes2):
@@ -181,12 +182,12 @@ def _ParseOutcomeList(rule, outcomes, variables, target_dict):
   """Outcome list format: [condition, outcome, outcome, ...]"""
 
   result = set([])
-  if type(outcomes) == str:
+  if isinstance(outcomes, str):
     outcomes = [outcomes]
   for item in outcomes:
-    if type(item) == str:
+    if isinstance(item, str):
       result.add(item)
-    elif type(item) == list:
+    elif isinstance(item, list):
       condition = item[0]
       exp = _EvalExpression(condition, variables)
       assert exp != VARIANT_EXPRESSION, (
@@ -199,7 +200,7 @@ def _ParseOutcomeList(rule, outcomes, variables, target_dict):
       assert exp is True, "Make sure expressions evaluate to boolean values"
 
       for outcome in item[1:]:
-        assert type(outcome) == str
+        assert isinstance(outcome, str)
         result.add(outcome)
     else:
       assert False
@@ -242,7 +243,7 @@ def ReadStatusFile(content, variables):
 
   variables.update(VARIABLES)
   for conditional_section in ReadContent(content):
-    assert type(conditional_section) == list
+    assert isinstance(conditional_section, list)
     assert len(conditional_section) == 2
     condition, section = conditional_section
     exp = _EvalExpression(condition, variables)
@@ -276,9 +277,9 @@ def ReadStatusFile(content, variables):
 
 
 def _ReadSection(section, variables, rules, prefix_rules):
-  assert type(section) == dict
+  assert isinstance(section, dict)
   for rule, outcome_list in section.iteritems():
-    assert type(rule) == str
+    assert isinstance(rule, str)
 
     if rule[-1] == '*':
       _ParseOutcomeList(rule[:-1], outcome_list, variables, prefix_rules)
@@ -308,13 +309,13 @@ def PresubmitCheck(path):
       status["success"] = False
   try:
     for section in contents:
-      _assert(type(section) == list, "Section must be a list")
+      _assert(isinstance(section, list), "Section must be a list")
       _assert(len(section) == 2, "Section list must have exactly 2 entries")
       section = section[1]
-      _assert(type(section) == dict,
+      _assert(isinstance(section, dict),
               "Second entry of section must be a dictionary")
       for rule in section:
-        _assert(type(rule) == str, "Rule key must be a string")
+        _assert(isinstance(rule, str), "Rule key must be a string")
         _assert(not rule.startswith(root_prefix),
                 "Suite name prefix must not be used in rule keys")
         _assert(not rule.endswith('.js'),
@@ -328,5 +329,5 @@ def PresubmitCheck(path):
                   "missing file for %s test %s" % (basename, rule))
     return status["success"]
   except Exception as e:
-    print e
+    print(e)
     return False

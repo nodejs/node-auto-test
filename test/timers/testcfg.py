@@ -30,6 +30,7 @@ import os
 from os.path import join, exists
 import re
 import shlex
+from functools import reduce
 
 FAKETIME_FLAGS_PATTERN = re.compile(r"//\s+FaketimeFlags:(.*)")
 FAKETIME_BIN_PATH = os.path.join("tools", "faketime", "src", "faketime")

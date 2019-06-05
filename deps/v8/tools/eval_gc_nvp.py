@@ -57,8 +57,7 @@ class Histogram:
 
   def __str__(self):
     ret = []
-    keys = self.histogram.keys()
-    keys.sort()
+    keys = sorted(self.histogram.keys())
     last = keys[len(keys) - 1]
     for i in range(0, last + 1):
       (min_value, max_value) = self.bucket_trait.bucket_to_range(i)

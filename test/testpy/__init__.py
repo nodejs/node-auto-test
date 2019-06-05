@@ -30,6 +30,7 @@ import os
 from os.path import join, dirname, exists, splitext
 import re
 import ast
+from functools import reduce
 
 
 FLAGS_PATTERN = re.compile(r"//\s+Flags:(.*)")

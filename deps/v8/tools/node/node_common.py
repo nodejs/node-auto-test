@@ -3,6 +3,7 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from __future__ import print_function
 import os
 import shutil
 import stat
@@ -21,20 +22,20 @@ def EnsureDepotTools(v8_path, fetch_if_not_exist):
     except:
       pass
     if fetch_if_not_exist:
-      print "Checking out depot_tools."
+      print("Checking out depot_tools.")
       subprocess.check_call(["git", "clone", DEPOT_TOOLS_URL, depot_tools])
       return depot_tools
     return None
   depot_tools = _Get(v8_path)
   assert depot_tools is not None
-  print "Using depot tools in %s" % depot_tools
+  print("Using depot tools in %s" % depot_tools)
   return depot_tools
 
 def UninitGit(v8_path):
-  print "Uninitializing temporary git repository"
+  print("Uninitializing temporary git repository")
   target = os.path.join(v8_path, ".git")
   if os.path.isdir(target):
-    print ">> Cleaning up %s" % target
+    print(">> Cleaning up %s" % target)
     def OnRmError(func, path, exec_info):
       # This might happen on Windows
       os.chmod(path, stat.S_IWRITE)

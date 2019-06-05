@@ -8,6 +8,7 @@ Use this script to fetch all dependencies for V8 to run build_gn.py.
 
 Usage: fetch_deps.py <v8-path>
 """
+from __future__ import print_function
 
 import os
 import subprocess
@@ -47,9 +48,9 @@ def EnsureGit(v8_path):
   actual_git_dir = subprocess.check_output(
       ["git", "rev-parse", "--absolute-git-dir"], cwd=v8_path).strip()
   if expected_git_dir == actual_git_dir:
-    print "V8 is tracked stand-alone by git."
+    print("V8 is tracked stand-alone by git.")
     return False
-  print "Initializing temporary git repository in v8."
+  print("Initializing temporary git repository in v8.")
   subprocess.check_call(["git", "init"], cwd=v8_path)
   subprocess.check_call(["git", "config", "user.name", "\"Ada Lovelace\""], cwd=v8_path)
   subprocess.check_call(["git", "config", "user.email", "\"ada@lovela.ce\""], cwd=v8_path)
@@ -67,7 +68,7 @@ def FetchDeps(v8_path):
 
   temporary_git = EnsureGit(v8_path)
   try:
-    print "Fetching dependencies."
+    print("Fetching dependencies.")
     env = os.environ.copy()
     # gclient needs to have depot_tools in the PATH.
     env["PATH"] = depot_tools + os.pathsep + env["PATH"]
