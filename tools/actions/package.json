@@ -1,0 +1,11 @@
+{
+  "name": "nodejs-actions",
+  "version": "0.0.0",
+  "type": "module",
+  "dependencies": {
+    "@octokit/action": "^3.0.5",
+    "@octokit/rest": "^18.0.3",
+    "core-validate-commit": "^3.13.1",
+    "got": "^11.5.2"
+  }
+}
