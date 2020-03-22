@@ -5,8 +5,7 @@
       "pattern": [
         {
           "regexp": "^    [✖⚠]  (\\d+):(\\d) +([\\S ]+\\S)  +(\\S+)$",
-          "message": 3,
-          "loop": true
+          "message": 3
         }
       ]
     }
