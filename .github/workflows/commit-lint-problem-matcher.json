@@ -4,7 +4,7 @@
       "owner": "core-validate-commit",
       "pattern": [
         {
-          "regexp": "^    [✖⚠]  (\\d+):(\\d) +([\\S ]+\\S)  +(\\S+)$",
+          "regexp": "^     [✖⚠]  (\\d+):(\\d) +([\\S ]+\\S)  +(\\S+)$",
           "message": 3
         }
       ]
