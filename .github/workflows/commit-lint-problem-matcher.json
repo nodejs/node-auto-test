@@ -5,11 +5,11 @@
       "owner": "core-validate-commit",
       "pattern": [
         {
-          "regexp": "^  ✖ ([a-z0-9A-Z]+.commit)$",
+          "regexp": "^  ✖ ([a-z0-9A-Z]+)$",
           "file": 1
         },
         {
-          "regexp": "^    ✖(\\d+):(\\d+) +([a-z \-]+)  ([a-z\-]+)$",
+          "regexp": "^    ✖  (\\d+):(\\d) +([\\S ]+\\S)  +(\\S+)$",
           "line": 1,
           "column": 2,
           "message": 3,
