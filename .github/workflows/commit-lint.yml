@@ -4,7 +4,6 @@ on: [pull_request_target]
 
 jobs:
   lint-commit-message:
-
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
