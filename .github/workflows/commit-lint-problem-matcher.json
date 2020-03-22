@@ -4,9 +4,8 @@
       "owner": "core-validate-commit",
       "pattern": [
         {
-          "regexp": "^  ([✖⚠])  ([a-z0-9A-Z]+)$",
-          "message": 1,
-          "file": 2,
+          "regexp": "^     [✖⚠]  (\\d+):(\\d) +([\\S ]+\\S)  +(\\S+)$",
+          "message": 3
         }
       ]
     }
