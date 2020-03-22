@@ -1,0 +1,22 @@
+
+{
+  "problemMatcher": [
+    {
+      "owner": "core-validate-commit",
+      "pattern": [
+        {
+          "regexp": "^  ✖ ([a-z0-9A-Z]+.commit)$",
+          "file": 1
+        },
+        {
+          "regexp": "^    ✖(\\d+):(\\d+) +([a-z \-]+)  ([a-z\-]+)$",
+          "line": 1,
+          "column": 2,
+          "message": 3,
+          "code": 4,
+          "loop": true
+        }
+      ]
+    }
+  ]
+}

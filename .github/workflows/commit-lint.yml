@@ -9,11 +9,11 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - name: "Save commit messages to file"
-        script:
+        run:
           git log --oneline ${{ github.base_ref }}..${{ github.head_ref }} | grep -v -e fixup -e squash | awk '{ print $1 }' | xargs -L1 -I{} bash -c "git show --pretty='format:%s%n%n%b' --no-patch {} > {}"
       - name: "First commit message adheres to guidelines at <a href=\"https://goo.gl/p2fr5Q\">https://goo.gl/p2fr5Q</a>"
         language: node_js
         node_js: "node"
-        script:
+        run:
           echo "::add-matcher::.github/workflows/commit-lint-problem-matcher.json"
           git log --oneline ${{ github.base_ref }}..${{ github.head_ref }} | grep -v -e fixup -e squash | awk '{ print $1 }' | xargs npx -q core-validate-commit
