@@ -13,7 +13,7 @@ PR_ID=$1;
 if [ -z "${PR_ID}" ]; then
   # Attempt to work out the PR number based on current HEAD
   if HEAD_COMMIT="$( git rev-parse HEAD )"; then
-    if SEARCH_RESULTS="$( curl -s ${GH_API_URL}/search/issues?q=sha:${HEAD_COMMIT}+type:pr+repo:nodejs/node )"; then
+    if SEARCH_RESULTS="$( curl -s ${GH_API_URL}/search/issues?q=sha:${HEAD_COMMIT}+type:pr+repo:nodejs/node-auto-test)"; then
       if FOUND_PR="$( node -p 'JSON.parse(process.argv[1]).items[0].number' "${SEARCH_RESULTS}" 2> /dev/null )"; then
         PR_ID=${FOUND_PR}
       fi
@@ -26,7 +26,7 @@ if [ -z "${PR_ID}" ]; then
   exit 1
 fi
 
-PATCH=$( curl -sL https://github.com/nodejs/node/pull/${PR_ID}.patch | grep '^From ' )
+PATCH=$( curl -sL https://github.com/nodejs/node-auto-test/pull/${PR_ID}.patch | grep '^From ' )
 if FIRST_COMMIT="$( echo "$PATCH" | awk '/^From [0-9a-f]{40} / { if (count++ == 0) print $2 }' )"; then
   MESSAGE=$( git show --quiet --format='format:%B' $FIRST_COMMIT )
   echo "
