@@ -9,15 +9,17 @@ jobs:
       - uses: actions/checkout@v2
         with:
           ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
+          # Last 100 commits should be enough for a PR
+          fetch-depth: 100
       - name: Use Node.js 12
         uses: actions/setup-node@v1
         with:
           node-version: 12.x
       - name: "Save commit messages to file"
         run: |
-          git log --oneline ${{ github.base_ref }}..${{ github.head_ref }} | grep -v -e fixup -e squash | awk '{ print $1 }' | xargs -L1 -I{} bash -c "git show --pretty='format:%s%n%n%b' --no-patch {} > {}"
+          echo git log --oneline ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}
+          git log --oneline ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} | grep -v -e fixup -e squash | awk '{ print $1 }' | xargs -L1 -I{} bash -c "git show --pretty='format:%s%n%n%b' --no-patch {} > {}"
       - name: "First commit message adheres to guidelines at <a href=\"https://goo.gl/p2fr5Q\">https://goo.gl/p2fr5Q</a>"
         run: |
           echo "::add-matcher::.github/workflows/commit-lint-problem-matcher.json"
-          git log --oneline ${{ github.base_ref }}..${{ github.head_ref }} | grep -v -e fixup -e squash | awk '{ print $1 }' | xargs npx -q core-validate-commit
+          git log --oneline ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }} | grep -v -e fixup -e squash | awk '{ print $1 }' | xargs npx -q core-validate-commit
