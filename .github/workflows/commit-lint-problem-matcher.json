@@ -2,6 +2,7 @@
   "problemMatcher": [
     {
       "owner": "core-validate-commit",
+      "severity": "warning",
       "pattern": [
         {
           "regexp": "^  ✖ ([a-z0-9A-Z]+)$",
