@@ -5,11 +5,11 @@
       "severity": "warning",
       "pattern": [
         {
-          "regexp": "^  ✖  ([a-z0-9A-Z]+)$",
+          "regexp": "^  [✖⚠]  ([a-z0-9A-Z]+)$",
           "file": 1
         },
         {
-          "regexp": "^    ✖  (\\d+):(\\d) +([\\S ]+\\S)  +(\\S+)$",
+          "regexp": "^    [✖⚠]  (\\d+):(\\d) +([\\S ]+\\S)  +(\\S+)$",
           "line": 1,
           "column": 2,
           "message": 3,
