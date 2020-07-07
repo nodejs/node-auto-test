@@ -24,7 +24,7 @@ function monkeyPatchGetWindowSize(fn) {
   const stream = WriteStream(1);
 
   assert(stream instanceof WriteStream);
-  assert.strictEqual(stream.columns, undefined);
+  assert.strictEqual(stream.columns, null);
   assert.strictEqual(stream.rows, undefined);
 }
 

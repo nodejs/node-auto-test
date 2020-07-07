@@ -307,6 +307,15 @@ class TapProgressIndicator(SimpleProgressIndicator):
   def AboutToRun(self, case):
     pass
 
+  def annotate(self, command, traceback, severity):
+    category, test_name = command.split('/')
+    command_path = os.path.join('test', category, "%s.js" % test_name)
+    find_full_path = re.search(r' +at .*\(.*%s:([0-9]+):([0-9]+)' % command_path, traceback)
+    col = line = 0
+    if find_full_path:
+        line, col = map(int, find_full_path.groups())
+    logger.info("::error file=%s,line=%d,col=%d::This failed oops" % (command_path, line, col))
+
   def HasRun(self, output):
     self._done += 1
     self.traceback = ''
@@ -337,6 +346,10 @@ class TapProgressIndicator(SimpleProgressIndicator):
 
       elif output.HasTimedOut():
         self.severity = 'fail'
+
+      #  if self.annotate_gh_check:
+      if True:
+        self.annotate(command, self.traceback, self.severity)
 
     else:
       skip = skip_regex.search(output.output.stdout)
