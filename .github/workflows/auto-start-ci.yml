@@ -12,8 +12,19 @@ on:
     - cron: "*/5 * * * *"
 
 jobs:
+  prestartCI:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check whether we should run
+        id: enableautostart
+        env:
+          JENKINS_USER: ${{ secrets.JENKINS_USER }}
+          JENKINS_TOKEN: ${{ secrets.JENKINS_TOKEN }}
+        run: |
+          echo "::set-output name=enableautostart::${{ env.JENKINS_TOKEN != '' }}"
   startCI:
-    if: github.repository == 'nodejs/node'
+    needs: [prestartCI]
+    if: needs.prestartCI.outputs.enableautostart == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@master
