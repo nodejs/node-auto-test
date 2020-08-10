@@ -9,7 +9,7 @@ on:
 jobs:
   startCI:
     runs-on: ubuntu-latest
-    if: github.event.label == 'request-ci'
+    if: github.event.label.name == 'request-ci'
     steps:
       - uses: actions/checkout@v2
 
