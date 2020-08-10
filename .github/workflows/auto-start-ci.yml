@@ -13,16 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v2
 
-      - run: head -n 20 README.md
-
-      - name: Dump GitHub context
-        env:
-          GITHUB_CONTEXT: ${{ toJson(github) }}
-        run: echo "$GITHUB_CONTEXT"
-
       # Install dependencies
-      - name: Install jq
-        run: sudo apt-get install jq -y
       - name: Install Node.js
         uses: actions/setup-node@v2-beta
         with:
@@ -44,4 +35,4 @@ jobs:
           ncu-config set repo ${{ env.REPOSITORY }}
 
       - name: Start CI
-        run: echo ./tools/actions/start-ci.sh ${{ secrets.GITHUB_TOKEN }} ${{ env.OWNER }} ${{ env.REPOSITORY }} ${{ github.event.number }}
+        run: ./tools/actions/start-ci.sh ${{ secrets.GITHUB_TOKEN }} ${{ env.OWNER }} ${{ env.REPOSITORY }} ${{ github.event.number }}
