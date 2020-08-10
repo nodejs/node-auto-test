@@ -8,12 +8,16 @@ on:
 
 jobs:
   startCI:
-    if: github.repository == 'nodejs/node'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
 
       - run: head -n 20 README.md
+
+      - name: Dump GitHub context
+        env:
+          GITHUB_CONTEXT: ${{ toJson(github) }}
+        run: echo "$GITHUB_CONTEXT"
 
       # Install dependencies
       - name: Install jq
