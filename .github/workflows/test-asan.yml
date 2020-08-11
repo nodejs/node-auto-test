@@ -19,6 +19,7 @@ env:
 
 jobs:
   test-asan:
+    if: github.repository == 'nodejs/node'
     runs-on: ubuntu-latest
     env:
       CC: clang

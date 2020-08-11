@@ -13,6 +13,7 @@ env:
 
 jobs:
   build-tarball:
+    if: github.repository == 'nodejs/node'
     env:
       PYTHON_VERSION: 3.8
     runs-on: ubuntu-latest
