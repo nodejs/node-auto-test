@@ -26,7 +26,8 @@ const { repository } = await octokit.graphql(
           commits(last: 250) {
             nodes {
               commit {
-                oid
+                oid,
+                message
               }
             }
           }
@@ -84,13 +85,13 @@ const skippable = [
 ]
 
 for (const { commit } of repository.pullRequest.commits.nodes) {
+  if (skippable.some(commit.message.startsWith)) {
+    continue
+  }
   const { headers, data } = await octokit.git.getCommit({
     "owner": owner,
     "repo": repo,
     "commit_sha": commit.oid
   })
-  if (skippable.some(data.title.startsWith)) {
-    continue
-  }
   validate.lint(data)
 }
