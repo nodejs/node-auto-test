@@ -17,3 +17,5 @@ jobs:
         run: |
           cd tools/actions
           node --experimental-top-level-await validate-commit
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
