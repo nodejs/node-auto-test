@@ -61,7 +61,7 @@ process.on('beforeExit', () => {
     'output': {
       'annotations': errors
     }
-  })
+  }).then(() => console.log('done'))
 });
 
 validate.on('message', ({ data, commit }) => {
