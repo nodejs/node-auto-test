@@ -85,7 +85,7 @@ const skippable = [
 ]
 
 for (const { commit } of repository.pullRequest.commits.nodes) {
-  if (skippable.some(commit.message.startsWith)) {
+  if (skippable.some(s => commit.message.startsWith(s))) {
     continue
   }
   const { headers, data } = await octokit.git.getCommit({
