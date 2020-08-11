@@ -3,14 +3,11 @@
 import pkg from "@octokit/action";
 const { Octokit } = pkg;
 import ValidateCommit from "core-validate-commit";
-console.log(ValidateCommit)
 import { readFile } from "fs/promises";
 
 const octokit = new Octokit();
 const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
 const eventPayload = JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH));
-console.log(eventPayload)
-const { job_id } = eventPayload
 
 const { data: checkRun } = await octokit.checks.create({
   repo,
@@ -44,13 +41,18 @@ const { repository } = await octokit.graphql(
 const validate = new ValidateCommit({ 'validate-metadata': false })
 
 const errors = []
+let shouldExit = false;
 
-process.on('beforeExit', async () => {
+process.on('beforeExit', () => {
+  if (shouldExit) {
+    return
+  }
+  shouldExit = true
   console.log(errors)
   if (errors.length === 0) {
     return
   }
-  const result = await octokit.checks.update({
+  octokit.checks.update({
     repo,
     owner,
     check_run_id: checkRun.id,
@@ -59,7 +61,7 @@ process.on('beforeExit', async () => {
     'output': {
       'annotations': errors
     }
-  });
+  })
 });
 
 validate.on('message', ({ data, commit }) => {
