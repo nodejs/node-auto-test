@@ -68,6 +68,7 @@ validate.on('message', ({ data, commit }) => {
     return;
   }
 
+  const { title, sha } = commit
   errors.push({
     path: sha,
     start_line: 1,
@@ -75,7 +76,7 @@ validate.on('message', ({ data, commit }) => {
     annotation_level: level === fail ? 'failure' : 'warning',
     message,
     title,
-    raw_details: this._rawStr
+    raw_details: commit._rawStr
   });
 })
 
