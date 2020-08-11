@@ -12,8 +12,6 @@ const eventPayload = JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH));
 console.log(eventPayload)
 const { job_id } = eventPayload
 
-// await octokit.actions.getJobForWorkflowRun({ repo, owner, job_id })
-
 const { data: checkRun } = await octokit.checks.create({
   repo,
   owner,
@@ -46,12 +44,12 @@ const validate = new ValidateCommit({ 'validate-metadata': false })
 
 const errors = []
 
-process.on('exit', () => {
+process.on('beforeExit', async () => {
   console.log(errors)
   if (errors.length === 0) {
     return
   }
-  const { data: checkRun } = await octokit.checks.update({
+  const result = await octokit.checks.update({
     repo,
     owner,
     check_run_id: checkRun.id,
