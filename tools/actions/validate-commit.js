@@ -21,9 +21,6 @@ const { data: checkRun } = await octokit.checks.create({
   'head_sha': eventPayload.pull_request.head.sha
 });
 
-console.log(checkRun)
-process.exit()
-
 const { repository } = await octokit.graphql(
   `query($owner:String!, $repo:String!, $pr:Int!) {
       repository(owner: $owner, name: $repo) {
@@ -49,21 +46,22 @@ const validate = new ValidateCommit({ 'validate-metadata': false })
 
 const errors = []
 
-// process.on('exit', () => {
-//   console.log(errors)
-//   const { data: checkRun } = await octokit.checks.update({
-//     repo,
-//     owner,
-//     check_run_id: checkRun.id,
-//     'status': 'completed',
-//     'conclusion': 'neutral',
-//     'output': {
-//       'annotations': [
-//       ]
-//     }
-
-//   });
-// });
+process.on('exit', () => {
+  console.log(errors)
+  if (errors.length === 0) {
+    return
+  }
+  const { data: checkRun } = await octokit.checks.update({
+    repo,
+    owner,
+    check_run_id: checkRun.id,
+    'status': 'completed',
+    'conclusion': 'neutral',
+    'output': {
+      'annotations': errors
+    }
+  });
+});
 
 validate.on('message', ({ data, commit }) => {
   const { message, level } = data;
