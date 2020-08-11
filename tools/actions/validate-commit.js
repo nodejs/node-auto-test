@@ -73,7 +73,7 @@ validate.on('message', ({ data, commit }) => {
     path: sha,
     start_line: 1,
     end_line: 1,
-    annotation_level: level === fail ? 'failure' : 'warning',
+    annotation_level: level === 'fail' ? 'failure' : 'warning',
     message,
     title,
     raw_details: commit._rawStr
