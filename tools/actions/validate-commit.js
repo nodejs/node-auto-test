@@ -12,7 +12,7 @@ const eventPayload = JSON.parse(await readFile(process.env.GITHUB_EVENT_PATH));
 console.log(eventPayload)
 const { job_id } = eventPayload
 
-await octokit.actions.getJobForWorkflowRun({ repo, owner, job_id })
+// await octokit.actions.getJobForWorkflowRun({ repo, owner, job_id })
 
 const { data: checkRun } = await octokit.checks.create({
   repo,
