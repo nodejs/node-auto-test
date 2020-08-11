@@ -50,8 +50,24 @@ process.on('beforeExit', () => {
   shouldExit = true
   console.log(errors)
   if (errors.length === 0) {
+    octokit.checks.update({
+      repo,
+      owner,
+      check_run_id: checkRun.id,
+      'status': 'completed',
+      'conclusion': 'success',
+      'output': {
+        'title': "Valid Commit",
+        'summary': "",
+        'annotations': errors
+      }
+    }).then(() => console.log('done'))
     return
   }
+  const summary = `Commits listed below don't follow  our [commit guidelines](https://goo.gl/p2fr5Q):
+
+${errors.map(e => `- [${e.sha} ${e.title}] ${e.message}`).join('\n')}`;
+
   octokit.checks.update({
     repo,
     owner,
@@ -59,6 +75,8 @@ process.on('beforeExit', () => {
     'status': 'completed',
     'conclusion': 'neutral',
     'output': {
+      'title': "Invalid Commit Message",
+      summary,
       'annotations': errors
     }
   }).then(() => console.log('done'))
