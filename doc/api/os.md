@@ -6,6 +6,8 @@
 
 <!-- source_link=lib/os.js -->
 
+What a cool project…
+
 The `os` module provides operating system-related utility methods and
 properties. It can be accessed using:
 
