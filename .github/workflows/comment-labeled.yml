@@ -27,3 +27,23 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --body "Fast-track has been requested by @${{ github.actor }}. Please 👍 to approve."
+
+  commit-queue:
+    if: github.repository == 'nodejs/node' && github.event_name == 'pull_request_target' && github.event.label.name == 'commit-queue'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - name: Restrict Commit-Queue to collaborators
+        run: ./tools/get-collaborators.mjs | grep -q "${{ github.actor }}"
+      - name: Remove label if necessary
+        if: {{ failure() }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE_URL: ${{ github.event.pull_request.issue_url }}
+          COMMIT_QUEUE_LABEL: ${{ github.event.label.name }}
+        run: |
+          gh pr comment ${{ github.event.pull_request.number }} --repo ${{ github.repository }} \
+          --body "Only collaborators can use the commit queue." &&
+          curl -X DELETE "$ISSUE_URL/labels/$COMMIT_QUEUE_LABEL" \
+          -H "Content-Type: application/json" \
+          -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}"
