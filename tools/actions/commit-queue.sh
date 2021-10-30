@@ -18,6 +18,10 @@ issueUrl() {
   echo "$API_URL/repos/${OWNER}/${REPOSITORY}/issues/${1}"
 }
 
+mergeUrl() {
+  echo "$API_URL/repos/${OWNER}/${REPOSITORY}/pulls/${1}/merge"
+}
+
 labelsUrl() {
   echo "$(issueUrl "${1}")/labels"
 }
@@ -92,12 +96,25 @@ for pr in "$@"; do
     git node land --abort --yes
     continue
   fi
-  
-  commits="$(git rev-parse $UPSTREAM/$DEFAULT_BRANCH)...$(git rev-parse HEAD)"
 
-  if ! git push $UPSTREAM $DEFAULT_BRANCH >> output 2>&1; then
-    commit_queue_failed "$pr"
-    continue
+  if [ -z "$MULTIPLE_COMMIT_POLICY" ]; then
+    commits="$(git rev-parse $UPSTREAM/$DEFAULT_BRANCH)...$(git rev-parse HEAD)"
+
+    if ! git push $UPSTREAM $DEFAULT_BRANCH >> output 2>&1; then
+      commit_queue_failed "$pr"
+      continue
+    fi
+  else
+    # If there's only one commit, we can use the Squash and Merge feature from GitHub
+    gitHubCurl "$(mergeUrl "$pr")" PUT --data "$(\
+      TITLE="$(git log -1 --pretty='format:%s')" \
+      BODY="$(git log -1 --pretty='format:%b')" \
+      node -p 'JSON.stringify({merge_method:"squash",commit_title:process.env.TITLE,commit_message: process.env.BODY})')" > response.json
+    cat response.json
+    if ! commits="$(node -e 'const r=require("./response.json");if(!r.merged)throw new Error("Merging failed");process.stdout.write(r.sha)')"; then
+      commit_queue_failed "$pr"
+      continue
+    fi
   fi
 
   rm output
