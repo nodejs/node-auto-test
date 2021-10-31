@@ -25,11 +25,6 @@ jobs:
           # Needs the whole git history for ncu to work
           # See https://github.com/nodejs/node-core-utils/pull/486
           fetch-depth: 0
-          # A personal token is required because pushing with GITHUB_TOKEN will
-          # prevent commits from running CI after they land. It needs
-          # to be set here because `checkout` configures GitHub authentication
-          # for push as well.
-          token: ${{ secrets.GH_USER_TOKEN }}
 
       # Install dependencies
       - name: Install Node.js
@@ -71,7 +66,7 @@ jobs:
           ncu-config set branch ${DEFAULT_BRANCH}
           ncu-config set upstream origin
           ncu-config set username "${{ secrets.GH_USER_NAME }}"
-          ncu-config set token "${{ secrets.GH_USER_TOKEN }}"
+          ncu-config set token "${{ secrets.GITHUB_TOKEN }}"
           ncu-config set jenkins_token "${{ secrets.JENKINS_TOKEN }}"
           ncu-config set repo "${REPOSITORY}"
           ncu-config set owner "${OWNER}"
