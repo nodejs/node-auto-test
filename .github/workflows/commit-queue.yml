@@ -65,7 +65,7 @@ jobs:
         run: |
           ncu-config set branch ${DEFAULT_BRANCH}
           ncu-config set upstream origin
-          ncu-config set username "${{ secrets.GH_USER_NAME }}"
+          ncu-config set username "${{ github.actor }}"
           ncu-config set token "${{ secrets.GITHUB_TOKEN }}"
           ncu-config set jenkins_token "${{ secrets.JENKINS_TOKEN }}"
           ncu-config set repo "${REPOSITORY}"
