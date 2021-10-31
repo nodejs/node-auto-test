@@ -18,7 +18,6 @@ env:
 
 jobs:
   commitQueue:
-    if: github.repository == 'nodejs/node'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
