@@ -53,6 +53,8 @@ jobs:
         with:
           # We want to persist credentials so we can push to gh-pages
           ref: gh-pages
+      - name: Erase previous version (if it exists)
+        run: rm -rf "${{ github.event.pull_request.number }}"
       - name: Download tarball from build job
         uses: actions/download-artifact@v3
         with:
@@ -60,8 +62,9 @@ jobs:
           path: ${{ github.event.pull_request.number }}
       - name: Commit the doc preview to gh-pages
         run: |
-          git config --global user.email "actions@github.com"
-          git config --global user.name "GitHub Actions"
           git add "${{ github.event.pull_request.number }}"
-          git commit -m "Add/Update preview for ${{ github.event.pull_request.html_url }}" -m "The preview will be available at https://${{ github.repository_owner }}.github.io/${{ github.event.pull_request.repo.name }}/${{ github.event.pull_request.number }}/"
+          git commit \
+            --author="Node.js GitHub Bot <github-bot@iojs.org>"
+            -m "Add/Update preview for ${{ github.event.pull_request.html_url }}" \
+            -m "The preview will be available at https://${{ github.repository_owner }}.github.io/${{ github.event.pull_request.base.repo.name }}/${{ github.event.pull_request.number }}/api/"
           git push origin HEAD:gh-pages
