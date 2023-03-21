@@ -45,6 +45,8 @@ jobs:
     if: github.event.pull_request
     needs: build-docs
     runs-on: ubuntu-latest
+    permission:
+      contents: read|write
     steps:
       - name: Check out the gh-pages branch
         uses: actions/checkout@v3
@@ -56,8 +58,6 @@ jobs:
         with:
           name: docs
           path: ${{ github.event.pull_request.number }}
-      - name: Display structure of downloaded files
-        run: ls -R
       - name: Commit the doc preview to gh-pages
         run: |
           git config --global user.email "actions@github.com"
