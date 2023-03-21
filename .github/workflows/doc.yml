@@ -41,3 +41,27 @@ jobs:
           path: out/doc
       - name: Test
         run: NODE=$(command -v node) make test-doc-ci TEST_CI_ARGS="-p actions --measure-flakiness 9"
+  build-preview:
+    if: github.event.pull_request
+    needs: build-docs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the gh-pages branch
+        uses: actions/checkout@v3
+        with:
+          persist-credentials: false
+          branch: gh-pages
+      - name: Download tarball from build job
+        uses: actions/download-artifact@v3
+        with:
+          name: docs
+          path: ${{ github.event.pull_request.id }}
+      - name: Display structure of downloaded files
+        run: ls -R
+      - name: Commit the doc preview to gh-pages
+        run: |
+          git config --global user.email "actions@github.com"
+          git config --global user.name "GitHub Actions"
+          git add "${{ github.event.pull_request.id }}"
+          git commit -m "Add/Update preview for ${{ github.event.pull_request.url }}" -m "The preview will be available at https://nodejs.github.io/node/${{ github.event.pull_request.id }}/"
+          git push origin HEAD:gh-pages
