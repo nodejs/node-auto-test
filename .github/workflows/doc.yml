@@ -46,7 +46,7 @@ jobs:
     needs: build-docs
     runs-on: ubuntu-latest
     permissions:
-      contents: read|write
+      contents: write
     steps:
       - name: Check out the gh-pages branch
         uses: actions/checkout@v3
