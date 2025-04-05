@@ -21,16 +21,6 @@ import * as fs from 'node:fs/promises';
 const fs = require('node:fs/promises');
 ```
 
-To use the callback and sync APIs:
-
-```mjs
-import * as fs from 'node:fs';
-```
-
-```cjs
-const fs = require('node:fs');
-```
-
 All file system operations have synchronous, callback, and promise-based
 forms, and are accessible using both CommonJS syntax and ES6 Modules (ESM).
 
