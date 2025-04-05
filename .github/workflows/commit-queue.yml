@@ -25,7 +25,7 @@ jobs:
   get_mergeable_prs:
     permissions:
       pull-requests: read
-    if: github.repository == 'nodejs/node'
+    if: github.repository == 'nodejs/node-auto-test'
     runs-on: ubuntu-latest
     outputs:
       numbers: ${{ steps.get_mergeable_prs.outputs.numbers }}
@@ -55,6 +55,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   commitQueue:
+    permissions:
+      contents: write  
+      pull-requests: write  
     needs: get_mergeable_prs
     if: needs.get_mergeable_prs.outputs.numbers != ''
     runs-on: ubuntu-latest
@@ -68,7 +71,7 @@ jobs:
           # prevent commits from running CI after they land. It needs
           # to be set here because `checkout` configures GitHub authentication
           # for push as well.
-          token: ${{ secrets.GH_USER_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       # Install dependencies
       - name: Install Node.js
@@ -94,10 +97,10 @@ jobs:
           ncu-config set owner "${OWNER}"
         env:
           USERNAME: ${{ secrets.JENKINS_USER }}
-          GH_TOKEN: ${{ secrets.GH_USER_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           JENKINS_TOKEN: ${{ secrets.JENKINS_TOKEN }}
 
       - name: Start the Commit Queue
         run: ./tools/actions/commit-queue.sh ${{ env.OWNER }} ${{ env.REPOSITORY }} ${{ needs.get_mergeable_prs.outputs.numbers }}
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_USER_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

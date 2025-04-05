@@ -86,7 +86,7 @@ for pr in "$@"; do
     commit_body=$(git log -1 --pretty='format:%b')
     commit_head=$(grep 'Fetched commits as' output | cut -d. -f3 | xargs git rev-parse)
 
-    if ! gh pr merge "$pr" --squash --body "$commit_body" --subject "$commit_title" --match-head-commit "$commit_head" > output; then
+    if ! gh pr merge "$pr" --squash --body "$commit_body" --subject "$commit_title" --match-head-commit "$commit_head" --admin > output; then
       commit_queue_failed "$pr"
       continue
     fi
