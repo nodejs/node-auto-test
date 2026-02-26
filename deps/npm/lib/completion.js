@@ -6,7 +6,7 @@ completion.usage = "npm completion >> ~/.bashrc\n"
                  + "source <(npm completion)"
 
 var npm = require("./npm.js")
-  , npmconf = require("npmconf")
+  , npmconf = require("./config/core.js")
   , configDefs = npmconf.defs
   , configTypes = configDefs.types
   , shorthands = configDefs.shorthands
@@ -26,12 +26,11 @@ completion.completion = function (opts, cb) {
     , path = require("path")
     , bashExists = null
     , zshExists = null
-    , bashProfExists = null
-  fs.stat(path.resolve(process.env.HOME, ".bashrc"), function (er, b) {
+  fs.stat(path.resolve(process.env.HOME, ".bashrc"), function (er) {
     bashExists = !er
     next()
   })
-  fs.stat(path.resolve(process.env.HOME, ".zshrc"), function (er, b) {
+  fs.stat(path.resolve(process.env.HOME, ".zshrc"), function (er) {
     zshExists = !er
     next()
   })
@@ -48,10 +47,10 @@ completion.completion = function (opts, cb) {
 }
 
 function completion (args, cb) {
-  if (process.platform === "win32") {
-    var e = new Error("npm completion not supported on windows")
-    e.code = "ENOTSUP"
-    e.errno = require("constants").ENOTSUP
+  if (process.platform === 'win32' && !(/^MINGW(32|64)$/.test(process.env.MSYSTEM))) {
+    var e = new Error('npm completion supported only in MINGW / Git bash on Windows')
+    e.code = 'ENOTSUP'
+    e.errno = require('constants').ENOTSUP
     return cb(e)
   }
 
@@ -79,7 +78,6 @@ function completion (args, cb) {
     , word = words[w]
     , line = process.env.COMP_LINE
     , point = +process.env.COMP_POINT
-    , lineLength = line.length
     , partialLine = line.substr(0, point)
     , partialWords = words.slice(0, w)
 
@@ -159,9 +157,9 @@ function dumpScript (cb) {
     if (er) return cb(er)
     d = d.replace(/^\#\!.*?\n/, "")
 
-    process.stdout.write(d, function (n) { cb() })
+    process.stdout.write(d, function () { cb() })
     process.stdout.on("error", function (er) {
-      // Darwin is a real dick sometimes.
+      // Darwin is a pain sometimes.
       //
       // This is necessary because the "source" or "." program in
       // bash on OS X closes its file argument before reading
@@ -218,8 +216,6 @@ function configCompl (opts, cb) {
     , split = word.match(/^(-+)((?:no-)*)(.*)$/)
     , dashes = split[1]
     , no = split[2]
-    , conf = split[3]
-    , confs = allConfs
     , flags = configNames.filter(isFlag)
   console.error(flags)
 
@@ -233,7 +229,7 @@ function configCompl (opts, cb) {
 // expand with the valid values of various config values.
 // not yet implemented.
 function configValueCompl (opts, cb) {
-  console.error('configValue', opts)
+  console.error("configValue", opts)
   return cb(null, [])
 }
 
@@ -241,7 +237,6 @@ function configValueCompl (opts, cb) {
 function isFlag (word) {
   // shorthands never take args.
   var split = word.match(/^(-*)((?:no-)+)?(.*)$/)
-    , dashes = split[1]
     , no = split[2]
     , conf = split[3]
   return no || configTypes[conf] === Boolean || shorthands[conf]

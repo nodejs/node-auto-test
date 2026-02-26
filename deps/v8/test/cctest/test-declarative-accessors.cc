@@ -27,9 +27,9 @@
 
 #include <stdlib.h>
 
-#include "v8.h"
+#include "src/v8.h"
 
-#include "cctest.h"
+#include "test/cctest/cctest.h"
 
 using namespace v8::internal;
 
@@ -37,13 +37,12 @@ using namespace v8::internal;
 class HandleArray : public Malloced {
  public:
   static const unsigned kArraySize = 200;
-  explicit HandleArray() {}
-  ~HandleArray() { Reset(v8::Isolate::GetCurrent()); }
-  void Reset(v8::Isolate* isolate) {
+  HandleArray() {}
+  ~HandleArray() { Reset(); }
+  void Reset() {
     for (unsigned i = 0; i < kArraySize; i++) {
       if (handles_[i].IsEmpty()) continue;
-      handles_[i].Dispose(isolate);
-      handles_[i].Clear();
+      handles_[i].Reset();
     }
   }
   v8::Persistent<v8::Value> handles_[kArraySize];
@@ -78,7 +77,7 @@ class DescriptorTestHelper {
   DescriptorTestHelper() :
       isolate_(NULL), array_(new AlignedArray), handle_array_(new HandleArray) {
     v8::V8::Initialize();
-    isolate_ = v8::Isolate::GetCurrent();
+    isolate_ = CcTest::isolate();
   }
   v8::Isolate* isolate_;
   // Data objects.
@@ -96,12 +95,13 @@ static v8::Local<v8::ObjectTemplate> CreateConstructor(
     const char* descriptor_name = NULL,
     v8::Handle<v8::DeclaredAccessorDescriptor> descriptor =
         v8::Handle<v8::DeclaredAccessorDescriptor>()) {
-  v8::Local<v8::FunctionTemplate> constructor = v8::FunctionTemplate::New();
+  v8::Local<v8::FunctionTemplate> constructor =
+      v8::FunctionTemplate::New(context->GetIsolate());
   v8::Local<v8::ObjectTemplate> obj_template = constructor->InstanceTemplate();
   // Setup object template.
   if (descriptor_name != NULL && !descriptor.IsEmpty()) {
     bool added_accessor =
-        obj_template->SetAccessor(v8_str(descriptor_name), descriptor);
+        obj_template->SetDeclaredAccessor(v8_str(descriptor_name), descriptor);
     CHECK(added_accessor);
   }
   obj_template->SetInternalFieldCount((internal_field+1)*2 + 7);
@@ -120,13 +120,13 @@ static void VerifyRead(v8::Handle<v8::DeclaredAccessorDescriptor> descriptor,
   CreateConstructor(context, "Accessible", internal_field, "x", descriptor);
   // Setup object.
   CompileRun("var accessible = new Accessible();");
-  v8::Local<v8::Object> obj(
-      v8::Object::Cast(*context->Global()->Get(v8_str("accessible"))));
+  v8::Local<v8::Object> obj = v8::Local<v8::Object>::Cast(
+      context->Global()->Get(v8_str("accessible")));
   obj->SetAlignedPointerInInternalField(internal_field, internal_object);
   bool added_accessor;
-  added_accessor = obj->SetAccessor(v8_str("y"), descriptor);
+  added_accessor = obj->SetDeclaredAccessor(v8_str("y"), descriptor);
   CHECK(added_accessor);
-  added_accessor = obj->SetAccessor(v8_str("13"), descriptor);
+  added_accessor = obj->SetDeclaredAccessor(v8_str("13"), descriptor);
   CHECK(added_accessor);
   // Test access from template getter.
   v8::Local<v8::Value> value;
@@ -147,17 +147,17 @@ static void VerifyRead(v8::Handle<v8::DeclaredAccessorDescriptor> descriptor,
 
 
 static v8::Handle<v8::Value> Convert(int32_t value, v8::Isolate* isolate) {
-  return v8::Integer::New(value, isolate);
+  return v8::Integer::New(isolate, value);
 }
 
 
-static v8::Handle<v8::Value> Convert(float value, v8::Isolate*) {
-  return v8::Number::New(value);
+static v8::Handle<v8::Value> Convert(float value, v8::Isolate* isolate) {
+  return v8::Number::New(isolate, value);
 }
 
 
-static v8::Handle<v8::Value> Convert(double value, v8::Isolate*) {
-  return v8::Number::New(value);
+static v8::Handle<v8::Value> Convert(double value, v8::Isolate* isolate) {
+  return v8::Number::New(isolate, value);
 }
 
 
@@ -178,7 +178,7 @@ static void TestPrimitiveValue(
   v8::Handle<v8::Value> expected = Convert(value, helper->isolate_);
   helper->array_->Reset();
   helper->array_->As<T*>()[index] = value;
-  VerifyRead(descriptor, internal_field, *helper->array_, expected);
+  VerifyRead(descriptor, internal_field, helper->array_.get(), expected);
 }
 
 
@@ -224,7 +224,7 @@ static void TestBitmaskCompare(T bitmask,
       CHECK(false);
       break;
   }
-  AlignedArray* array = *helper->array_;
+  AlignedArray* array = helper->array_.get();
   array->Reset();
   VerifyRead(descriptor, internal_field, array, v8::False(helper->isolate_));
   array->As<T*>()[index] = compare_value;
@@ -252,7 +252,7 @@ TEST(PointerCompareRead) {
       OOD::NewInternalFieldDereference(helper.isolate_, internal_field)
       ->NewRawShift(helper.isolate_, static_cast<uint16_t>(index*sizeof(ptr)))
       ->NewPointerCompare(helper.isolate_, ptr);
-  AlignedArray* array = *helper.array_;
+  AlignedArray* array = helper.array_.get();
   VerifyRead(descriptor, internal_field, array, v8::False(helper.isolate_));
   array->As<uintptr_t*>()[index] = reinterpret_cast<uintptr_t>(ptr);
   VerifyRead(descriptor, internal_field, array, v8::True(helper.isolate_));
@@ -274,13 +274,15 @@ TEST(PointerDereferenceRead) {
       ->NewRawShift(helper.isolate_,
                     static_cast<uint16_t>(second_index*sizeof(int16_t)))
       ->NewPrimitiveValue(helper.isolate_, v8::kDescriptorInt16Type, 0);
-  AlignedArray* array = *helper.array_;
+  AlignedArray* array = helper.array_.get();
   array->As<uintptr_t**>()[first_index] =
       &array->As<uintptr_t*>()[pointed_to_index];
-  VerifyRead(descriptor, internal_field, array, v8::Integer::New(0));
+  VerifyRead(descriptor, internal_field, array,
+             v8::Integer::New(helper.isolate_, 0));
   second_index += pointed_to_index*sizeof(uintptr_t)/sizeof(uint16_t);
   array->As<uint16_t*>()[second_index] = expected;
-  VerifyRead(descriptor, internal_field, array, v8::Integer::New(expected));
+  VerifyRead(descriptor, internal_field, array,
+             v8::Integer::New(helper.isolate_, expected));
 }
 
 
@@ -293,9 +295,8 @@ TEST(HandleDereferenceRead) {
       OOD::NewInternalFieldDereference(helper.isolate_, internal_field)
       ->NewRawShift(helper.isolate_, index*kPointerSize)
       ->NewHandleDereference(helper.isolate_);
-  HandleArray* array = *helper.handle_array_;
+  HandleArray* array = helper.handle_array_.get();
   v8::Handle<v8::String> expected = v8_str("whatever");
-  array->handles_[index] = v8::Persistent<v8::Value>::New(helper.isolate_,
-                                                          expected);
+  array->handles_[index].Reset(helper.isolate_, expected);
   VerifyRead(descriptor, internal_field, array, expected);
 }

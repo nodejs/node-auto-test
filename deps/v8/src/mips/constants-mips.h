@@ -1,29 +1,6 @@
 // Copyright 2012 the V8 project authors. All rights reserved.
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-//     * Redistributions of source code must retain the above copyright
-//       notice, this list of conditions and the following disclaimer.
-//     * Redistributions in binary form must reproduce the above
-//       copyright notice, this list of conditions and the following
-//       disclaimer in the documentation and/or other materials provided
-//       with the distribution.
-//     * Neither the name of Google Inc. nor the names of its
-//       contributors may be used to endorse or promote products derived
-//       from this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 #ifndef  V8_MIPS_CONSTANTS_H_
 #define  V8_MIPS_CONSTANTS_H_
@@ -55,6 +32,18 @@ enum ArchVariants {
   static const ArchVariants kArchVariant = kMips32r1;
 #endif
 
+enum Endianness {
+  kLittle,
+  kBig
+};
+
+#if defined(V8_TARGET_LITTLE_ENDIAN)
+  static const Endianness kArchEndian = kLittle;
+#elif defined(V8_TARGET_BIG_ENDIAN)
+  static const Endianness kArchEndian = kBig;
+#else
+#error Unknown endianness
+#endif
 
 #if(defined(__mips_hard_float) && __mips_hard_float != 0)
 // Use floating-point coprocessor instructions. This flag is raised when
@@ -69,6 +58,15 @@ const bool IsMipsSoftFloatABI = true;
 const bool IsMipsSoftFloatABI = true;
 #endif
 
+#if defined(V8_TARGET_LITTLE_ENDIAN)
+const uint32_t kHoleNanUpper32Offset = 4;
+const uint32_t kHoleNanLower32Offset = 0;
+#elif defined(V8_TARGET_BIG_ENDIAN)
+const uint32_t kHoleNanUpper32Offset = 0;
+const uint32_t kHoleNanLower32Offset = 4;
+#else
+#error Unknown endianness
+#endif
 
 // Defines constants and accessor classes to assemble, disassemble and
 // simulate MIPS32 instructions.
@@ -123,6 +121,16 @@ const uint32_t kFCSRFlagMask =
     kFCSRInvalidOpFlagMask;
 
 const uint32_t kFCSRExceptionFlagMask = kFCSRFlagMask ^ kFCSRInexactFlagMask;
+
+// 'pref' instruction hints
+const int32_t kPrefHintLoad = 0;
+const int32_t kPrefHintStore = 1;
+const int32_t kPrefHintLoadStreamed = 4;
+const int32_t kPrefHintStoreStreamed = 5;
+const int32_t kPrefHintLoadRetained = 6;
+const int32_t kPrefHintStoreRetained = 7;
+const int32_t kPrefHintWritebackInvalidate = 25;
+const int32_t kPrefHintPrepareForStore = 30;
 
 // Helper functions for converting between register numbers and names.
 class Registers {
@@ -296,6 +304,8 @@ enum Opcode {
 
   LWC1      =   ((6 << 3) + 1) << kOpcodeShift,
   LDC1      =   ((6 << 3) + 5) << kOpcodeShift,
+
+  PREF      =   ((6 << 3) + 3) << kOpcodeShift,
 
   SWC1      =   ((7 << 3) + 1) << kOpcodeShift,
   SDC1      =   ((7 << 3) + 5) << kOpcodeShift,
@@ -489,12 +499,13 @@ enum Condition {
 // no_condition value (-2). As long as tests for no_condition check
 // for condition < 0, this will work as expected.
 inline Condition NegateCondition(Condition cc) {
-  ASSERT(cc != cc_always);
+  DCHECK(cc != cc_always);
   return static_cast<Condition>(cc ^ 1);
 }
 
 
-inline Condition ReverseCondition(Condition cc) {
+// Commute a condition such that {a cond b == b cond' a}.
+inline Condition CommuteCondition(Condition cc) {
   switch (cc) {
     case Uless:
       return Ugreater;
@@ -514,7 +525,7 @@ inline Condition ReverseCondition(Condition cc) {
       return greater_equal;
     default:
       return cc;
-  };
+  }
 }
 
 
@@ -649,29 +660,29 @@ class Instruction {
   }
 
   inline int RsValue() const {
-    ASSERT(InstructionType() == kRegisterType ||
+    DCHECK(InstructionType() == kRegisterType ||
            InstructionType() == kImmediateType);
     return Bits(kRsShift + kRsBits - 1, kRsShift);
   }
 
   inline int RtValue() const {
-    ASSERT(InstructionType() == kRegisterType ||
+    DCHECK(InstructionType() == kRegisterType ||
            InstructionType() == kImmediateType);
     return Bits(kRtShift + kRtBits - 1, kRtShift);
   }
 
   inline int RdValue() const {
-    ASSERT(InstructionType() == kRegisterType);
+    DCHECK(InstructionType() == kRegisterType);
     return Bits(kRdShift + kRdBits - 1, kRdShift);
   }
 
   inline int SaValue() const {
-    ASSERT(InstructionType() == kRegisterType);
+    DCHECK(InstructionType() == kRegisterType);
     return Bits(kSaShift + kSaBits - 1, kSaShift);
   }
 
   inline int FunctionValue() const {
-    ASSERT(InstructionType() == kRegisterType ||
+    DCHECK(InstructionType() == kRegisterType ||
            InstructionType() == kImmediateType);
     return Bits(kFunctionShift + kFunctionBits - 1, kFunctionShift);
   }
@@ -713,7 +724,7 @@ class Instruction {
   }
 
   inline int RsFieldRaw() const {
-    ASSERT(InstructionType() == kRegisterType ||
+    DCHECK(InstructionType() == kRegisterType ||
            InstructionType() == kImmediateType);
     return InstructionBits() & kRsFieldMask;
   }
@@ -724,18 +735,18 @@ class Instruction {
   }
 
   inline int RtFieldRaw() const {
-    ASSERT(InstructionType() == kRegisterType ||
+    DCHECK(InstructionType() == kRegisterType ||
            InstructionType() == kImmediateType);
     return InstructionBits() & kRtFieldMask;
   }
 
   inline int RdFieldRaw() const {
-    ASSERT(InstructionType() == kRegisterType);
+    DCHECK(InstructionType() == kRegisterType);
     return InstructionBits() & kRdFieldMask;
   }
 
   inline int SaFieldRaw() const {
-    ASSERT(InstructionType() == kRegisterType);
+    DCHECK(InstructionType() == kRegisterType);
     return InstructionBits() & kSaFieldMask;
   }
 
@@ -760,12 +771,12 @@ class Instruction {
   }
 
   inline int32_t Imm16Value() const {
-    ASSERT(InstructionType() == kImmediateType);
+    DCHECK(InstructionType() == kImmediateType);
     return Bits(kImm16Shift + kImm16Bits - 1, kImm16Shift);
   }
 
   inline int32_t Imm26Value() const {
-    ASSERT(InstructionType() == kJumpType);
+    DCHECK(InstructionType() == kJumpType);
     return Bits(kImm26Shift + kImm26Bits - 1, kImm26Shift);
   }
 

@@ -27,16 +27,16 @@
 
 #include <stdlib.h>
 
-#include "v8.h"
+#include "src/v8.h"
 
-#include "factory.h"
-#include "macro-assembler.h"
-#include "cctest.h"
-#include "code-stubs.h"
-#include "objects.h"
+#include "src/code-stubs.h"
+#include "src/factory.h"
+#include "src/macro-assembler.h"
+#include "src/objects.h"
+#include "test/cctest/cctest.h"
 
 #ifdef USE_SIMULATOR
-#include "simulator.h"
+#include "src/simulator.h"
 #endif
 
 using namespace v8::internal;
@@ -44,16 +44,14 @@ using namespace v8::internal;
 
 typedef uint32_t (*HASH_FUNCTION)();
 
-static v8::Persistent<v8::Context> env;
-
 #define __ masm->
 
 
 void generate(MacroAssembler* masm, i::Vector<const uint8_t> string) {
   // GenerateHashInit takes the first character as an argument so it can't
   // handle the zero length string.
-  ASSERT(string.length() > 0);
-#ifdef V8_TARGET_ARCH_IA32
+  DCHECK(string.length() > 0);
+#if V8_TARGET_ARCH_IA32 || V8_TARGET_ARCH_X87
   __ push(ebx);
   __ push(ecx);
   __ mov(eax, Immediate(0));
@@ -68,21 +66,21 @@ void generate(MacroAssembler* masm, i::Vector<const uint8_t> string) {
   __ pop(ebx);
   __ Ret();
 #elif V8_TARGET_ARCH_X64
-  __ push(kRootRegister);
+  __ pushq(kRootRegister);
   __ InitializeRootRegister();
-  __ push(rbx);
-  __ push(rcx);
-  __ movq(rax, Immediate(0));
-  __ movq(rbx, Immediate(string.at(0)));
+  __ pushq(rbx);
+  __ pushq(rcx);
+  __ movp(rax, Immediate(0));
+  __ movp(rbx, Immediate(string.at(0)));
   StringHelper::GenerateHashInit(masm, rax, rbx, rcx);
   for (int i = 1; i < string.length(); i++) {
-    __ movq(rbx, Immediate(string.at(i)));
+    __ movp(rbx, Immediate(string.at(i)));
     StringHelper::GenerateHashAddCharacter(masm, rax, rbx, rcx);
   }
   StringHelper::GenerateHashGetHash(masm, rax, rcx);
-  __ pop(rcx);
-  __ pop(rbx);
-  __ pop(kRootRegister);
+  __ popq(rcx);
+  __ popq(rbx);
+  __ popq(kRootRegister);
   __ Ret();
 #elif V8_TARGET_ARCH_ARM
   __ push(kRootRegister);
@@ -98,11 +96,29 @@ void generate(MacroAssembler* masm, i::Vector<const uint8_t> string) {
   StringHelper::GenerateHashGetHash(masm, r0);
   __ pop(kRootRegister);
   __ mov(pc, Operand(lr));
-#elif V8_TARGET_ARCH_MIPS
+#elif V8_TARGET_ARCH_ARM64
+  // The ARM64 assembler usually uses jssp (x28) as a stack pointer, but only
+  // csp is initialized by the calling (C++) code.
+  Register old_stack_pointer = __ StackPointer();
+  __ SetStackPointer(csp);
+  __ Push(root, xzr);
+  __ InitializeRootRegister();
+  __ Mov(x0, 0);
+  __ Mov(x10, Operand(string.at(0)));
+  StringHelper::GenerateHashInit(masm, x0, x10);
+  for (int i = 1; i < string.length(); i++) {
+    __ Mov(x10, Operand(string.at(i)));
+    StringHelper::GenerateHashAddCharacter(masm, x0, x10);
+  }
+  StringHelper::GenerateHashGetHash(masm, x0, x10);
+  __ Pop(xzr, root);
+  __ Ret();
+  __ SetStackPointer(old_stack_pointer);
+#elif V8_TARGET_ARCH_MIPS || V8_TARGET_ARCH_MIPS64
   __ push(kRootRegister);
   __ InitializeRootRegister();
 
-  __ li(v0, Operand(0));
+  __ mov(v0, zero_reg);
   __ li(t1, Operand(string.at(0)));
   StringHelper::GenerateHashInit(masm, v0, t1);
   for (int i = 1; i < string.length(); i++) {
@@ -113,25 +129,27 @@ void generate(MacroAssembler* masm, i::Vector<const uint8_t> string) {
   __ pop(kRootRegister);
   __ jr(ra);
   __ nop();
+#else
+#error Unsupported architecture.
 #endif
 }
 
 
 void generate(MacroAssembler* masm, uint32_t key) {
-#ifdef V8_TARGET_ARCH_IA32
+#if V8_TARGET_ARCH_IA32 || V8_TARGET_ARCH_X87
   __ push(ebx);
   __ mov(eax, Immediate(key));
   __ GetNumberHash(eax, ebx);
   __ pop(ebx);
   __ Ret();
 #elif V8_TARGET_ARCH_X64
-  __ push(kRootRegister);
+  __ pushq(kRootRegister);
   __ InitializeRootRegister();
-  __ push(rbx);
-  __ movq(rax, Immediate(key));
+  __ pushq(rbx);
+  __ movp(rax, Immediate(key));
   __ GetNumberHash(rax, rbx);
-  __ pop(rbx);
-  __ pop(kRootRegister);
+  __ popq(rbx);
+  __ popq(kRootRegister);
   __ Ret();
 #elif V8_TARGET_ARCH_ARM
   __ push(kRootRegister);
@@ -140,7 +158,19 @@ void generate(MacroAssembler* masm, uint32_t key) {
   __ GetNumberHash(r0, ip);
   __ pop(kRootRegister);
   __ mov(pc, Operand(lr));
-#elif V8_TARGET_ARCH_MIPS
+#elif V8_TARGET_ARCH_ARM64
+  // The ARM64 assembler usually uses jssp (x28) as a stack pointer, but only
+  // csp is initialized by the calling (C++) code.
+  Register old_stack_pointer = __ StackPointer();
+  __ SetStackPointer(csp);
+  __ Push(root, xzr);
+  __ InitializeRootRegister();
+  __ Mov(x0, key);
+  __ GetNumberHash(x0, x10);
+  __ Pop(xzr, root);
+  __ Ret();
+  __ SetStackPointer(old_stack_pointer);
+#elif V8_TARGET_ARCH_MIPS || V8_TARGET_ARCH_MIPS64
   __ push(kRootRegister);
   __ InitializeRootRegister();
   __ li(v0, Operand(key));
@@ -148,12 +178,14 @@ void generate(MacroAssembler* masm, uint32_t key) {
   __ pop(kRootRegister);
   __ jr(ra);
   __ nop();
+#else
+#error Unsupported architecture.
 #endif
 }
 
 
 void check(i::Vector<const uint8_t> string) {
-  Isolate* isolate = Isolate::Current();
+  Isolate* isolate = CcTest::i_isolate();
   Factory* factory = isolate->factory();
   HandleScope scope(isolate);
 
@@ -171,11 +203,12 @@ void check(i::Vector<const uint8_t> string) {
   CHECK(code->IsCode());
 
   HASH_FUNCTION hash = FUNCTION_CAST<HASH_FUNCTION>(code->entry());
-  Handle<String> v8_string = factory->NewStringFromOneByte(string);
+  Handle<String> v8_string =
+      factory->NewStringFromOneByte(string).ToHandleChecked();
   v8_string->set_hash_field(String::kEmptyHashField);
 #ifdef USE_SIMULATOR
-  uint32_t codegen_hash =
-      reinterpret_cast<uint32_t>(CALL_GENERATED_CODE(hash, 0, 0, 0, 0, 0));
+  uint32_t codegen_hash = static_cast<uint32_t>(
+        reinterpret_cast<uintptr_t>(CALL_GENERATED_CODE(hash, 0, 0, 0, 0, 0)));
 #else
   uint32_t codegen_hash = hash();
 #endif
@@ -190,12 +223,12 @@ void check(i::Vector<const char> s) {
 
 
 void check(uint32_t key) {
-  Isolate* isolate = Isolate::Current();
+  Isolate* isolate = CcTest::i_isolate();
   Factory* factory = isolate->factory();
   HandleScope scope(isolate);
 
   v8::internal::byte buffer[2048];
-  MacroAssembler masm(Isolate::Current(), buffer, sizeof buffer);
+  MacroAssembler masm(CcTest::i_isolate(), buffer, sizeof buffer);
 
   generate(&masm, key);
 
@@ -209,8 +242,8 @@ void check(uint32_t key) {
 
   HASH_FUNCTION hash = FUNCTION_CAST<HASH_FUNCTION>(code->entry());
 #ifdef USE_SIMULATOR
-  uint32_t codegen_hash =
-      reinterpret_cast<uint32_t>(CALL_GENERATED_CODE(hash, 0, 0, 0, 0, 0));
+  uint32_t codegen_hash = static_cast<uint32_t>(
+        reinterpret_cast<uintptr_t>(CALL_GENERATED_CODE(hash, 0, 0, 0, 0, 0)));
 #else
   uint32_t codegen_hash = hash();
 #endif
@@ -232,7 +265,10 @@ static uint32_t PseudoRandom(uint32_t i, uint32_t j) {
 
 
 TEST(StringHash) {
-  if (env.IsEmpty()) env = v8::Context::New();
+  v8::Isolate* isolate = CcTest::isolate();
+  v8::HandleScope handle_scope(isolate);
+  v8::Context::Scope context_scope(v8::Context::New(isolate));
+
   for (uint8_t a = 0; a < String::kMaxOneByteCharCode; a++) {
     // Numbers are hashed differently.
     if (a >= '0' && a <= '9') continue;
@@ -250,7 +286,9 @@ TEST(StringHash) {
 
 
 TEST(NumberHash) {
-  if (env.IsEmpty()) env = v8::Context::New();
+  v8::Isolate* isolate = CcTest::isolate();
+  v8::HandleScope handle_scope(isolate);
+  v8::Context::Scope context_scope(v8::Context::New(isolate));
 
   // Some specific numbers
   for (uint32_t key = 0; key < 42; key += 7) {

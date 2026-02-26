@@ -1,29 +1,6 @@
 // Copyright 2012 the V8 project authors. All rights reserved.
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are
-// met:
-//
-//     * Redistributions of source code must retain the above copyright
-//       notice, this list of conditions and the following disclaimer.
-//     * Redistributions in binary form must reproduce the above
-//       copyright notice, this list of conditions and the following
-//       disclaimer in the documentation and/or other materials provided
-//       with the distribution.
-//     * Neither the name of Google Inc. nor the names of its
-//       contributors may be used to endorse or promote products derived
-//       from this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
-// "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
-// LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
-// A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
-// OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
-// LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
-// DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
-// THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
-// (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-// OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+// Use of this source code is governed by a BSD-style license that can be
+// found in the LICENSE file.
 
 "use strict";
 
@@ -33,66 +10,68 @@
 
 var $Set = global.Set;
 var $Map = global.Map;
-var $WeakMap = global.WeakMap;
 
-// Global sentinel to be used instead of undefined keys, which are not
-// supported internally but required for Harmony sets and maps.
-var undefined_sentinel = {};
 
 // -------------------------------------------------------------------
 // Harmony Set
 
-function SetConstructor() {
-  if (%_IsConstructCall()) {
-    %SetInitialize(this);
-  } else {
-    return new $Set();
+function SetConstructor(iterable) {
+  if (!%_IsConstructCall()) {
+    throw MakeTypeError('constructor_not_function', ['Set']);
+  }
+
+  var iter, adder;
+
+  if (!IS_NULL_OR_UNDEFINED(iterable)) {
+    iter = GetIterator(iterable);
+    adder = this.add;
+    if (!IS_SPEC_FUNCTION(adder)) {
+      throw MakeTypeError('property_not_function', ['add', this]);
+    }
+  }
+
+  %SetInitialize(this);
+
+  if (IS_UNDEFINED(iter)) return;
+
+  var next, done;
+  while (!(next = iter.next()).done) {
+    if (!IS_SPEC_OBJECT(next)) {
+      throw MakeTypeError('iterator_result_not_an_object', [next]);
+    }
+    %_CallFunction(this, next.value, adder);
   }
 }
 
 
-function SetAdd(key) {
+function SetAddJS(key) {
   if (!IS_SET(this)) {
     throw MakeTypeError('incompatible_method_receiver',
                         ['Set.prototype.add', this]);
-  }
-  if (IS_UNDEFINED(key)) {
-    key = undefined_sentinel;
   }
   return %SetAdd(this, key);
 }
 
 
-function SetHas(key) {
+function SetHasJS(key) {
   if (!IS_SET(this)) {
     throw MakeTypeError('incompatible_method_receiver',
                         ['Set.prototype.has', this]);
-  }
-  if (IS_UNDEFINED(key)) {
-    key = undefined_sentinel;
   }
   return %SetHas(this, key);
 }
 
 
-function SetDelete(key) {
+function SetDeleteJS(key) {
   if (!IS_SET(this)) {
     throw MakeTypeError('incompatible_method_receiver',
                         ['Set.prototype.delete', this]);
   }
-  if (IS_UNDEFINED(key)) {
-    key = undefined_sentinel;
-  }
-  if (%SetHas(this, key)) {
-    %SetDelete(this, key);
-    return true;
-  } else {
-    return false;
-  }
+  return %SetDelete(this, key);
 }
 
 
-function SetGetSize() {
+function SetGetSizeJS() {
   if (!IS_SET(this)) {
     throw MakeTypeError('incompatible_method_receiver',
                         ['Set.prototype.size', this]);
@@ -101,13 +80,34 @@ function SetGetSize() {
 }
 
 
-function SetClear() {
+function SetClearJS() {
   if (!IS_SET(this)) {
     throw MakeTypeError('incompatible_method_receiver',
                         ['Set.prototype.clear', this]);
   }
-  // Replace the internal table with a new empty table.
-  %SetInitialize(this);
+  %SetClear(this);
+}
+
+
+function SetForEach(f, receiver) {
+  if (!IS_SET(this)) {
+    throw MakeTypeError('incompatible_method_receiver',
+                        ['Set.prototype.forEach', this]);
+  }
+
+  if (!IS_SPEC_FUNCTION(f)) {
+    throw MakeTypeError('called_non_callable', [f]);
+  }
+
+  var iterator = new SetIterator(this, ITERATOR_KIND_VALUES);
+  var key;
+  var stepping = DEBUG_IS_ACTIVE && %DebugCallbackSupportsStepping(f);
+  var value_array = [UNDEFINED];
+  while (%SetIteratorNext(iterator, value_array)) {
+    if (stepping) %DebugPrepareStepInIfStepping(f);
+    key = value_array[0];
+    %_CallFunction(receiver, key, key, this, f);
+  }
 }
 
 
@@ -118,15 +118,18 @@ function SetUpSet() {
 
   %SetCode($Set, SetConstructor);
   %FunctionSetPrototype($Set, new $Object());
-  %SetProperty($Set.prototype, "constructor", $Set, DONT_ENUM);
+  %AddNamedProperty($Set.prototype, "constructor", $Set, DONT_ENUM);
+
+  %FunctionSetLength(SetForEach, 1);
 
   // Set up the non-enumerable functions on the Set prototype object.
-  InstallGetter($Set.prototype, "size", SetGetSize);
+  InstallGetter($Set.prototype, "size", SetGetSizeJS);
   InstallFunctions($Set.prototype, DONT_ENUM, $Array(
-    "add", SetAdd,
-    "has", SetHas,
-    "delete", SetDelete,
-    "clear", SetClear
+    "add", SetAddJS,
+    "has", SetHasJS,
+    "delete", SetDeleteJS,
+    "clear", SetClearJS,
+    "forEach", SetForEach
   ));
 }
 
@@ -136,64 +139,76 @@ SetUpSet();
 // -------------------------------------------------------------------
 // Harmony Map
 
-function MapConstructor() {
-  if (%_IsConstructCall()) {
-    %MapInitialize(this);
-  } else {
-    return new $Map();
+function MapConstructor(iterable) {
+  if (!%_IsConstructCall()) {
+    throw MakeTypeError('constructor_not_function', ['Map']);
+  }
+
+  var iter, adder;
+
+  if (!IS_NULL_OR_UNDEFINED(iterable)) {
+    iter = GetIterator(iterable);
+    adder = this.set;
+    if (!IS_SPEC_FUNCTION(adder)) {
+      throw MakeTypeError('property_not_function', ['set', this]);
+    }
+  }
+
+  %MapInitialize(this);
+
+  if (IS_UNDEFINED(iter)) return;
+
+  var next, done, nextItem;
+  while (!(next = iter.next()).done) {
+    if (!IS_SPEC_OBJECT(next)) {
+      throw MakeTypeError('iterator_result_not_an_object', [next]);
+    }
+    nextItem = next.value;
+    if (!IS_SPEC_OBJECT(nextItem)) {
+      throw MakeTypeError('iterator_value_not_an_object', [nextItem]);
+    }
+    %_CallFunction(this, nextItem[0], nextItem[1], adder);
   }
 }
 
 
-function MapGet(key) {
+function MapGetJS(key) {
   if (!IS_MAP(this)) {
     throw MakeTypeError('incompatible_method_receiver',
                         ['Map.prototype.get', this]);
-  }
-  if (IS_UNDEFINED(key)) {
-    key = undefined_sentinel;
   }
   return %MapGet(this, key);
 }
 
 
-function MapSet(key, value) {
+function MapSetJS(key, value) {
   if (!IS_MAP(this)) {
     throw MakeTypeError('incompatible_method_receiver',
                         ['Map.prototype.set', this]);
-  }
-  if (IS_UNDEFINED(key)) {
-    key = undefined_sentinel;
   }
   return %MapSet(this, key, value);
 }
 
 
-function MapHas(key) {
+function MapHasJS(key) {
   if (!IS_MAP(this)) {
     throw MakeTypeError('incompatible_method_receiver',
                         ['Map.prototype.has', this]);
-  }
-  if (IS_UNDEFINED(key)) {
-    key = undefined_sentinel;
   }
   return %MapHas(this, key);
 }
 
 
-function MapDelete(key) {
+function MapDeleteJS(key) {
   if (!IS_MAP(this)) {
     throw MakeTypeError('incompatible_method_receiver',
                         ['Map.prototype.delete', this]);
-  }
-  if (IS_UNDEFINED(key)) {
-    key = undefined_sentinel;
   }
   return %MapDelete(this, key);
 }
 
 
-function MapGetSize() {
+function MapGetSizeJS() {
   if (!IS_MAP(this)) {
     throw MakeTypeError('incompatible_method_receiver',
                         ['Map.prototype.size', this]);
@@ -202,13 +217,32 @@ function MapGetSize() {
 }
 
 
-function MapClear() {
+function MapClearJS() {
   if (!IS_MAP(this)) {
     throw MakeTypeError('incompatible_method_receiver',
                         ['Map.prototype.clear', this]);
   }
-  // Replace the internal table with a new empty table.
-  %MapInitialize(this);
+  %MapClear(this);
+}
+
+
+function MapForEach(f, receiver) {
+  if (!IS_MAP(this)) {
+    throw MakeTypeError('incompatible_method_receiver',
+                        ['Map.prototype.forEach', this]);
+  }
+
+  if (!IS_SPEC_FUNCTION(f)) {
+    throw MakeTypeError('called_non_callable', [f]);
+  }
+
+  var iterator = new MapIterator(this, ITERATOR_KIND_ENTRIES);
+  var stepping = DEBUG_IS_ACTIVE && %DebugCallbackSupportsStepping(f);
+  var value_array = [UNDEFINED, UNDEFINED];
+  while (%MapIteratorNext(iterator, value_array)) {
+    if (stepping) %DebugPrepareStepInIfStepping(f);
+    %_CallFunction(receiver, value_array[1], value_array[0], this, f);
+  }
 }
 
 
@@ -219,98 +253,20 @@ function SetUpMap() {
 
   %SetCode($Map, MapConstructor);
   %FunctionSetPrototype($Map, new $Object());
-  %SetProperty($Map.prototype, "constructor", $Map, DONT_ENUM);
+  %AddNamedProperty($Map.prototype, "constructor", $Map, DONT_ENUM);
+
+  %FunctionSetLength(MapForEach, 1);
 
   // Set up the non-enumerable functions on the Map prototype object.
-  InstallGetter($Map.prototype, "size", MapGetSize);
+  InstallGetter($Map.prototype, "size", MapGetSizeJS);
   InstallFunctions($Map.prototype, DONT_ENUM, $Array(
-    "get", MapGet,
-    "set", MapSet,
-    "has", MapHas,
-    "delete", MapDelete,
-    "clear", MapClear
+    "get", MapGetJS,
+    "set", MapSetJS,
+    "has", MapHasJS,
+    "delete", MapDeleteJS,
+    "clear", MapClearJS,
+    "forEach", MapForEach
   ));
 }
 
 SetUpMap();
-
-
-// -------------------------------------------------------------------
-// Harmony WeakMap
-
-function WeakMapConstructor() {
-  if (%_IsConstructCall()) {
-    %WeakMapInitialize(this);
-  } else {
-    return new $WeakMap();
-  }
-}
-
-
-function WeakMapGet(key) {
-  if (!IS_WEAKMAP(this)) {
-    throw MakeTypeError('incompatible_method_receiver',
-                        ['WeakMap.prototype.get', this]);
-  }
-  if (!(IS_SPEC_OBJECT(key) || IS_SYMBOL(key))) {
-    throw %MakeTypeError('invalid_weakmap_key', [this, key]);
-  }
-  return %WeakMapGet(this, key);
-}
-
-
-function WeakMapSet(key, value) {
-  if (!IS_WEAKMAP(this)) {
-    throw MakeTypeError('incompatible_method_receiver',
-                        ['WeakMap.prototype.set', this]);
-  }
-  if (!(IS_SPEC_OBJECT(key) || IS_SYMBOL(key))) {
-    throw %MakeTypeError('invalid_weakmap_key', [this, key]);
-  }
-  return %WeakMapSet(this, key, value);
-}
-
-
-function WeakMapHas(key) {
-  if (!IS_WEAKMAP(this)) {
-    throw MakeTypeError('incompatible_method_receiver',
-                        ['WeakMap.prototype.has', this]);
-  }
-  if (!(IS_SPEC_OBJECT(key) || IS_SYMBOL(key))) {
-    throw %MakeTypeError('invalid_weakmap_key', [this, key]);
-  }
-  return %WeakMapHas(this, key);
-}
-
-
-function WeakMapDelete(key) {
-  if (!IS_WEAKMAP(this)) {
-    throw MakeTypeError('incompatible_method_receiver',
-                        ['WeakMap.prototype.delete', this]);
-  }
-  if (!(IS_SPEC_OBJECT(key) || IS_SYMBOL(key))) {
-    throw %MakeTypeError('invalid_weakmap_key', [this, key]);
-  }
-  return %WeakMapDelete(this, key);
-}
-
-
-// -------------------------------------------------------------------
-
-function SetUpWeakMap() {
-  %CheckIsBootstrapping();
-
-  %SetCode($WeakMap, WeakMapConstructor);
-  %FunctionSetPrototype($WeakMap, new $Object());
-  %SetProperty($WeakMap.prototype, "constructor", $WeakMap, DONT_ENUM);
-
-  // Set up the non-enumerable functions on the WeakMap prototype object.
-  InstallFunctions($WeakMap.prototype, DONT_ENUM, $Array(
-    "get", WeakMapGet,
-    "set", WeakMapSet,
-    "has", WeakMapHas,
-    "delete", WeakMapDelete
-  ));
-}
-
-SetUpWeakMap();

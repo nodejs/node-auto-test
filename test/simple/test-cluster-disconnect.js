@@ -35,6 +35,7 @@ if (cluster.isWorker) {
   }).listen(common.PORT + 1, '127.0.0.1');
 
 } else if (cluster.isMaster) {
+  var servers = 2;
 
   // test a single TCP server
   var testConnection = function(port, cb) {
@@ -52,12 +53,11 @@ if (cluster.isWorker) {
 
   // test both servers created in the cluster
   var testCluster = function(cb) {
-    var servers = 2;
     var done = 0;
 
     for (var i = 0, l = servers; i < l; i++) {
-      testConnection(common.PORT + i, function(sucess) {
-        assert.ok(sucess);
+      testConnection(common.PORT + i, function(success) {
+        assert.ok(success);
         done += 1;
         if (done === servers) {
           cb();
@@ -68,7 +68,7 @@ if (cluster.isWorker) {
 
   // start two workers and execute callback when both is listening
   var startCluster = function(cb) {
-    var workers = 2;
+    var workers = 8;
     var online = 0;
 
     for (var i = 0, l = workers; i < l; i++) {
@@ -76,7 +76,7 @@ if (cluster.isWorker) {
       var worker = cluster.fork();
       worker.on('listening', function() {
         online += 1;
-        if (online === workers) {
+        if (online === workers * servers) {
           cb();
         }
       });

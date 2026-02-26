@@ -5,13 +5,28 @@ PYTHON ?= python
 NINJA ?= ninja
 DESTDIR ?=
 SIGN ?=
+PREFIX ?= /usr/local
+FLAKY_TESTS ?= run
+STAGINGSERVER ?= node-www
 
+OSTYPE := $(shell uname -s | tr '[A-Z]' '[a-z]')
+
+# Flags for packaging.
+BUILD_DOWNLOAD_FLAGS ?= --download=all
+BUILD_INTL_FLAGS ?= --with-intl=small-icu
+BUILD_RELEASE_FLAGS ?= $(BUILD_DOWNLOAD_FLAGS) $(BUILD_INTL_FLAGS)
 NODE ?= ./node
 
 # Default to verbose builds.
 # To do quiet/pretty builds, run `make V=` to set V to an empty string,
 # or set the V environment variable to an empty string.
 V ?= 1
+
+ifeq ($(USE_NINJA),1)
+ifneq ($(V),)
+NINJA := $(NINJA) -v
+endif
+endif
 
 # BUILDTYPE=Debug builds both release and debug builds. If you want to compile
 # just the debug build, run `make -C out BUILDTYPE=Debug` instead.
@@ -43,22 +58,26 @@ node_g: config.gypi out/Makefile
 	ln -fs out/Debug/node $@
 endif
 
-out/Makefile: common.gypi deps/uv/uv.gyp deps/http_parser/http_parser.gyp deps/zlib/zlib.gyp deps/v8/build/common.gypi deps/v8/tools/gyp/v8.gyp node.gyp config.gypi
+out/Makefile: common.gypi deps/uv/uv.gyp deps/http_parser/http_parser.gyp deps/zlib/zlib.gyp deps/v8/build/toolchain.gypi deps/v8/build/features.gypi deps/v8/tools/gyp/v8.gyp node.gyp config.gypi
 ifeq ($(USE_NINJA),1)
 	touch out/Makefile
-	$(PYTHON) tools/gyp_node -f ninja
+	$(PYTHON) tools/gyp_node.py -f ninja
 else
-	$(PYTHON) tools/gyp_node -f make
+	$(PYTHON) tools/gyp_node.py -f make
 endif
 
 config.gypi: configure
-	$(PYTHON) ./configure
+	if [ -f $@ ]; then
+		$(error Stale $@, please re-run ./configure)
+	else
+		$(error No $@, please run ./configure first)
+	fi
 
 install: all
-	$(PYTHON) tools/install.py $@ $(DESTDIR)
+	$(PYTHON) tools/install.py $@ '$(DESTDIR)' '$(PREFIX)'
 
 uninstall:
-	$(PYTHON) tools/install.py $@ $(DESTDIR)
+	$(PYTHON) tools/install.py $@ '$(DESTDIR)' '$(PREFIX)'
 
 clean:
 	-rm -rf out/Makefile node node_g out/$(BUILDTYPE)/node blog.html email.md
@@ -67,14 +86,17 @@ clean:
 
 distclean:
 	-rm -rf out
-	-rm -f config.gypi
+	-rm -f config.gypi icu_config.gypi
 	-rm -f config.mk
 	-rm -rf node node_g blog.html email.md
 	-rm -rf node_modules
+	-rm -rf deps/icu
+	-rm -rf deps/icu4c*.tgz deps/icu4c*.zip deps/icu-tmp
 
 test: all
 	$(PYTHON) tools/test.py --mode=release simple message
 	$(MAKE) jslint
+	$(MAKE) cpplint
 
 test-http1: all
 	$(PYTHON) tools/test.py --mode=release --use-http1 simple message
@@ -82,83 +104,105 @@ test-http1: all
 test-valgrind: all
 	$(PYTHON) tools/test.py --mode=release --valgrind simple message
 
-test/gc/node_modules/weak/build:
+test/gc/node_modules/weak/build/Release/weakref.node:
 	@if [ ! -f node ]; then make all; fi
 	./node deps/npm/node_modules/node-gyp/bin/node-gyp rebuild \
 		--directory="$(shell pwd)/test/gc/node_modules/weak" \
 		--nodedir="$(shell pwd)"
 
-test-gc: all test/gc/node_modules/weak/build
+build-addons:
+	@if [ ! -f node ]; then make all; fi
+	rm -rf test/addons/doc-*/
+	./node tools/doc/addon-verify.js
+	$(foreach dir, \
+			$(sort $(dir $(wildcard test/addons/*/*.gyp))), \
+			./node deps/npm/node_modules/node-gyp/bin/node-gyp rebuild \
+					--directory="$(shell pwd)/$(dir)" \
+					--nodedir="$(shell pwd)" && ) echo "build done"
+
+test-gc: all test/gc/node_modules/weak/build/Release/weakref.node
 	$(PYTHON) tools/test.py --mode=release gc
 
-test-all: all test/gc/node_modules/weak/build
+test-build: all build-addons
+
+test-all: test-build test/gc/node_modules/weak/build/Release/weakref.node
 	$(PYTHON) tools/test.py --mode=debug,release
 	make test-npm
 
-test-all-http1: all
+test-all-http1: test-build
 	$(PYTHON) tools/test.py --mode=debug,release --use-http1
 
-test-all-valgrind: all
+test-all-valgrind: test-build
 	$(PYTHON) tools/test.py --mode=debug,release --valgrind
 
-test-release: all
+test-ci:
+	$(PYTHON) tools/test.py -p tap --logfile test.tap --mode=release --arch=$(DESTCPU) --flaky-tests=$(FLAKY_TESTS) simple message internet
+
+test-release: test-build
 	$(PYTHON) tools/test.py --mode=release
 
-test-debug: all
+test-debug: test-build
 	$(PYTHON) tools/test.py --mode=debug
 
-test-message: all
+test-message: test-build
 	$(PYTHON) tools/test.py message
 
 test-simple: all
 	$(PYTHON) tools/test.py simple
 
-test-pummel: all
+test-pummel: all wrk
 	$(PYTHON) tools/test.py pummel
 
 test-internet: all
 	$(PYTHON) tools/test.py internet
 
+test-debugger: all
+	$(PYTHON) tools/test.py debugger
+
 test-npm: node
-	./node deps/npm/test/run.js
+	rm -rf npm-cache npm-tmp npm-prefix
+	mkdir npm-cache npm-tmp npm-prefix
+	cd deps/npm ; npm_config_cache="$(shell pwd)/npm-cache" \
+	     npm_config_prefix="$(shell pwd)/npm-prefix" \
+	     npm_config_tmp="$(shell pwd)/npm-tmp" \
+	     PATH="../../:${PATH}" node cli.js install
+	cd deps/npm ; npm_config_cache="$(shell pwd)/npm-cache" \
+	     npm_config_prefix="$(shell pwd)/npm-prefix" \
+	     npm_config_tmp="$(shell pwd)/npm-tmp" \
+	     PATH="../../:${PATH}" node cli.js run-script test && \
+	     PATH="../../:${PATH}" node cli.js prune --prod && \
+	     cd ../.. && \
+	     rm -rf npm-cache npm-tmp npm-prefix
 
 test-npm-publish: node
 	npm_package_config_publishtest=true ./node deps/npm/test/run.js
+
+test-addons: test-build
+	$(PYTHON) tools/test.py --mode=release addons
+
+test-timers:
+	$(MAKE) --directory=tools faketime
+	$(PYTHON) tools/test.py --mode=release timers
+
+test-timers-clean:
+	$(MAKE) --directory=tools clean
 
 apidoc_sources = $(wildcard doc/api/*.markdown)
 apidocs = $(addprefix out/,$(apidoc_sources:.markdown=.html)) \
           $(addprefix out/,$(apidoc_sources:.markdown=.json))
 
-apidoc_dirs = out/doc out/doc/api/ out/doc/api/assets out/doc/about out/doc/community out/doc/download out/doc/logos out/doc/images
+apidoc_dirs = out/doc out/doc/api/ out/doc/api/assets
 
 apiassets = $(subst api_assets,api/assets,$(addprefix out/,$(wildcard doc/api_assets/*)))
 
-doc_images = $(addprefix out/,$(wildcard doc/images/* doc/*.jpg doc/*.png))
-
 website_files = \
-	out/doc/index.html    \
-	out/doc/v0.4_announcement.html   \
-	out/doc/cla.html      \
 	out/doc/sh_main.js    \
-	out/doc/sh_javascript.min.js \
-	out/doc/sh_vim-dark.css \
-	out/doc/sh.css \
-	out/doc/favicon.ico   \
-	out/doc/pipe.css \
-	out/doc/about/index.html \
-	out/doc/community/index.html \
-	out/doc/download/index.html \
-	out/doc/logos/index.html \
-	out/doc/changelog.html \
-	$(doc_images)
+	out/doc/sh_javascript.min.js
 
-doc: $(apidoc_dirs) $(website_files) $(apiassets) $(apidocs) tools/doc/ blog node
+doc: $(apidoc_dirs) $(website_files) $(apiassets) $(apidocs) tools/doc/ out/doc/changelog.html node
 
-blogclean:
-	rm -rf out/blog
-
-blog: doc/blog out/Release/node tools/blog
-	out/Release/node tools/blog/generate.js doc/blog/ out/blog/ doc/blog.html doc/rss.xml
+doc-branch: NODE_DOC_VERSION = v$(shell $(PYTHON) tools/getnodeversion.py | cut -f1,2 -d.)
+doc-branch: doc
 
 $(apidoc_dirs):
 	mkdir -p $@
@@ -169,17 +213,14 @@ out/doc/api/assets/%: doc/api_assets/% out/doc/api/assets/
 out/doc/changelog.html: ChangeLog doc/changelog-head.html doc/changelog-foot.html tools/build-changelog.sh node
 	bash tools/build-changelog.sh
 
-out/doc/%.html: doc/%.html node
-	cat $< | sed -e 's|__VERSION__|'$(VERSION)'|g' > $@
-
 out/doc/%: doc/%
 	cp -r $< $@
 
 out/doc/api/%.json: doc/api/%.markdown node
-	out/Release/node tools/doc/generate.js --format=json $< > $@
+	NODE_DOC_VERSION=$(NODE_DOC_VERSION) out/Release/node tools/doc/generate.js --format=json $< > $@
 
 out/doc/api/%.html: doc/api/%.markdown node
-	out/Release/node tools/doc/generate.js --format=html --template=doc/template.html $< > $@
+	NODE_DOC_VERSION=$(NODE_DOC_VERSION) out/Release/node tools/doc/generate.js --format=html --template=doc/template.html $< > $@
 
 email.md: ChangeLog tools/email-footer.md
 	bash tools/changelog-head.sh | sed 's|^\* #|* \\#|g' > $@
@@ -187,9 +228,6 @@ email.md: ChangeLog tools/email-footer.md
 
 blog.html: email.md
 	cat $< | ./node tools/doc/node_modules/.bin/marked > $@
-
-blog-upload: blog
-	rsync -r out/blog/ node@nodejs.org:~/web/nodejs.org/blog/
 
 website-upload: doc
 	rsync -r out/doc/ node@nodejs.org:~/web/nodejs.org/
@@ -201,15 +239,63 @@ website-upload: doc
     rm -f ~/web/nodejs.org/dist/node-latest.tar.gz &&\
     ln -s $(VERSION)/node-$(VERSION).tar.gz ~/web/nodejs.org/dist/node-latest.tar.gz'
 
+doc-branch-upload: NODE_DOC_VERSION = v$(shell $(PYTHON) tools/getnodeversion.py | cut -f1,2 -d.)
+doc-branch-upload: doc-branch
+	echo $(NODE_DOC_VERSION)
+	rsync -r out/doc/api/ node@nodejs.org:~/web/nodejs.org/$(NODE_DOC_VERSION)
+
 docopen: out/doc/api/all.html
 	-google-chrome out/doc/api/all.html
 
 docclean:
 	-rm -rf out/doc
 
-VERSION=v$(shell $(PYTHON) tools/getnodeversion.py)
-RELEASE=$(shell $(PYTHON) tools/getnodeisrelease.py)
-PLATFORM=$(shell uname | tr '[:upper:]' '[:lower:]')
+run-ci:
+	$(PYTHON) ./configure --without-snapshot $(CONFIG_FLAGS)
+	$(MAKE)
+	$(MAKE) test-ci
+
+RAWVER=$(shell $(PYTHON) tools/getnodeversion.py)
+VERSION=v$(RAWVER)
+
+# For nightly builds, you must set DISTTYPE to "nightly", "next-nightly" or
+# "custom". For the nightly and next-nightly case, you need to set DATESTRING
+# and COMMIT in order to properly name the build.
+# For the rc case you need to set CUSTOMTAG to an appropriate CUSTOMTAG number
+
+ifndef DISTTYPE
+DISTTYPE=release
+endif
+ifeq ($(DISTTYPE),release)
+FULLVERSION=$(VERSION)
+else # ifeq ($(DISTTYPE),release)
+ifeq ($(DISTTYPE),custom)
+ifndef CUSTOMTAG
+$(error CUSTOMTAG is not set for DISTTYPE=custom)
+endif # ifndef CUSTOMTAG
+TAG=$(CUSTOMTAG)
+else # ifeq ($(DISTTYPE),custom)
+ifndef DATESTRING
+$(error DATESTRING is not set for nightly)
+endif # ifndef DATESTRING
+ifndef COMMIT
+$(error COMMIT is not set for nightly)
+endif # ifndef COMMIT
+ifneq ($(DISTTYPE),nightly)
+ifneq ($(DISTTYPE),next-nightly)
+$(error DISTTYPE is not release, custom, nightly or next-nightly)
+endif # ifneq ($(DISTTYPE),next-nightly)
+endif # ifneq ($(DISTTYPE),nightly)
+TAG=$(DISTTYPE)$(DATESTRING)$(COMMIT)
+endif # ifeq ($(DISTTYPE),custom)
+FULLVERSION=$(VERSION)-$(TAG)
+endif # ifeq ($(DISTTYPE),release)
+
+DISTTYPEDIR ?= $(DISTTYPE)
+RELEASE=$(shell sed -ne 's/\#define NODE_VERSION_IS_RELEASE \([01]\)/\1/p' src/node_version.h)
+NODE_DOC_VERSION=$(VERSION)
+NPMVERSION=v$(shell cat deps/npm/package.json | grep '"version"' | sed 's/^[^:]*: "\([^"]*\)",.*/\1/')
+
 ifeq ($(findstring x86_64,$(shell uname -m)),x86_64)
 DESTCPU ?= x64
 else
@@ -224,26 +310,31 @@ else
 ARCH=x86
 endif
 endif
-TARNAME=node-$(VERSION)
-ifdef NIGHTLY
-TAG = nightly-$(NIGHTLY)
-TARNAME=node-$(VERSION)-$(TAG)
+
+# enforce "x86" over "ia32" as the generally accepted way of referring to 32-bit intel
+ifeq ($(ARCH),ia32)
+override ARCH=x86
 endif
-TARBALL=$(TARNAME).tar.gz
-BINARYNAME=$(TARNAME)-$(PLATFORM)-$(ARCH)
-BINARYTAR=$(BINARYNAME).tar.gz
-PKG=out/$(TARNAME).pkg
-packagemaker=/Developer/Applications/Utilities/PackageMaker.app/Contents/MacOS/PackageMaker
+ifeq ($(DESTCPU),ia32)
+override DESTCPU=x86
+endif
 
-dist: doc $(TARBALL) $(PKG)
-
+TARNAME=node-$(FULLVERSION)
+TARBALL=$(TARNAME).tar
+BINARYNAME=$(TARNAME)-$(OSTYPE)-$(ARCH)
+BINARYTAR=$(BINARYNAME).tar
+# OSX doesn't have xz installed by default, http://macpkg.sourceforge.net/
+XZ=$(shell which xz > /dev/null 2>&1; echo $$?)
+XZ_COMPRESSION ?= 9
+PKG=$(TARNAME).pkg
+PACKAGEMAKER ?= /Developer/Applications/Utilities/PackageMaker.app/Contents/MacOS/PackageMaker
 PKGDIR=out/dist-osx
 
 release-only:
 	@if [ "$(shell git status --porcelain | egrep -v '^\?\? ')" = "" ]; then \
 		exit 0 ; \
 	else \
-	  echo "" >&2 ; \
+		echo "" >&2 ; \
 		echo "The git repository is not clean." >&2 ; \
 		echo "Please commit changes before building release tarball." >&2 ; \
 		echo "" >&2 ; \
@@ -251,38 +342,52 @@ release-only:
 		echo "" >&2 ; \
 		exit 1 ; \
 	fi
-	@if [ "$(NIGHTLY)" != "" -o "$(RELEASE)" = "1" ]; then \
+	@if [ "$(DISTTYPE)" != "release" -o "$(RELEASE)" = "1" ]; then \
 		exit 0; \
 	else \
-	  echo "" >&2 ; \
+		echo "" >&2 ; \
 		echo "#NODE_VERSION_IS_RELEASE is set to $(RELEASE)." >&2 ; \
-	  echo "Did you remember to update src/node_version.cc?" >&2 ; \
-	  echo "" >&2 ; \
+		echo "Did you remember to update src/node_version.h?" >&2 ; \
+		echo "" >&2 ; \
 		exit 1 ; \
 	fi
-
-pkg: $(PKG)
 
 $(PKG): release-only
 	rm -rf $(PKGDIR)
 	rm -rf out/deps out/Release
-	$(PYTHON) ./configure --prefix=$(PKGDIR)/32/usr/local --without-snapshot --dest-cpu=ia32 --tag=$(TAG)
-	$(MAKE) install V=$(V)
+	$(PYTHON) ./configure \
+		--dest-cpu=ia32 \
+		--tag=$(TAG) \
+		--without-snapshot \
+		$(CONFIG_FLAGS) $(BUILD_RELEASE_FLAGS)
+	$(MAKE) install V=$(V) DESTDIR=$(PKGDIR)/32
 	rm -rf out/deps out/Release
-	$(PYTHON) ./configure --prefix=$(PKGDIR)/usr/local --without-snapshot --dest-cpu=x64 --tag=$(TAG)
-	$(MAKE) install V=$(V)
-	SIGN="$(SIGN)" PKGDIR="$(PKGDIR)" bash tools/osx-codesign.sh
+	$(PYTHON) ./configure \
+		--dest-cpu=x64 \
+		--tag=$(TAG) \
+		--without-snapshot \
+		$(CONFIG_FLAGS) $(BUILD_RELEASE_FLAGS)
+	$(MAKE) install V=$(V) DESTDIR=$(PKGDIR)
+	SIGN="$(CODESIGN_CERT)" PKGDIR="$(PKGDIR)" bash tools/osx-codesign.sh
 	lipo $(PKGDIR)/32/usr/local/bin/node \
 		$(PKGDIR)/usr/local/bin/node \
 		-output $(PKGDIR)/usr/local/bin/node-universal \
 		-create
 	mv $(PKGDIR)/usr/local/bin/node-universal $(PKGDIR)/usr/local/bin/node
 	rm -rf $(PKGDIR)/32
-	$(packagemaker) \
+	$(PACKAGEMAKER) \
 		--id "org.nodejs.Node" \
 		--doc tools/osx-pkg.pmdoc \
 		--out $(PKG)
-	SIGN="$(SIGN)" PKG="$(PKG)" bash tools/osx-productsign.sh
+	SIGN="$(PRODUCTSIGN_CERT)" PKG="$(PKG)" bash tools/osx-productsign.sh
+
+pkg: $(PKG)
+
+pkg-upload: pkg
+	ssh $(STAGINGSERVER) "mkdir -p nodejs/$(DISTTYPEDIR)/$(FULLVERSION)"
+	chmod 664 node-$(FULLVERSION).pkg
+	scp -p node-$(FULLVERSION).pkg $(STAGINGSERVER):nodejs/$(DISTTYPEDIR)/$(FULLVERSION)/node-$(FULLVERSION).pkg
+	ssh $(STAGINGSERVER) "touch nodejs/$(DISTTYPEDIR)/$(FULLVERSION)/node-$(FULLVERSION).pkg.done"
 
 $(TARBALL): release-only node doc
 	git archive --format=tar --prefix=$(TARNAME)/ HEAD | tar xf -
@@ -294,28 +399,126 @@ $(TARBALL): release-only node doc
 	find $(TARNAME)/ -type l | xargs rm # annoying on windows
 	tar -cf $(TARNAME).tar $(TARNAME)
 	rm -rf $(TARNAME)
-	gzip -f -9 $(TARNAME).tar
+	gzip -c -f -9 $(TARNAME).tar > $(TARNAME).tar.gz
+ifeq ($(XZ), 0)
+	xz -c -f -$(XZ_COMPRESSION) $(TARNAME).tar > $(TARNAME).tar.xz
+endif
+	rm $(TARNAME).tar
 
 tar: $(TARBALL)
+
+tar-upload: tar
+	ssh $(STAGINGSERVER) "mkdir -p nodejs/$(DISTTYPEDIR)/$(FULLVERSION)"
+	chmod 664 node-$(FULLVERSION).tar.gz
+	scp -p node-$(FULLVERSION).tar.gz $(STAGINGSERVER):nodejs/$(DISTTYPEDIR)/$(FULLVERSION)/node-$(FULLVERSION).tar.gz
+	ssh $(STAGINGSERVER) "touch nodejs/$(DISTTYPEDIR)/$(FULLVERSION)/node-$(FULLVERSION).tar.gz.done"
+ifeq ($(XZ), 0)
+	chmod 664 node-$(FULLVERSION).tar.xz
+	scp -p node-$(FULLVERSION).tar.xz $(STAGINGSERVER):nodejs/$(DISTTYPEDIR)/$(FULLVERSION)/node-$(FULLVERSION).tar.xz
+	ssh $(STAGINGSERVER) "touch nodejs/$(DISTTYPEDIR)/$(FULLVERSION)/node-$(FULLVERSION).tar.xz.done"
+endif
+
+doc-upload: tar
+	ssh $(STAGINGSERVER) "mkdir -p nodejs/$(DISTTYPEDIR)/$(FULLVERSION)"
+	chmod -R ug=rw-x+X,o=r+X out/doc/
+	scp -pr out/doc/ $(STAGINGSERVER):nodejs/$(DISTTYPEDIR)/$(FULLVERSION)/docs/
+	ssh $(STAGINGSERVER) "touch nodejs/$(DISTTYPEDIR)/$(FULLVERSION)/docs.done"
+
+$(TARBALL)-headers: config.gypi release-only
+	$(PYTHON) ./configure \
+		--prefix=/ \
+		--dest-cpu=$(DESTCPU) \
+		--tag=$(TAG) \
+		$(CONFIG_FLAGS) $(BUILD_RELEASE_FLAGS)
+	HEADERS_ONLY=1 $(PYTHON) tools/install.py install '$(TARNAME)' '/'
+	find $(TARNAME)/ -type l | xargs rm # annoying on windows
+	tar -cf $(TARNAME)-headers.tar $(TARNAME)
+	rm -rf $(TARNAME)
+	gzip -c -f -9 $(TARNAME)-headers.tar > $(TARNAME)-headers.tar.gz
+ifeq ($(XZ), 0)
+	xz -c -f -$(XZ_COMPRESSION) $(TARNAME)-headers.tar > $(TARNAME)-headers.tar.xz
+endif
+	rm $(TARNAME)-headers.tar
+
+tar-headers: $(TARBALL)-headers
+
+tar-headers-upload: tar-headers
+	ssh $(STAGINGSERVER) "mkdir -p nodejs/$(DISTTYPEDIR)/$(FULLVERSION)"
+	chmod 664 $(TARNAME)-headers.tar.gz
+	scp -p $(TARNAME)-headers.tar.gz $(STAGINGSERVER):nodejs/$(DISTTYPEDIR)/$(FULLVERSION)/$(TARNAME)-headers.tar.gz
+	ssh $(STAGINGSERVER) "touch nodejs/$(DISTTYPEDIR)/$(FULLVERSION)/$(TARNAME)-headers.tar.gz.done"
+ifeq ($(XZ), 0)
+	chmod 664 $(TARNAME)-headers.tar.xz
+	scp -p $(TARNAME)-headers.tar.xz $(STAGINGSERVER):nodejs/$(DISTTYPEDIR)/$(FULLVERSION)/$(TARNAME)-headers.tar.xz
+	ssh $(STAGINGSERVER) "touch nodejs/$(DISTTYPEDIR)/$(FULLVERSION)/$(TARNAME)-headers.tar.xz.done"
+endif
 
 $(BINARYTAR): release-only
 	rm -rf $(BINARYNAME)
 	rm -rf out/deps out/Release
-	$(PYTHON) ./configure --prefix=/ --without-snapshot --dest-cpu=$(DESTCPU) --tag=$(TAG) $(CONFIG_FLAGS)
+	$(PYTHON) ./configure --prefix=/ --download=all --with-intl=small-icu \
+		--without-snapshot --dest-cpu=$(DESTCPU) --tag=$(TAG) $(CONFIG_FLAGS)
 	$(MAKE) install DESTDIR=$(BINARYNAME) V=$(V) PORTABLE=1
 	cp README.md $(BINARYNAME)
 	cp LICENSE $(BINARYNAME)
 	cp ChangeLog $(BINARYNAME)
 	tar -cf $(BINARYNAME).tar $(BINARYNAME)
 	rm -rf $(BINARYNAME)
-	gzip -f -9 $(BINARYNAME).tar
+	gzip -c -f -9 $(BINARYNAME).tar > $(BINARYNAME).tar.gz
+ifeq ($(XZ), 0)
+	xz -c -f -$(XZ_COMPRESSION) $(BINARYNAME).tar > $(BINARYNAME).tar.xz
+endif
+	rm $(BINARYNAME).tar
 
 binary: $(BINARYTAR)
 
-dist-upload: $(TARBALL) $(PKG)
-	ssh node@nodejs.org mkdir -p web/nodejs.org/dist/$(VERSION)
-	scp $(TARBALL) node@nodejs.org:~/web/nodejs.org/dist/$(VERSION)/$(TARBALL)
-	scp $(PKG) node@nodejs.org:~/web/nodejs.org/dist/$(VERSION)/$(TARNAME).pkg
+binary-upload-arch: binary
+	ssh $(STAGINGSERVER) "mkdir -p nodejs/$(DISTTYPEDIR)/$(FULLVERSION)"
+	chmod 664 node-$(FULLVERSION)-$(OSTYPE)-$(ARCH).tar.gz
+	scp -p node-$(FULLVERSION)-$(OSTYPE)-$(ARCH).tar.gz $(STAGINGSERVER):nodejs/$(DISTTYPEDIR)/$(FULLVERSION)/node-$(FULLVERSION)-$(OSTYPE)-$(ARCH).tar.gz
+	ssh $(STAGINGSERVER) "touch nodejs/$(DISTTYPEDIR)/$(FULLVERSION)/node-$(FULLVERSION)-$(OSTYPE)-$(ARCH).tar.gz.done"
+ifeq ($(XZ), 0)
+	chmod 664 node-$(FULLVERSION)-$(OSTYPE)-$(ARCH).tar.xz
+	scp -p node-$(FULLVERSION)-$(OSTYPE)-$(ARCH).tar.xz $(STAGINGSERVER):nodejs/$(DISTTYPEDIR)/$(FULLVERSION)/node-$(FULLVERSION)-$(OSTYPE)-$(ARCH).tar.xz
+	ssh $(STAGINGSERVER) "touch nodejs/$(DISTTYPEDIR)/$(FULLVERSION)/node-$(FULLVERSION)-$(OSTYPE)-$(ARCH).tar.xz.done"
+endif
+
+ifeq ($(OSTYPE),darwin)
+binary-upload:
+	$(MAKE) binary-upload-arch \
+		DESTCPU=ia32 \
+		ARCH=x86 \
+		DISTTYPE=$(DISTTYPE) \
+		DATESTRING=$(DATESTRING) \
+		COMMIT=$(COMMIT) \
+		CUSTOMTAG=$(CUSTOMTAG) \
+		CONFIG_FLAGS=$(CONFIG_FLAGS)
+	$(MAKE) binary-upload-arch \
+		DESTCPU=x64 \
+		ARCH=x64 \
+		DISTTYPE=$(DISTTYPE) \
+		DATESTRING=$(DATESTRING) \
+		COMMIT=$(COMMIT) \
+		CUSTOMTAG=$(CUSTOMTAG) \
+		CONFIG_FLAGS=$(CONFIG_FLAGS)
+else
+binary-upload: binary-upload-arch
+endif
+
+
+$(PKGSRC): release-only
+	rm -rf dist out
+	$(PYTHON) configure --prefix=/ --without-snapshot --download=all \
+		--with-intl=small-icu --dest-cpu=$(DESTCPU) --tag=$(TAG) \
+		$(CONFIG_FLAGS)
+	$(MAKE) install DESTDIR=dist
+	(cd dist; find * -type f | sort) > packlist
+	pkg_info -X pkg_install | \
+		egrep '^(MACHINE_ARCH|OPSYS|OS_VERSION|PKGTOOLS_VERSION)' > build-info
+	pkg_create -B build-info -c tools/pkgsrc/comment -d tools/pkgsrc/description \
+		-f packlist -I /opt/local -p dist -U $(PKGSRC)
+
+pkgsrc: $(PKGSRC)
 
 wrkclean:
 	$(MAKE) -C tools/wrk/ clean
@@ -368,9 +571,34 @@ jslintfix:
 jslint:
 	PYTHONPATH=tools/closure_linter/ $(PYTHON) tools/closure_linter/closure_linter/gjslint.py --unix_mode --strict --nojsdoc -r lib/ -r src/ --exclude_files lib/punycode.js
 
+CPPLINT_EXCLUDE ?=
+CPPLINT_EXCLUDE += src/node_root_certs.h
+CPPLINT_EXCLUDE += src/node_win32_perfctr_provider.cc
+CPPLINT_EXCLUDE += src/queue.h
+CPPLINT_EXCLUDE += src/tree.h
+CPPLINT_EXCLUDE += src/v8abbr.h
+
+CPPLINT_FILES = $(filter-out $(CPPLINT_EXCLUDE), $(wildcard src/*.cc src/*.h src/*.c tools/icu/*.h tools/icu/*.cc deps/debugger-agent/include/* deps/debugger-agent/src/*))
+
 cpplint:
-	@$(PYTHON) tools/cpplint.py $(wildcard src/*.cc src/*.h src/*.c)
+	@$(PYTHON) tools/cpplint.py $(CPPLINT_FILES)
 
 lint: jslint cpplint
 
-.PHONY: lint cpplint jslint bench clean docopen docclean doc dist distclean check uninstall install install-includes install-bin all staticlib dynamiclib test test-all website-upload pkg blog blogclean tar binary release-only bench-http-simple bench-idle bench-all bench bench-misc bench-array bench-buffer bench-net bench-http bench-fs bench-tls
+CONFLICT_RE=^>>>>>>> [0-9A-Fa-f]+|^<<<<<<< [A-Za-z]+
+lint-ci: jslint cpplint
+	@if ! ( grep -IEqrs "$(CONFLICT_RE)" benchmark deps doc lib src test tools ) \
+		&& ! ( find . -maxdepth 1 -type f | xargs grep -IEqs "$(CONFLICT_RE)" ); then \
+		exit 0 ; \
+	else \
+		echo "" >&2 ; \
+		echo "Conflict marker detected in one or more files. Please fix them first." >&2 ; \
+		exit 1 ; \
+	fi
+
+.PHONY: lint cpplint jslint bench clean docopen docclean doc dist distclean \
+	check uninstall install install-includes install-bin all staticlib \
+	dynamiclib test test-all test-addons build-addons website-upload pkg \
+	blog blogclean tar binary release-only bench-http-simple bench-idle \
+	bench-all bench bench-misc bench-array bench-buffer bench-net \
+	bench-http bench-fs bench-tls run-ci

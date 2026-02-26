@@ -40,12 +40,13 @@ function TestStringify(expected, input) {
 
 var array_1 = [];
 var array_2 = [];
-array_1[100000] = 1;
-array_2[100000] = function() { return 1; };
-var nulls = "";
-for (var i = 0; i < 100000; i++) {
-  nulls += 'null,';
+array_1[1<<17] = 1;
+array_2[1<<17] = function() { return 1; };
+var nulls = "null,";
+for (var i = 0; i < 17; i++) {
+  nulls += nulls;
 }
+
 expected_1 = '[' + nulls + '1]';
 expected_2 = '[' + nulls + 'null]';
 TestStringify(expected_1, array_1);
@@ -103,6 +104,10 @@ var tojson_via_getter = { get toJSON() {
                               },
                           a: 1 };
 TestStringify('321', tojson_via_getter);
+
+assertThrows(function() {
+  JSON.stringify({ get toJSON() { throw "error"; } });
+});
 
 // Test toJSON with key.
 tojson_obj = { toJSON: function(key) { return key + key; } };

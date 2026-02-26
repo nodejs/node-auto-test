@@ -25,11 +25,13 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-#include "v8.h"
+#include <utility>
 
-#include "global-handles.h"
-#include "snapshot.h"
-#include "cctest.h"
+#include "src/v8.h"
+
+#include "src/global-handles.h"
+#include "src/snapshot.h"
+#include "test/cctest/cctest.h"
 
 using namespace v8::internal;
 
@@ -41,22 +43,22 @@ static Isolate* GetIsolateFrom(LocalContext* context) {
 
 static Handle<JSWeakMap> AllocateJSWeakMap(Isolate* isolate) {
   Factory* factory = isolate->factory();
-  Heap* heap = isolate->heap();
   Handle<Map> map = factory->NewMap(JS_WEAK_MAP_TYPE, JSWeakMap::kSize);
   Handle<JSObject> weakmap_obj = factory->NewJSObjectFromMap(map);
   Handle<JSWeakMap> weakmap(JSWeakMap::cast(*weakmap_obj));
-  // Do not use handles for the hash table, it would make entries strong.
-  Object* table_obj = ObjectHashTable::Allocate(heap, 1)->ToObjectChecked();
-  ObjectHashTable* table = ObjectHashTable::cast(table_obj);
-  weakmap->set_table(table);
-  weakmap->set_next(Smi::FromInt(0));
+  // Do not leak handles for the hash table, it would make entries strong.
+  {
+    HandleScope scope(isolate);
+    Handle<ObjectHashTable> table = ObjectHashTable::New(isolate, 1);
+    weakmap->set_table(*table);
+  }
   return weakmap;
 }
 
 static void PutIntoWeakMap(Handle<JSWeakMap> weakmap,
                            Handle<JSObject> key,
                            Handle<Object> value) {
-  Handle<ObjectHashTable> table = PutIntoObjectHashTable(
+  Handle<ObjectHashTable> table = ObjectHashTable::Put(
       Handle<ObjectHashTable>(ObjectHashTable::cast(weakmap->table())),
       Handle<JSObject>(JSObject::cast(*key)),
       value);
@@ -64,12 +66,14 @@ static void PutIntoWeakMap(Handle<JSWeakMap> weakmap,
 }
 
 static int NumberOfWeakCalls = 0;
-static void WeakPointerCallback(v8::Isolate* isolate,
-                                v8::Persistent<v8::Value> handle,
-                                void* id) {
-  ASSERT(id == reinterpret_cast<void*>(1234));
+static void WeakPointerCallback(
+    const v8::WeakCallbackData<v8::Value, void>& data) {
+  std::pair<v8::Persistent<v8::Value>*, int>* p =
+      reinterpret_cast<std::pair<v8::Persistent<v8::Value>*, int>*>(
+          data.GetParameter());
+  DCHECK_EQ(1234, p->second);
   NumberOfWeakCalls++;
-  handle.Dispose(isolate);
+  p->first->Reset();
 }
 
 
@@ -112,10 +116,10 @@ TEST(Weakness) {
   // Make the global reference to the key weak.
   {
     HandleScope scope(isolate);
-    global_handles->MakeWeak(key.location(),
-                             reinterpret_cast<void*>(1234),
-                             NULL,
-                             &WeakPointerCallback);
+    std::pair<Handle<Object>*, int> handle_and_id(&key, 1234);
+    GlobalHandles::MakeWeak(key.location(),
+                            reinterpret_cast<void*>(&handle_and_id),
+                            &WeakPointerCallback);
   }
   CHECK(global_handles->IsWeak(key.location()));
 
@@ -176,14 +180,15 @@ TEST(Shrinking) {
 // Test that weak map values on an evacuation candidate which are not reachable
 // by other paths are correctly recorded in the slots buffer.
 TEST(Regress2060a) {
+  if (i::FLAG_never_compact) return;
   FLAG_always_compact = true;
   LocalContext context;
   Isolate* isolate = GetIsolateFrom(&context);
   Factory* factory = isolate->factory();
   Heap* heap = isolate->heap();
   HandleScope scope(isolate);
-  Handle<JSFunction> function =
-      factory->NewFunction(factory->function_string(), factory->null_value());
+  Handle<JSFunction> function = factory->NewFunction(
+      factory->function_string());
   Handle<JSObject> key = factory->NewJSObject(function);
   Handle<JSWeakMap> weakmap = AllocateJSWeakMap(isolate);
 
@@ -211,6 +216,7 @@ TEST(Regress2060a) {
 // Test that weak map keys on an evacuation candidate which are reachable by
 // other strong paths are correctly recorded in the slots buffer.
 TEST(Regress2060b) {
+  if (i::FLAG_never_compact) return;
   FLAG_always_compact = true;
 #ifdef VERIFY_HEAP
   FLAG_verify_heap = true;
@@ -221,8 +227,8 @@ TEST(Regress2060b) {
   Factory* factory = isolate->factory();
   Heap* heap = isolate->heap();
   HandleScope scope(isolate);
-  Handle<JSFunction> function =
-      factory->NewFunction(factory->function_string(), factory->null_value());
+  Handle<JSFunction> function = factory->NewFunction(
+      factory->function_string());
 
   // Start second old-space page so that keys land on evacuation candidate.
   Page* first_page = heap->old_pointer_space()->anchor()->next_page();
@@ -248,4 +254,21 @@ TEST(Regress2060b) {
   heap->CollectAllGarbage(Heap::kNoGCFlags);
   heap->CollectAllGarbage(Heap::kNoGCFlags);
   heap->CollectAllGarbage(Heap::kNoGCFlags);
+}
+
+
+TEST(Regress399527) {
+  CcTest::InitializeVM();
+  v8::HandleScope scope(CcTest::isolate());
+  Isolate* isolate = CcTest::i_isolate();
+  Heap* heap = isolate->heap();
+  {
+    HandleScope scope(isolate);
+    AllocateJSWeakMap(isolate);
+    SimulateIncrementalMarking(heap);
+  }
+  // The weak map is marked black here but leaving the handle scope will make
+  // the object unreachable. Aborting incremental marking will clear all the
+  // marking bits which makes the weak map garbage.
+  heap->CollectAllGarbage(Heap::kAbortIncrementalMarkingMask);
 }

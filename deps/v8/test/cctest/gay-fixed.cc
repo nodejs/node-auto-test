@@ -29,9 +29,9 @@
 // have been generated using Gay's dtoa to produce the fixed representation:
 //         dtoa(v, 3, number_digits, &decimal_point, &sign, NULL);
 
-#include "v8.h"
+#include "src/v8.h"
 
-#include "gay-fixed.h"
+#include "test/cctest/gay-fixed.h"
 
 namespace v8 {
 namespace internal {

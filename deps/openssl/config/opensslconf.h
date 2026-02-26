@@ -44,6 +44,9 @@
 # ifndef OPENSSL_NO_STORE
 #  define OPENSSL_NO_STORE
 # endif
+# ifndef OPENSSL_NO_WEAK_SSL_CIPHERS
+#  define OPENSSL_NO_WEAK_SSL_CIPHERS
+# endif
 #endif /* OPENSSL_DOING_MAKEDEPEND */
 
 #ifndef OPENSSL_THREADS
@@ -111,6 +114,9 @@
 # endif
 # if defined(OPENSSL_NO_MDC2) && !defined(NO_MDC2)
 #  define NO_MDC2
+# endif
+# if defined(OPENSSL_NO_WEAK_SSL_CIPHERS) && !defined(NO_WEAK_SSL_CIPHERS)
+#  define NO_WEAK_SSL_CIPHERS
 # endif
 #endif
 
@@ -299,7 +305,7 @@
       even newer MIPS CPU's, but at the moment one size fits all for
       optimization options.  Older Sparc's work better with only UNROLL, but
       there's no way to tell at compile time what it is you're running on */
-#  if defined( sun )		/* Newer Sparc's */
+#  if defined( __sun ) || defined ( sun )		/* Newer Sparc's */
 #    define DES_PTR
 #    define DES_RISC1
 #    define DES_UNROLL

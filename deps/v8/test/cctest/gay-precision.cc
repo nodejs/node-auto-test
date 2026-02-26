@@ -29,9 +29,9 @@
 // have been generated using Gay's dtoa to produce the precision representation:
 //         dtoa(v, 2, number_digits, &decimal_point, &sign, NULL);
 
-#include "v8.h"
+#include "src/v8.h"
 
-#include "gay-precision.h"
+#include "test/cctest/gay-precision.h"
 
 namespace v8 {
 namespace internal {

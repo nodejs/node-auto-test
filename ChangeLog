@@ -1,4 +1,1268 @@
-2013.04.19, Version 0.11.1 (Unstable)
+2016-10-18, Version 0.12.17 (Maintenance), @rvagg
+
+This is a security release. All Node.js users should consult the security release summary at https://nodejs.org/en/blog/vulnerability/october-2016-security-releases/ for details on patched vulnerabilities.
+
+Notable changes:
+
+* c-ares: fix for single-byte buffer overwrite, CVE-2016-5180, more information at https://c-ares.haxx.se/adv_20160929.html (Daniel Stenberg)
+
+Commits:
+
+* [c5b095ecf8] - deps: avoid single-byte buffer overwrite (Daniel Stenberg) https://github.com/nodejs/node/pull/8849
+* [5f1097dcb0] - win,build: try multiple timeservers when signing (Rod Vagg) https://github.com/nodejs/node/pull/9155
+
+2016-09-27, Version 0.12.16 (Maintenance), @rvagg
+
+This is a security release. All Node.js users should consult the security release summary at https://nodejs.org/en/blog/vulnerability/september-2016-security-releases/ for details on patched vulnerabilities.
+
+Notable changes:
+
+* buffer: Zero-fill excess bytes in new `Buffer` objects created with `Buffer.concat()` while providing a `totalLength` parameter that exceeds the total length of the original `Buffer` objects being concatenated. (Сковорода Никита Андреевич)
+* http:
+  - CVE-2016-5325 - Properly validate for allowable characters in the `reason` argument in `ServerResponse#writeHead()`. Fixes a possible response splitting attack vector. This introduces a new case where `throw` may occur when configuring HTTP responses, users should already be adopting try/catch here. Originally reported independently by Evan Lucas and Romain Gaucher. (Evan Lucas)
+  - Invalid status codes can no longer be sent. Limited to 3 digit numbers between 100 - 999. Lack of proper validation may also serve as a potential response splitting attack vector. Backported from v4.x. (Brian White)
+* openssl:
+  - Upgrade to 1.0.1u, fixes a number of defects impacting Node.js: CVE-2016-6304 ("OCSP Status Request extension unbounded memory growth", high severity), CVE-2016-2183, CVE-2016-6303, CVE-2016-2178 and CVE-2016-6306.
+  - Remove support for loading dynamic third-party engine modules. An attacker may be able to hide malicious code to be inserted into Node.js at runtime by masquerading as one of the dynamic engine modules. Originally reported by Ahmed Zaki (Skype). (Ben Noordhuis, Rod Vagg)
+* tls: CVE-2016-7099 - Fix invalid wildcard certificate validation check whereby a TLS server may be able to serve an invalid wildcard certificate for its hostname due to improper validation of `*.` in the wildcard string. Originally reported by Alexander Minozhenko and James Bunton (Atlassian). (Ben Noordhuis)
+
+Commits:
+
+* [38d7258d89] - buffer: zero-fill uninitialized bytes in .concat() (Сковорода Никита Андреевич) https://github.com/nodejs/node-private/pull/66
+* [1ba6d16786] - build: turn on -fno-delete-null-pointer-checks (Ben Noordhuis) https://github.com/nodejs/node/pull/6737
+* [71e4285e27] - crypto: don't build hardware engines (Rod Vagg) https://github.com/nodejs/node-private/pull/69
+* [b6e0105a66] - deps: add -no_rand_screen to openssl s_client (Shigeki Ohtsu) https://github.com/nodejs/node-v0.x-archive/pull/25368
+* [1caec97eab] - deps: fix openssl assembly error on ia32 win32 (Fedor Indutny) https://github.com/nodejs/node-v0.x-archive/pull/25654
+* [734bc6938b] - deps: separate sha256/sha512-x86_64.pl for openssl (Shigeki Ohtsu) https://github.com/nodejs/node-v0.x-archive/pull/25654
+* [7cc6d4eb5c] - deps: copy all openssl header files to include dir (Shigeki Ohtsu) https://github.com/nodejs/node/pull/8718
+* [4a9da21217] - deps: upgrade openssl sources to 1.0.1u (Shigeki Ohtsu) https://github.com/nodejs/node/pull/8718
+* [6d977902bd] - http: check reason chars in writeHead (Evan Lucas) https://github.com/nodejs/node-private/pull/47
+* [ad470e496b] - http: disallow sending obviously invalid status codes (Evan Lucas) https://github.com/nodejs/node-private/pull/47
+* [9dbde2fc88] - lib: make tls.checkServerIdentity() more strict (Ben Noordhuis) https://github.com/nodejs/node-private/pull/61
+* [db80592071] - openssl: fix keypress requirement in apps on win32 (Shigeki Ohtsu) https://github.com/nodejs/node-v0.x-archive/pull/25654
+
+2016-06-23, Version 0.12.15 (Maintenance), @rvagg
+
+Notable changes:
+
+This is a security release. All Node.js users should consult the security release summary at https://nodejs.org/en/blog/vulnerability/june-2016-security-releases/ for details on patched vulnerabilities.
+
+* libuv: (CVE-2014-9748) Fixes a bug in the read/write locks implementation for Windows XP and Windows 2003 that can lead to undefined and potentially unsafe behaviour. More information can be found at https://github.com/libuv/libuv/issues/515 or at https://nodejs.org/en/blog/vulnerability/june-2016-security-releases/.
+* V8: (CVE-2016-1669) Fixes a potential Buffer overflow vulnerability discovered in V8, more details can be found in the CVE at https://www.cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2016-1669 or at https://nodejs.org/en/blog/vulnerability/june-2016-security-releases/.
+
+Commits:
+
+* [da8501edf6] - deps: backport bd1777fd from libuv upstream (Rod Vagg)
+* [9207a00f8e] - deps: backport 85adf43e from libuv upstream (Rod Vagg)
+* [9627f34230] - deps: backport 98239224 from libuv upstream (Rod Vagg)
+* [5df21b2e36] - deps: backport 9a4fd268 from libuv upstream (Rod Vagg)
+* [e75de35057] - deps: backport 3eb6764a from libuv upstream (Rod Vagg)
+* [a113e02f16] - deps: backport 3a9bfec from v8 upstream (Ben Noordhuis)
+* [8138055c88] - test: fix test failure due to expired certificates (Ben Noordhuis) https://github.com/nodejs/node/pull/7195
+
+2016-05-06, Version 0.12.14 (Maintenance), @rvagg
+
+Notable changes:
+
+* npm: Correct erroneous version number in v2.15.1 code (Forrest L Norvell) https://github.com/nodejs/node/pull/5988
+* openssl: Upgrade to v1.0.1t, addressing security vulnerabilities (Shigeki Ohtsu) https://github.com/nodejs/node/pull/6553
+  - Fixes CVE-2016-2107 "Padding oracle in AES-NI CBC MAC check"
+  - Fixes CVE-2016-2105 "EVP_EncodeUpdate overflow"
+  - See https://nodejs.org/en/blog/vulnerability/openssl-may-2016/ for full details
+
+Commits:
+
+* [3e99ee1b47] - deps: completely upgrade npm in LTS to 2.15.1 (Forrest L Norvell) https://github.com/nodejs/node/pull/5988
+* [2b63396e1f] - deps: add -no_rand_screen to openssl s_client (Shigeki Ohtsu) https://github.com/joyent/node/pull/25368
+* [f21705df58] - deps: update openssl asm files (Shigeki Ohtsu) https://github.com/nodejs/node/pull/6553
+* [02b6a6bc27] - deps: fix openssl assembly error on ia32 win32 (Fedor Indutny) https://github.com/joyent/node/pull/25654
+* [1aecc668b0] - deps: separate sha256/sha512-x86_64.pl for openssl (Shigeki Ohtsu) https://github.com/joyent/node/pull/25654
+* [39380836a0] - deps: copy all openssl header files to include dir (Shigeki Ohtsu) https://github.com/nodejs/node/pull/6553
+* [08c8ae44a8] - deps: upgrade openssl sources to 1.0.1t (Shigeki Ohtsu) https://github.com/nodejs/node/pull/6553
+* [f5a961ab13] - openssl: fix keypress requirement in apps on win32 (Shigeki Ohtsu) https://github.com/joyent/node/pull/25654
+* [810fb211a7] - tools: remove obsolete npm test-legacy command (Kat Marchán) https://github.com/nodejs/node/pull/5988
+
+2016-03-31, Version 0.12.13 (LTS), @rvagg
+
+Notable changes:
+
+* npm: Upgrade to v2.15.1. Fixes a security flaw in the use of authentication tokens in HTTP requests that would allow an attacker to set up a server that could collect tokens from users of the command-line interface. Authentication tokens have previously been sent with every request made by the CLI for logged-in users, regardless of the destination of the request. This update fixes this by only including those tokens for requests made against the registry or registries used for the current install. (Forrest L Norvell) https://github.com/nodejs/node/pull/5967
+* openssl: OpenSSL v1.0.1s disables the EXPORT and LOW ciphers as they are obsolete and not considered safe. This release of Node.js turns on `OPENSSL_NO_WEAK_SSL_CIPHERS` to fully disable the 27 ciphers included in these lists which can be used in SSLv3 and higher. Full details can be found in our LTS discussion on the matter (https://github.com/nodejs/LTS/issues/85). (Shigeki Ohtsu) https://github.com/nodejs/node/pull/5712
+
+Commits:
+
+* [2ce29165a1] - deps: upgrade npm in LTS to 2.15.1 (Forrest L Norvell)
+* [a115779026] - deps: Disable EXPORT and LOW ciphers in openssl (Shigeki Ohtsu) https://github.com/nodejs/node/pull/5712
+* [ab907eb5a8] - test: skip cluster-disconnect-race on Windows (Gibson Fahnestock) https://github.com/nodejs/node/pull/5621
+* [9c06db7444] - test: change tls tests not to use LOW cipher (Shigeki Ohtsu) https://github.com/nodejs/node/pull/5712
+* [154098a3dc] - test: bp fix for test-http-get-pipeline-problem.js (Michael Dawson) https://github.com/nodejs/node/pull/3013
+* [ff2bed6e86] - win,build: support Visual C++ Build Tools 2015 (João Reis) https://github.com/nodejs/node/pull/5627
+
+2016-03-08, Version 0.12.12 (LTS), @rvagg
+
+Notable changes:
+
+* openssl: Fully remove SSLv2 support, the `--enable-ssl2` command line argument will now produce an error. The DROWN Attack (https://drownattack.com/) creates a vulnerability where SSLv2 is enabled by a server, even if a client connection is not using SSLv2. The SSLv2 protocol is widely considered unacceptably broken and should not be supported. More information is available at https://www.openssl.org/news/vulnerabilities.html#2016-0800
+
+Note that the upgrade to OpenSSL 1.0.1s in Node.js v0.12.11 removed internal SSLv2 support. The change in this release was originally intended for v0.12.11. The `--enable-ssl2` command line argument now produces an error rather than being a no-op.
+
+Commits:
+
+* [dbfc9d9241] - crypto,tls: remove SSLv2 support (Ben Noordhuis) https://github.com/nodejs/node/pull/5536
+
+2016-03-03, Version 0.12.11 (LTS), @rvagg
+
+Notable changes:
+
+* http_parser: Update to http-parser 2.3.2 to fix an unintentionally strict limitation of allowable header characters. (James M Snell) https://github.com/nodejs/node/pull/5241
+* domains:
+  - Prevent an exit due to an exception being thrown rather than emitting an 'uncaughtException' event on the `process` object when no error handler is set on the domain within which an error is thrown and an 'uncaughtException' event listener is set on `process`. (Julien Gilli) https://github.com/nodejs/node/pull/3885
+  - Fix an issue where the process would not abort in the proper function call if an error is thrown within a domain with no error handler and `--abort-on-uncaught-exception` is used. (Julien Gilli) https://github.com/nodejs/node/pull/3885
+* openssl: Upgrade from 1.0.1r to 1.0.1s (Ben Noordhuis) https://github.com/nodejs/node/pull/5509
+  - Fix a double-free defect in parsing malformed DSA keys that may potentially be used for DoS or memory corruption attacks. It is likely to be very difficult to use this defect for a practical attack and is therefore considered low severity for Node.js users. More info is available at https://www.openssl.org/news/vulnerabilities.html#2016-0705
+  - Fix a defect that can cause memory corruption in certain very rare cases relating to the internal `BN_hex2bn()` and `BN_dec2bn()` functions. It is believed that Node.js is not invoking the code paths that use these functions so practical attacks via Node.js using this defect are _unlikely_ to be possible. More info is available at https://www.openssl.org/news/vulnerabilities.html#2016-0797
+  - Fix a defect that makes the CacheBleed Attack (https://ssrg.nicta.com.au/projects/TS/cachebleed/) possible. This defect enables attackers to execute side-channel attacks leading to the potential recovery of entire RSA private keys. It only affects the Intel Sandy Bridge (and possibly older) microarchitecture when using hyper-threading. Newer microarchitectures, including Haswell, are unaffected. More info is available at https://www.openssl.org/news/vulnerabilities.html#2016-0702
+
+Commits:
+
+* [1ab6653db9] - build: update Node.js logo on OSX installer (Rod Vagg) https://github.com/nodejs/node/pull/5401
+* [fcc64792ae] - child_process: guard against race condition (Rich Trott) https://github.com/nodejs/node/pull/5153
+* [6c468df9af] - child_process: fix data loss with readable event (Brian White) https://github.com/nodejs/node/pull/5037
+* [61a22019c2] - deps: upgrade openssl to 1.0.1s (Ben Noordhuis) https://github.com/nodejs/node/pull/5509
+* [fa26b13df7] - deps: update to http-parser 2.3.2 (James M Snell) https://github.com/nodejs/node/pull/5241
+* [46c8e2165f] - deps: backport 1f8555 from v8's upstream (Trevor Norris) https://github.com/nodejs/node/pull/3945
+* [ce58c2c31a] - doc: remove SSLv2 descriptions (Shigeki Ohtsu) https://github.com/nodejs/node/pull/5541
+* [018e4e0b1a] - domains: fix handling of uncaught exceptions (Julien Gilli) https://github.com/nodejs/node/pull/3885
+* [d421e85dc9] - lib: fix cluster handle leak (Rich Trott) https://github.com/nodejs/node/pull/5152
+* [3a48f0022f] - node: fix leaking Context handle (Trevor Norris) https://github.com/nodejs/node/pull/3945
+* [28dddabf6a] - src: fix build error without OpenSSL support (Jörg Krause) https://github.com/nodejs/node/pull/4201
+* [a79baf03cd] - src: use global SealHandleScope (Trevor Norris) https://github.com/nodejs/node/pull/3945
+* [be39f30447] - test: add test-domain-exit-dispose-again back (Julien Gilli) https://github.com/nodejs/node/pull/4278
+* [da66166b9a] - test: fix test-domain-exit-dispose-again (Julien Gilli) https://github.com/nodejs/node/pull/3991
+
+2016-02-09, Version 0.12.10 (LTS), @jasnell
+
+This is an important security release. All Node.js users should consult the security release summary at nodejs.org for details on patched vulnerabilities.
+
+Notable changes:
+
+* http: fix defects in HTTP header parsing for requests and responses that can allow request smuggling (CVE-2016-2086) or response splitting (CVE-2016-2216). HTTP header parsing now aligns more closely with the HTTP spec including restricting the acceptable characters.
+* http-parser: upgrade from 2.3.0 to 2.3.1
+* openssl: upgrade from 1.0.1q to 1.0.1r. To mitigate against the Logjam attack, TLS clients now reject Diffie-Hellman handshakes with parameters shorter than 1024-bits, up from the previous limit of 768-bits.
+* src:
+  - introduce new `--security-revert={cvenum}` command line flag for selective reversion of specific CVE fixes
+  - allow the fix for CVE-2016-2216 to be selectively reverted using `--security-revert=CVE-2016-2216`
+* build:
+  - xz compressed tar files will be made available from nodejs.org for v0.12 builds from v0.12.10 onward
+  - A headers.tar.gz file will be made available from nodejs.org for v0.12 builds from v0.12.10 onward, a future change to node-gyp will be required to make use of these
+
+Commits:
+
+* [4312848bff] - build: enable xz compressed tarballs where possible (Rod Vagg) https://github.com/nodejs/node/pull/4894
+* [247626245c] - deps: upgrade openssl sources to 1.0.1r (Shigeki Ohtsu) https://github.com/joyent/node/pull/25368
+* [744c9749fc] - deps: update http-parser to version 2.3.1 (James M Snell)
+* [d1c56ec7d1] - doc: clarify v0.12.9 notable items (Rod Vagg) https://github.com/nodejs/node/pull/4154
+* [e128d9a5b4] - http: strictly forbid invalid characters from headers (James M Snell)
+* [bdb9f2cf89] - src: avoiding compiler warnings in node_revert.cc (James M Snell)
+* [23bced1fb3] - src: add --security-revert command line flag (James M Snell)
+* [f41a3c73e7] - tools: backport tools/install.py for headers (Richard Lau) https://github.com/nodejs/node/pull/4149
+
+2015-12-04, Version 0.12.9 (LTS), @rvagg
+
+Security Update
+
+Notable changes:
+
+* http: Fix CVE-2015-8027, a bug whereby an HTTP socket may no longer have a parser associated with it but a pipelined request attempts to trigger a pause or resume on the non-existent parser, a potential denial-of-service vulnerability. (Fedor Indutny)
+* openssl: Upgrade to 1.0.1q, fixes CVE-2015-3194 "Certificate verify crash with missing PSS parameter", a potential denial-of-service vector for Node.js TLS servers using client certificate authentication; TLS clients are also impacted. Details are available at <http://openssl.org/news/secadv/20151203.txt>. (Ben Noordhuis) https://github.com/nodejs/node/pull/4133
+
+Commits:
+
+* [8d24a14f2c] - deps: upgrade to openssl 1.0.1q (Ben Noordhuis) https://github.com/nodejs/node/pull/4133
+* [dfc6f4a9af] - http: fix pipeline regression (Fedor Indutny)
+
+2015.11.25, Version 0.12.8 (LTS)
+
+* [d9399569bd] - build: backport tools/release.sh (Rod Vagg) https://github.com/nodejs/node/pull/3642
+* [78c5b4c8bd] - build: backport config for new CI infrastructure (Rod Vagg) https://github.com/nodejs/node/pull/3642
+* [83441616a5] - build: fix --without-ssl compile time error (Ben Noordhuis) https://github.com/nodejs/node/pull/3825
+* [8887666b0b] - build: update manifest to include Windows 10 (Lucien Greathouse) https://github.com/nodejs/node/pull/2843
+* [08afe4ec8e] - build: add MSVS 2015 support (Rod Vagg) https://github.com/nodejs/node/pull/2843
+* [4f2456369c] - build: work around VS2015 issue in ICU <56 (Steven R. Loomis) https://github.com/nodejs/node-v0.x-archive/pull/25804
+* [15030f26fd] - build: Intl: bump ICU4C from 54 to 55 (backport) (Steven R. Loomis) https://github.com/nodejs/node-v0.x-archive/pull/25856
+* [1083fa70f0] - build: run-ci makefile rule (Alexis Campailla) https://github.com/nodejs/node-v0.x-archive/pull/25653
+* [2d2494cf14] - build: support flaky tests in test-ci (Alexis Campailla) https://github.com/nodejs/node-v0.x-archive/pull/25653
+* [b25d26f2ef] - build: support Jenkins via test-ci (Alexis Campailla) https://github.com/nodejs/node-v0.x-archive/pull/25653
+* [7e4b47f38a] - build,win: fix node.exe resource version (João Reis) https://github.com/nodejs/node/pull/3053
+* [e07c86e240] - build,win: try next MSVS version on failure (João Reis) https://github.com/nodejs/node/pull/2843
+* [b5a0abcfdf] - child_process: clone spawn options argument (cjihrig) https://github.com/nodejs/node-v0.x-archive/pull/9159
+* [8b81f98c41] - configure: add --without-mdb flag (cgalibern) https://github.com/nodejs/node-v0.x-archive/pull/25707
+* [071c860c2b] - crypto: replace rwlocks with simple mutexes (Ben Noordhuis) https://github.com/nodejs/node/pull/2723
+* [ca97fb6be3] - deps: upgrade npm to 2.14.9 (Forrest L Norvell) https://github.com/nodejs/node/pull/3684
+* [583734342e] - deps: fix openssl for MSVS 2015 (Andy Polyakov) https://github.com/nodejs/node/pull/2843
+* [02c262a4c6] - deps: fix gyp to work on MacOSX without XCode (Shigeki Ohtsu) https://github.com/nodejs/node/pull/2843
+* [f0fba0bce8] - deps: update gyp to 25ed9ac (João Reis) https://github.com/nodejs/node/pull/2843
+* [f693565813] - deps: upgrade to npm 2.13.4 (Kat Marchán) https://github.com/nodejs/node-v0.x-archive/pull/25825
+* [618b142679] - deps,v8: fix compilation in VS2015 (João Reis) https://github.com/nodejs/node/pull/2843
+* [49b4f0d54e] - doc: backport README.md (Rod Vagg) https://github.com/nodejs/node/pull/3642
+* [2860c53562] - doc: fixed child_process.exec doc (Tyler Anton) https://github.com/nodejs/node-v0.x-archive/pull/14088
+* [4a91fa11a3] - doc: Update docs for os.platform() (George Kotchlamazashvili) https://github.com/nodejs/node-v0.x-archive/pull/25777
+* [b03ab02fe8] - doc: Change the link for v8 docs to v8dox.com (Chad Walker) https://github.com/nodejs/node-v0.x-archive/pull/25811
+* [1fd8f37efd] - doc: buffer, adding missing backtick (Dyana Rose) https://github.com/nodejs/node-v0.x-archive/pull/25811
+* [162d0db3bb] - doc: tls.markdown, adjust version from v0.10.39 to v0.10.x (James M Snell) https://github.com/nodejs/node-v0.x-archive/pull/25591
+* [eda2560cdc] - doc: additional refinement to readable event (James M Snell) https://github.com/nodejs/node-v0.x-archive/pull/25591
+* [881d9bea01] - doc: readable event clarification (James M Snell) https://github.com/nodejs/node-v0.x-archive/pull/25591
+* [b6378f0c75] - doc: stream.unshift does not reset reading state (James M Snell) https://github.com/nodejs/node-v0.x-archive/pull/25591
+* [4952e2b4d2] - doc: clarify Readable._read and Readable.push (fresheneesz) https://github.com/nodejs/node-v0.x-archive/pull/25591
+* [14000b97d4] - doc: two minor stream doc improvements (James M Snell) https://github.com/nodejs/node-v0.x-archive/pull/25591
+* [6b6bd21497] - doc: Clarified read method with specified size argument. (Philippe Laferriere) https://github.com/nodejs/node-v0.x-archive/pull/25591
+* [16f547600a] - doc: Document http.request protocol option (Ville Skyttä) https://github.com/nodejs/node-v0.x-archive/pull/25591
+* [618e4ecda9] - doc: add a note about readable in flowing mode (James M Snell) https://github.com/nodejs/node-v0.x-archive/pull/25591
+* [0b165be37b] - doc: fix line wrapping in buffer.markdown (James M Snell) https://github.com/nodejs/node-v0.x-archive/pull/25591
+* [70dd13f88d] - doc: add CleartextStream deprecation notice (James M Snell) https://github.com/nodejs/node-v0.x-archive/pull/25591
+* [418cde0765] - doc: mention that mode is ignored if file exists (James M Snell) https://github.com/nodejs/node-v0.x-archive/pull/25591
+* [85bcb281e4] - doc: improve http.abort description (James M Snell) https://github.com/nodejs/node-v0.x-archive/pull/25591
+* [5ccb429ee8] - doc, comments: Grammar and spelling fixes (Ville Skyttä) https://github.com/nodejs/node-v0.x-archive/pull/25591
+* [a24db43101] - docs: event emitter behavior notice (Samuel Mills (Henchman)) https://github.com/nodejs/node-v0.x-archive/pull/25467
+* [8cbf7cb021] - docs: events clarify emitter.listener() behavior (Benjamin Steephenson) https://github.com/nodejs/node-v0.x-archive/pull/25591
+* [b7229debbe] - docs: Fix default options for fs.createWriteStream() (Chris Neave) https://github.com/nodejs/node-v0.x-archive/pull/25591
+* [f0453caea2] - domains: port caeb677 from v0.10 to v0.12 (Jeremy Whitlock) https://github.com/nodejs/node-v0.x-archive/pull/25835
+* [261fa3620f] - src: fix intermittent SIGSEGV in resolveTxt (Evan Lucas) https://github.com/nodejs/node-v0.x-archive/pull/9300
+* [1f7257b02d] - test: mark test-https-aws-ssl flaky on linux (João Reis) https://github.com/nodejs/node-v0.x-archive/pull/25893
+* [cf435d55db] - test: mark test-signal-unregister as flaky (Alexis Campailla) https://github.com/nodejs/node-v0.x-archive/pull/25750
+* [ceb6a8c131] - test: fix test-debug-port-from-cmdline (João Reis) https://github.com/nodejs/node-v0.x-archive/pull/25748
+* [22997731e6] - test: add regression test for #25735 (Fedor Indutny) https://github.com/nodejs/node-v0.x-archive/pull/25739
+* [39e05639f4] - test: mark http-pipeline-flood flaky on win32 (Julien Gilli) https://github.com/nodejs/node-v0.x-archive/pull/25707
+* [78d256e7f5] - test: unmark tests that are no longer flaky (João Reis) https://github.com/nodejs/node-v0.x-archive/pull/25676
+* [a9b642cf5b] - test: runner should return 0 on flaky tests (Alexis Campailla) https://github.com/nodejs/node-v0.x-archive/pull/25653
+* [b48639befd] - test: support writing test output to file (Alexis Campailla) https://github.com/nodejs/node-v0.x-archive/pull/25653
+* [caa16b41d6] - (SEMVER-MINOR) tls: prevent server from using dhe keys < 768 (Michael Dawson) https://github.com/nodejs/node/pull/3890
+* [0363cf4a80] - tls: Closing parent socket also closes the tls sock (Devin Nakamura) https://github.com/nodejs/node-v0.x-archive/pull/25642
+* [75697112e8] - tls: do not hang without `newSession` handler (Fedor Indutny) https://github.com/nodejs/node-v0.x-archive/pull/25739
+* [d998a65058] - tools: pass constant to logger instead of string (Johan Bergström) https://github.com/nodejs/node-v0.x-archive/pull/25653
+* [1982ed6e63] - v8: port fbff705 from v0.10 to v0.12 (Jeremy Whitlock) https://github.com/nodejs/node-v0.x-archive/pull/25835
+* [44d7054252] - win: fix custom actions for WiX older than 3.9 (João Reis) https://github.com/nodejs/node/pull/2843
+* [586c4d8b8e] - win: fix custom actions on Visual Studio != 2013 (Julien Gilli) https://github.com/nodejs/node/pull/2843
+* [14db629497] - win,msi: correct installation path registry keys (João Reis) https://github.com/nodejs/node-v0.x-archive/pull/25640
+* [8e80528453] - win,msi: change InstallScope to perMachine (João Reis) https://github.com/nodejs/node-v0.x-archive/pull/25640
+* [35bbe98401] - Update addons.markdown (Max Deepfield) https://github.com/nodejs/node-v0.x-archive/pull/25885
+* [9a6f1ce416] - comma (Julien Valéry) https://github.com/nodejs/node-v0.x-archive/pull/25811
+* [d384bf8f84] - Update assert.markdown (daveboivin) https://github.com/nodejs/node-v0.x-archive/pull/25811
+* [89b22ccbe1] - Fixed typo (Andrew Murray) https://github.com/nodejs/node-v0.x-archive/pull/25811
+* [5ad05af380] - Update util.markdown (Daniel Rentz) https://github.com/nodejs/node-v0.x-archive/pull/25591
+* [cb660ab3d3] - Update child_process.markdown, spelling (Jared Fox) https://github.com/nodejs/node-v0.x-archive/pull/25591
+* [59c67fe3cd] - updated documentation for fs.createReadStream (Michele Caini) https://github.com/nodejs/node-v0.x-archive/pull/25591
+* [53b6a615a5] - Documentation update about Buffer initialization (Sarath) https://github.com/nodejs/node-v0.x-archive/pull/25591
+* [b8d47a7b6f] - fix (Fedor Indutny) https://github.com/nodejs/node-v0.x-archive/pull/25739
+
+2015.07.09, Version 0.12.7 (Stable)
+
+* openssl: upgrade to 1.0.1p
+
+* npm: upgrade to 2.11.3
+
+* V8: cherry-pick JitCodeEvent patch from upstream (Ben Noordhuis)
+
+* win,msi: create npm folder in AppData directory (Steven Rockarts)
+
+
+2015.07.03, Version 0.12.6 (Stable), 0be9a77bb18ec15b4fb6a1fb0762f313b7351201
+
+* V8: fix out-of-band write in utf8 decoder
+
+
+2015.06.22, Version 0.12.5 (Stable), 61c6abf00898fe00eb7fcf2c23ba0b01cf12034c
+
+* openssl: upgrade to 1.0.1o (Addressing multiple CVEs)
+
+* npm: upgrade to 2.11.2
+
+* uv: upgrade to 1.6.1
+
+* V8: avoid deadlock when profiling is active (Dmitri Melikyan)
+
+* install: fix source path for openssl headers (Oguz Bastemur)
+
+* install: make sure opensslconf.h is overwritten (Oguz Bastemur)
+
+* timers: fix timeout when added in timer's callback (Julien Gilli)
+
+* windows: broadcast WM_SETTINGCHANGE after install (Mathias Küsel)
+
+
+2015.05.22, Version 0.12.4 (Stable), 0a604e92e258c5ee2752d763e50721e35053f135
+
+* npm: upgrade to 2.10.1
+
+* V8: revert v8 Array.prototype.values() removal (cjihrig)
+
+* win: bring back xp/2k3 support (Bert Belder)
+
+
+2015.05.13, Version 0.12.3 (Stable), 03431c7d7b4b4a3054ca8ae2cfa8009e3e84a2c7
+
+* V8: update to 3.28.71.19
+
+* uv: upgrade to 1.5.0
+
+* npm: upgrade to 2.9.1
+
+* V8: don't busy loop in v8 cpu profiler thread (Mike Tunnicliffe)
+
+* V8: fix issue with let bindings in for loops (adamk)
+
+* debugger: don't spawn child process in remote mode (Jackson Tian)
+
+* net: do not set V4MAPPED on FreeBSD (Julien Gilli)
+
+* repl: make 'Unexpected token' errors recoverable (Julien Gilli)
+
+* src: backport ignore ENOTCONN on shutdown race (Ben Noordhuis)
+
+* src: fix backport of SIGINT crash fix on FreeBSD (Julien Gilli)
+
+
+2015.03.31, Version 0.12.2 (Stable), 523d445705027438b83b8d5958c9beeb1c8711d9
+
+* uv: Upgrade to 1.4.2
+
+* npm: Upgrade to 2.7.4
+
+* V8: do not add extra newline in log file (Julien Gilli)
+
+* V8: Fix --max_old_space_size=4096 integer overflow (Andrei Sedoi)
+
+* asyncwrap: fix constructor condition for early ret (Trevor Norris)
+
+* buffer: align chunks on 8-byte boundary (Fedor Indutny)
+
+* buffer: fix pool offset adjustment (Trevor Norris)
+
+* build: fix use of strict aliasing (Trevor Norris)
+
+* console: allow Object.prototype fields as labels (Colin Ihrig)
+
+* fs: make F_OK/R_OK/W_OK/X_OK not writable (Jackson Tian)
+
+* fs: properly handle fd passed to truncate() (Bruno Jouhier)
+
+* http: fix assert on data/end after socket error (Fedor Indutny)
+
+* lib: fix max size check in Buffer constructor (Ben Noordhuis)
+
+* lib: fix stdio/ipc sync i/o regression (Ben Noordhuis)
+
+* module: replace NativeModule.require (Herbert Vojčík)
+
+* net: allow port 0 in connect() (cjihrig)
+
+* net: unref timer in parent sockets (Fedor Indutny)
+
+* path: refactor for performance and consistency (Nathan Woltman)
+
+* smalloc: extend user API (Trevor Norris)
+
+* src: fix for SIGINT crash on FreeBSD (Fedor Indutny)
+
+* src: fix builtin modules failing with --use-strict (Julien Gilli)
+
+* watchdog: fix timeout for early polling return (Saúl Ibarra Corretgé)
+
+
+2015.03.23, Version 0.12.1 (Stable), 0034086b49f22cfde765a7e9f55db25f8eb310b6
+
+* openssl: upgrade to 1.0.1m (Addressing multiple CVES)
+
+
+2015.02.06, Version 0.12.0 (Stable), 2b18916ff054309a07408719b62e2b6a4f1e056a
+
+* npm: Upgrade to 2.5.1
+
+* mdb_v8: update for v0.12 (Dave Pacheco)
+
+
+2015.01.29, Version 0.11.16 (Unstable), 8e42e5a0731040075e14cec087eea86729f2dc53
+
+* openssl: Upgrade to 1.0.1l
+
+* npm: Upgrade to 2.3.0
+
+* url: revert support of `path` for url.format" (Julien Gilli)
+
+* assert: use util.inspect() to create error messages (cjihrig)
+
+* net: throw on invalid socket timeouts (cjihrig)
+
+* url: fix parsing of ssh urls (Evan Lucas)
+
+
+2015.01.20, Version 0.11.15 (Unstable), 8a9f263a82089814e69f277f9fecd2888705101b
+
+* v8: Upgrade to 3.28.73
+
+* uv: Upgrade to 1.0.2
+
+* npm: Upgrade to v2.1.6
+
+* uv: float patch to revert tty breakage (Trevor Norris)
+
+* v8: re-implement debugger-agent (Fedor Indutny)
+
+* v8: apply floating irhydra patch (Fedor Indutny)
+
+* v8: fix postmortem-metadata generator (Refael Ackermann)
+
+* debugger: fix unhandled error in setBreakpoint (Miroslav Bajtoš)
+
+* async-wrap: add event hooks (Trevor Norris)
+
+* async-wrap: expose async-wrap as binding (Trevor Norris)
+
+* buffer, doc: misc. fix and cleanup (Trevor Norris)
+
+* buffer: add generic functions for (u)int ops (Yazhong Liu)
+
+* buffer: fix and cleanup fill() (Trevor Norris)
+
+* buffer: mv floating point read/write checks to JS (Trevor Norris)
+
+* build, i18n: improve Intl build, add "--with-intl" (Steven R. Loomis)
+
+* build: add small-icu support for binary packages (Julien Gilli)
+
+* build: do not generate support for libuv's probes (Julien Gilli)
+
+* build: i18n: add icu config options (Steven R. Loomis)
+
+* build: i18n: support little-endian machines (Steven Loomis)
+
+* build: vcbuild fix "The input line is too long." (Alexis Campailla)
+
+* child_process: improve spawn() argument handling (cjihrig)
+
+* cluster: avoid race enabling debugger in worker (Timothy J Fontaine)
+
+* cluster: cluster.disconnect() should check status (Sam Roberts)
+
+* cluster: do not signal children in debug mode (Fedor Indutny)
+
+* cluster: don't assert if worker has no handles (Sam Roberts)
+
+* core: fix usage of uv_cwd (Saúl Ibarra Corretgé)
+
+* core: replace uv_fs_readdir with uv_fs_scandir (Saúl Ibarra Corretgé)
+
+* crypto: createDiffieHellman throw for bad args (Trevor Norris)
+
+* crypto: lower RSS usage for TLSCallbacks (Fedor Indutny)
+
+* crypto: store thread id as pointer-sized (Alexis Campailla)
+
+* dns: propagate domain for c-ares methods (Chris Dickinson)
+
+* fs: fix symlink error message (Vladimir Kurchatkin)
+
+* http: Improve _addHeaderLines method (Jackson Tian)
+
+* http: cleanup setHeader() (Trevor Norris)
+
+* http: rename flush to flushHeaders (Timothy J Fontaine)
+
+* lib,src: fix spawnSync ignoring its 'env' option (Juanjo)
+
+* modules: adding load linked modules feature (Thorsten Lorenz)
+
+* net: Make server.connections un-enumerable (Patrick Mooney)
+
+* net: add pauseOnConnect option to createServer() (cjihrig)
+
+* net: make connect() input validation synchronous (cjihrig)
+
+* node: avoid automatic microtask runs (Vladimir Kurchatkin)
+
+* node: fix throws before timer module is loaded (Trevor Norris)
+
+* openssl: fix keypress requirement in apps on win32 (Fedor Indutny)
+
+* path: added parse() and format() functions (Rory Bradford)
+
+* path: allow calling platform specific methods (Timothy J Fontaine)
+
+* path: don't lower-cases drive letters (Bert Belder)
+
+* path: refactor normalizeArray() (Nathan Woltman)
+
+* process: pid can be a string in process.kill() (Sam Roberts)
+
+* readline: fix performance issue when large line (Jicheng Li)
+
+* readline: should not require an output stream. (Julien Gilli)
+
+* smalloc: check if obj has external data (Vladimir Kurchatkin)
+
+* smalloc: don't allow to dispose typed arrays (Vladimir Kurchatkin)
+
+* smalloc: fix bad assert for zero length data (Trevor Norris)
+
+* smalloc: fix copyOnto optimization (Vladimir Kurchatkin)
+
+* src: all wrap's now use actual FunctionTemplate (Trevor Norris)
+
+* src: fix VC++ warning C4244 (Rasmus Christian Pedersen)
+
+* src: remove Async Listener (Trevor Norris)
+
+* stream: switch _writableState.buffer to queue (Chris Dickinson)
+
+* streams: make setDefaultEncoding() throw (Brian White)
+
+* streams: set default encoding for writable streams (Johnny Ray)
+
+* tls: remove tls.createSecurePair code deprecation (Jackson Tian)
+
+* tls_wrap: ignore ZERO_RETURN after close_notify (Fedor Indutny)
+
+* url: change hostname regex to negate invalid chars (Jonathan Johnson)
+
+* url: fixed encoding for slash switching emulation. (Evan Rutledge Borden)
+
+* url: improve parsing speed (CGavrila)
+
+* url: make query() consistent (Gabriel Wicke)
+
+* url: support `path` for url.format (Yazhong Liu)
+
+* util: add es6 Symbol support for `util.inspect` (gyson)
+
+
+2014.09.24, Version 0.11.14 (Unstable), 902090af5375e497dded310575f19de5328a9bbc
+
+* uv: Upgrade to v1.0.0-rc1
+
+* http_parser: Upgrade to v2.3.0
+
+* npm: Upgrade to v2.0.0
+
+* openssl: Upgrade to v1.0.1i
+
+* v8: Upgrade to 3.26.33
+
+* Add fast path for simple URL parsing (Gabriel Wicke)
+
+* Added support for options parameter in console.dir() (Xavi Magrinyà)
+
+* Cluster: fix shared handles on Windows (Alexis Campailla)
+
+* buffer: Fix incorrect Buffer.compare behavior (Feross Aboukhadijeh)
+
+* buffer: construct new buffer from buffer toJSON() output (cjihrig)
+
+* buffer: improve Buffer constructor (Kang-Hao Kenny)
+
+* build: linking CoreFoundation framework for OSX (Thorsten Lorenz)
+
+* child_process: accept uid/gid everywhere (Fedor Indutny)
+
+* child_process: add path to spawn ENOENT Error (Ryan Cole)
+
+* child_process: copy spawnSync() cwd option to proper buffer (cjihrig)
+
+* child_process: do not access stderr when stdio set to 'ignore' (cjihrig)
+
+* child_process: don't throw on EAGAIN (Charles)
+
+* child_process: don't throw on EMFILE/ENFILE (Ben Noordhuis)
+
+* child_process: use full path for cmd.exe on Win32 (Ed Morley)
+
+* cluster: allow multiple calls to setupMaster() (Ryan Graham)
+
+* cluster: centralize removal from workers list. (Julien Gilli)
+
+* cluster: enable error/message events using .worker (cjihrig)
+
+* cluster: include settings object in 'setup' event (Ryan Graham)
+
+* cluster: restore v0.10.x setupMaster() behaviour (Ryan Graham)
+
+* cluster: support options in Worker constructor (cjihrig)
+
+* cluster: test events emit on cluster.worker (Sam Roberts)
+
+* console: console.dir() accepts options object (Xavi Magrinyà)
+
+* crypto: add `honorCipherOrder` argument (Fedor Indutny)
+
+* crypto: allow padding in RSA methods (Fedor Indutny)
+
+* crypto: clarify RandomBytes() error msg (Mickael van der Beek)
+
+* crypto: never store pointer to conn in SSL_CTX (Fedor Indutny)
+
+* crypto: unsigned value can't be negative (Brian White)
+
+* dgram: remove new keyword from errnoException (Jackson Tian)
+
+* dns: always set variable family in lookup() (cjihrig)
+
+* dns: include host name in error message if available (Maciej Małecki)
+
+* dns: introduce lookupService function (Saúl Ibarra Corretgé)
+
+* dns: send lookup c-ares errors to callback (Chris Dickinson)
+
+* dns: throw if hostname is not string or falsey (cjihrig)
+
+* events: Output the event that is leaking (Arnout Kazemier)
+
+* fs: close file if fstat() fails in readFile() (cjihrig)
+
+* fs: fs.readFile should not throw uncaughtException (Jackson Tian)
+
+* http: add 308 status_code, see RFC7238 (Yazhong Liu)
+
+* http: don't default OPTIONS to chunked encoding (Nick Muerdter)
+
+* http: fix bailout for writeHead (Alex Kocharin)
+
+* http: remove unused code block (Fedor Indutny)
+
+* http: write() after end() emits an error. (Julien Gilli)
+
+* lib, src: add vm.runInDebugContext() (Ben Noordhuis)
+
+* lib: noisy deprecation of child_process customFds (Ryan Graham)
+
+* module: don't require fs several times (Robert Kowalski)
+
+* net,dgram: workers can listen on exclusive ports (cjihrig)
+
+* net,stream: add isPaused, don't read() when paused (Chris Dickinson)
+
+* net: Ensure consistent binding to IPV6 if address is absent (Raymond Feng)
+
+* net: add remoteFamily for socket (Jackson Tian)
+
+* net: don't emit listening if handle is closed (Eli Skeggs)
+
+* net: don't prefer IPv4 addresses during resolution (cjihrig)
+
+* net: don't throw on net.Server.close() (cjihrig)
+
+* net: reset `errorEmitted` on reconnect (Ed Umansky)
+
+* node: set names for prototype methods (Trevor Norris)
+
+* node: support v8 microtask queue (Vladimir Kurchatkin)
+
+* path: fix slice OOB in trim (Lucio M. Tato)
+
+* path: isAbsolute() should always return boolean (Herman Lee)
+
+* process: throw TypeError if kill pid not a number (Sam Roberts)
+
+* querystring: custom encode and decode (fengmk2)
+
+* querystring: do not add sep for empty array (cjihrig)
+
+* querystring: remove prepended ? from query field (Ezequiel Rabinovich)
+
+* readline: fix close event of readline.Interface() (Yazhong Liu)
+
+* readline: fixes scoping bug (Dan Kaplun)
+
+* readline: implements keypress buffering (Dan Kaplun)
+
+* repl: fix multi-line input (Fedor Indutny)
+
+* repl: fix overwrite for this._prompt (Yazhong Liu)
+
+* repl: proper `setPrompt()` and `multiline` support (Fedor Indutny)
+
+* stream: don't try to finish if buffer is not empty (Vladimir Kurchatkin)
+
+* stream: only end reading on null, not undefined (Jonathan Reem)
+
+* streams: set default hwm properly for Duplex (Andrew Oppenlander)
+
+* string_bytes: ucs2 support big endian (Andrew Low)
+
+* tls, crypto: add DHE support (Shigeki Ohtsu)
+
+* tls: `checkServerIdentity` option (Trevor Livingston)
+
+* tls: add DHE-RSA-AES128-SHA256 to the def ciphers (Shigeki Ohtsu)
+
+* tls: better error reporting at cert validation (Fedor Indutny)
+
+* tls: support multiple keys/certs (Fedor Indutny)
+
+* tls: throw an error, not string (Jackson Tian)
+
+* udp: make it possible to receive empty udp packets (Andrius Bentkus)
+
+* url: treat \ the same as / (isaacs)
+
+
+2014.05.01, Version 0.11.13 (Unstable), 99c9930ad626e2796af23def7cac19b65c608d18
+
+* v8: upgrade to 3.24.35.22
+
+* buffer: add compare and equals methods (Sean McArthur)
+
+* buffer: improve {read,write}{U}Int* methods (Nick Apperson)
+
+* buffer: return uint if MSB is 1 in readUInt32 (goussardg)
+
+* buffer: truncate buffer after string decode (Fedor Indutny)
+
+* child_process: fix assertion error in spawnSync (Shigeki Ohtsu)
+
+* crypto: fix memory leak in CipherBase::Final (Fedor Indutny)
+
+* crypto: improve error messages (Ingmar Runge)
+
+* crypto: move `createCredentials` to tls (Fedor Indutny)
+
+* crypto: work around OpenSSL oddness (Fedor Indutny)
+
+* dgram: introduce `reuseAddr` option (Fedor Indutny)
+
+* domain: don't crash on "throw null" (Alex Kocharin)
+
+* events: check if _events is an own property (Vladimir Kurchatkin)
+
+* fs: improve performance of all stat functions (James Pickard)
+
+* fs: return blksize on stats object (Trevor Norris)
+
+* http: add request.flush() method (Ben Noordhuis)
+
+* http: better client "protocol not supported" error (Nathan Rajlich)
+
+* http: use defaultAgent.protocol in protocol check (Nathan Rajlich)
+
+* main: Handle SIGINT properly. (Geir Hauge)
+
+* net: bind to `::` TCP address by default (Fedor Indutny)
+
+* readline: consider newlines for cursor position (Yazhong Liu)
+
+* stream: split `objectMode` for Duplex (Vladimir Kurchatkin)
+
+* tls: `getPeerCertificate(detailed)` (Fedor Indutny)
+
+* tls: do not call SNICallback unless present (Fedor Indutny)
+
+* tls: force readable/writable to `true` (Fedor Indutny)
+
+* tls: support OCSP on client and server (Fedor Indutny)
+
+* util: made util.isArray a direct alias for Array.isArray (Evan Carroll)
+
+
+2014.03.11, Version 0.11.12 (Unstable), 7d6b8db40f32e817ff145b7cfe6b3aec3179fba7
+
+* uv: Upgrade to v0.11.22 (Timothy J Fontaine)
+
+* buffer: allow toString to accept Infinity for end (Brian White)
+
+* child_process: add spawnSync/execSync (Bert Belder, Timothy J Fontaine)
+
+* cluster: handle bind errors on Windows (Alexis Campailla)
+
+* contextify: handle infinite recursion errors (Fedor Indutny)
+
+* crypto: allow custom generator for DiffieHellman (Brian White)
+
+* crypto: allow setting add'l authenticated data (Brian White)
+
+* crypto: fix CipherFinal return value check (Brian White)
+
+* crypto: make NewSessionDoneCb public (Fedor Indutny)
+
+* dgram: pass the bytes sent to the send callback (Timothy J Fontaine)
+
+* dns: validate arguments in resolver (Kenan Sulayman)
+
+* dns: verify argument is valid function in resolve (Kenan Sulayman)
+
+* http: avoid duplicate keys in writeHead (David Björklund)
+
+* net: add localPort to connect options (Timothy J Fontaine)
+
+* node: do not print SyntaxError hints to stderr (Fedor Indutny)
+
+* node: invoke `beforeExit` again if loop was active (Fedor Indutny)
+
+* node: make AsyncListenerInst field more explicit (Trevor Norris)
+
+* os: networkInterfaces include scopeid for ipv6 (Xidorn Quan)
+
+* process: allow changing `exitCode` in `on('exit')` (Fedor Indutny)
+
+* readline: fix `line` event, if input emit 'end' (Yazhong Liu)
+
+* src: add tracing.v8.on('gc') statistics hooks (Ben Noordhuis)
+
+* src: add v8.getHeapStatistics() function (Ben Noordhuis)
+
+* src: emit 'beforeExit' event on process object (Ben Noordhuis)
+
+* src: move AsyncListener from process to tracing (Trevor Norris)
+
+* tls: fix crash in SNICallback (Fedor Indutny)
+
+* tls: introduce asynchronous `newSession` (Fedor Indutny)
+
+* util: show meaningful values for boxed primitives (Nathan Rajlich)
+
+* vm: don't copy Proxy object from parent context (Ben Noordhuis)
+
+* windows: make stdout/sterr pipes blocking (Alexis Campailla)
+
+* zlib: add sync versions for convenience methods (Nikolai Vavilov)
+
+
+2014.01.29, Version 0.11.11 (Unstable), b46e77421581ea358e221a8a843d057c747f7e90
+
+* v8: Upgrade to 3.22.24.19
+
+* http_parser: Upgrade to 2.2.1
+
+* openssl: Upgrade to 1.0.1f
+
+* uv: Upgrade to 0.11.18
+
+* async-listener: revamp of subsystem (Trevor Norris)
+
+* node: do not ever close stdio (Fedor Indutny)
+
+* http: use writev on chunked encoding (Trevor Norris)
+
+* async_wrap/timers: remove Add/RemoveAsyncListener (Trevor Norris)
+
+* child_process: better error reporting for exec (Fedor Indutny)
+
+* crypto: add newline to cert and key if not present (Fedor Indutny)
+
+* crypto: clear error in GetPeerCertificate (Fedor Indutny)
+
+* crypto: honor default ciphers in client mode (Jacob Hoffman-Andrews)
+
+* crypto: introduce .setEngine(engine, [flags]) (Fedor Indutny)
+
+* crypto: support custom pbkdf2 digest methods (Ben Noordhuis)
+
+* domain: fix off-by-one in Domain.exit() (Ryan Graham)
+
+* http: concatenate duplicate headers by default (Alex Kocharin)
+
+* http: do not emit EOF non-readable socket (Fedor Indutny)
+
+* node: fix argument parsing with -p arg (Alexis Campailla)
+
+* path: improve POSIX path.join() performance (Jo Liss)
+
+* tls: emit `clientError` on early socket close (Fedor Indutny)
+
+* tls: introduce `.setMaxSendFragment(size)` (Fedor Indutny)
+
+* tls: make cert/pfx optional in tls.createServer() (Ben Noordhuis)
+
+* tls: process accumulated input (Fedor Indutny)
+
+* tls: show human-readable error messages (Ben Noordhuis)
+
+* util: handle escaped forward slashes correctly (Tom Gallacher)
+
+
+2013.12.31, Version 0.11.10 (Unstable), 66931791f06207d1cdfea5ec1529edf3c94026d3
+
+* http_parser: update to 2.2
+
+* uv: Upgrade to v0.11.17
+
+* v8: Upgrade to 3.22.24.10
+
+* buffer: optimize writeInt* methods (Paul Loyd)
+
+* child_process: better error handling (Alexis Campailla)
+
+* cluster: do not synchronously emit 'setup' event (Sam Roberts)
+
+* cluster: restore backwards compatibility and various fixes (Sam Roberts)
+
+* crypto: remove unnecessary OpenSSL_add_all_digests (Yorkie)
+
+* crypto: support GCM authenticated encryption mode. (Ingmar Runge)
+
+* dns: add resolveSoa and 'SOA' rrtype (Tuğrul Topuz)
+
+* events: move EE c'tor guts to EventEmitter.init (Bert Belder)
+
+* http: DELETE shouldn't default to chunked encoding (Lalit Kapoor)
+
+* http: parse the status message in a http response. (Cam Swords)
+
+* node: fix removing AsyncListener in callback (Vladimir Kurchatkin)
+
+* node: follow specification, zero-fill ArrayBuffers (Trevor Norris)
+
+* openssl: use ASM optimized routines (Fedor Indutny)
+
+* process: allow nextTick infinite recursion (Trevor Norris)
+
+* querystring: remove `name` from `stringify()` (Yorkie)
+
+* timers: setImmediate v8 optimization fix (pflannery)
+
+* tls: add serialNumber to getPeerCertificate() (Ben Noordhuis)
+
+* tls: reintroduce socket.encrypted (Fedor Indutny)
+
+* tls: fix handling of asterisk in SNI context (Fedor Indutny)
+
+* util: Format negative zero as '-0' (David Chan)
+
+* vm: fix race condition in timeout (Alexis Campailla)
+
+* windows: fix dns lookup of localhost with ipv6 (Alexis Campailla)
+
+
+2013.11.20, Version 0.11.9 (Unstable), dcfd032bdd69dfb38c120e18438d6316ae522edc
+
+* uv: upgrade to v0.11.15 (Timothy J Fontaine)
+
+* v8: upgrade to 3.22.24.5 (Timothy J Fontaine)
+
+* buffer: remove warning when no encoding is passed (Trevor Norris)
+
+* build: make v8 use random seed for hash tables (Ben Noordhuis)
+
+* crypto: build with shared openssl without NPN (Ben Noordhuis)
+
+* crypto: update root certificates (Ben Noordhuis)
+
+* debugger: pass on v8 debug switches (Ben Noordhuis)
+
+* domain: use AsyncListener API (Trevor Norris)
+
+* fs: add recursive subdirectory support to fs.watch (Nick Simmons)
+
+* fs: make fs.watch() non-recursive by default (Ben Noordhuis)
+
+* http: cleanup freeSockets when socket destroyed (fengmk2)
+
+* http: force socket encoding to be null (isaacs)
+
+* http: make DELETE requests set `req.method` (Nathan Rajlich)
+
+* node: add AsyncListener support (Trevor Norris)
+
+* src: remove global HandleScope that hid memory leaks (Ben Noordhuis)
+
+* tls: add ECDH ciphers support (Erik Dubbelboer)
+
+* tls: do not default to 'localhost' servername (Fedor Indutny)
+
+* tls: more accurate wrapping of connecting socket (Fedor Indutny)
+
+
+2013.10.30, Version 0.11.8 (Unstable), f8d86e24f3463c36f7f3f4c3b3ec779e5b6201e1
+
+* uv: Upgrade to v0.11.14
+
+* v8: upgrade 3.21.18.3
+
+* assert: indicate if exception message is generated (Glen Mailer)
+
+* buffer: add buf.toArrayBuffer() API (Trevor Norris)
+
+* cluster: fix premature 'disconnect' event (Ben Noordhuis)
+
+* crypto: add SPKAC support (Jason Gerfen)
+
+* debugger: count space for line numbers correctly (Alex Kocharin)
+
+* debugger: make busy loops SIGUSR1-interruptible (Ben Noordhuis)
+
+* debugger: repeat last command (Alex Kocharin)
+
+* debugger: show current line, fix for #6150 (Alex Kocharin)
+
+* dgram: send() can accept strings (Trevor Norris)
+
+* dns: rename domain to hostname (Ben Noordhuis)
+
+* dns: set hostname property on error object (Ben Noordhuis)
+
+* dtrace, mdb_v8: support more string, frame types (Dave Pacheco)
+
+* http: add statusMessage (Patrik Stutz)
+
+* http: expose supported methods (Ben Noordhuis)
+
+* http: provide backpressure for pipeline flood (isaacs)
+
+* process: Add exitCode property (isaacs)
+
+* tls: socket.renegotiate(options, callback) (Fedor Indutny)
+
+* util: format as Error if instanceof Error (Rod Vagg)
+
+
+2013.08.21, Version 0.11.7 (Unstable), be52549bfa5311208b5fcdb3ba09210460fa9ceb
+
+* uv: upgrade to v0.11.13
+
+* v8: upgrade to 3.20.17
+
+* buffer: adhere to INSPECT_MAX_BYTES (Timothy J Fontaine)
+
+* buffer: fix regression for large buffer creation (Trevor Norris)
+
+* buffer: don't throw if slice length too long (Trevor Norris)
+
+* buffer: Buffer(buf) constructor copies into the proper buffer (Ben Noordhuis)
+
+* cli: remove --max-stack-size (Ben Noordhuis)
+
+* cli: unknown command line options are errors (Ben Noordhuis)
+
+* child_process: exec accept buffer as an encoding (Seth Fitzsimmons)
+
+* crypto: make randomBytes/pbkdf2 callbacks domain aware (Ben Noordhuis)
+
+* domain: deprecate domain.dispose(). (Forrest L Norvell)
+
+* fs: Expose birthtime on stat objects (isaacs)
+
+* http: Only send connection:keep-alive if necessary (isaacs)
+
+* repl: Catch syntax errors better (isaacs, Nathan Rajlich)
+
+* stream: change default highWaterMark for objectMode to 16 (Mathias Buus)
+
+* stream: make setEncoding/pause/resume chainable (Julian Gruber, isaacs)
+
+* util: pass opts to custom inspect functions (Timothy J Fontaine)
+
+* vm: rewritten to behave like Contextify (Domenic Denicola)
+
+
+2013.08.21, Version 0.11.6 (Unstable), 04018d4b3938fd30ba14822e79195e4af2be36f6
+
+* uv: Upgrade to v0.11.8
+
+* v8: upgrade v8 to 3.20.14.1
+
+* build: disable SSLv2 by default (Ben Noordhuis)
+
+* build: don't auto-destroy existing configuration (Ben Noordhuis)
+
+* crypto: add TLS 1.1 and 1.2 to secureProtocol list (Matthias Bartelmeß)
+
+* crypto: fix memory leak in randomBytes() error path (Ben Noordhuis)
+
+* dgram: don't call into js when send cb is omitted (Ben Noordhuis)
+
+* dgram: fix regression in string argument handling (Ben Noordhuis)
+
+* domains: performance improvements (Trevor Norris)
+
+* events: EventEmitter = require('events') (Jake Verbaten)
+
+* http: Add write()/end() callbacks (isaacs)
+
+* http: Consistent 'finish' event semantics (isaacs)
+
+* http: Prefer 'binary' over 'ascii' (isaacs)
+
+* http: Support legacy agent.addRequest API (isaacs)
+
+* http: Write hex/base64 chunks properly (isaacs)
+
+* http: add agent.maxFreeSockets option (isaacs)
+
+* http: provide access to raw headers/trailers (isaacs)
+
+* http: removed headers stay removed (James Halliday)
+
+* http,timers: improve callback performance (Ben Noordhuis)
+
+* net: family option in net.connect (Vsevolod Strukchinsky)
+
+* readline: pause stdin before turning off terminal raw mode (Daniel Chatfield)
+
+* smalloc: allow different external array types (Trevor Norris)
+
+* smalloc: expose ExternalArraySize (Trevor Norris)
+
+* stream: Short-circuit buffer pushes when flowing (isaacs)
+
+* tls: handle errors on socket before releasing it (Fedor Indutny)
+
+* util: fix isPrimitive check (Trevor Norris)
+
+* util: isObject should always return boolean (Trevor Norris)
+
+
+2013.08.06, Version 0.11.5 (Unstable), 6f92da2dd106b0c63fde563284f83e08e2a521b5
+
+* v8: upgrade to 3.20.11
+
+* uv: upgrade to v0.11.7
+
+* buffer: return offset for end of last write (Trevor Norris)
+
+* build: embed the mdb_v8.so into the binary (Timothy J Fontaine)
+
+* build: fix --without-ssl build (Ben Noordhuis)
+
+* child_process: add 'shell' option to .exec() (Ben Noordhuis)
+
+* dgram: report send errors to cb, don't pass bytes (Ben Noordhuis)
+
+* fs: write strings directly to disk (Trevor Norris)
+
+* https: fix default port (Koichi Kobayashi)
+
+* openssl: use asm for sha, md5, rmd (Fedor Indutny)
+
+* os: add mac address to networkInterfaces() output (Brian White)
+
+* smalloc: introduce smalloc module (Trevor Norris)
+
+* stream: Simplify flowing, passive data listening (streams3) (isaacs)
+
+* tls: asynchronous SNICallback (Fedor Indutny)
+
+* tls: share tls tickets key between cluster workers (Fedor Indutny)
+
+* util: don't throw on circular %j input to format() (Ben Noordhuis)
+
+
+2013.07.12, Version 0.11.4 (Unstable), b5b84197ed037918fd1a26e5cb87cce7c812ca55
+
+* npm: Upgrade to 1.3.4
+
+* v8: Upgrade to v3.20.2
+
+* c-ares: Upgrade to piscisaureus/cares@805d153
+
+* timers: setImmediate process full queue each turn (Ben Noordhuis)
+
+* http: Add agent.get/request methods (isaacs)
+
+* http: Proper KeepAlive behavior (isaacs)
+
+* configure: fix the --without-ssl option (Nathan Rajlich)
+
+* buffer: propagate originating parent (Trevor Norris)
+
+* tls_wrap: return Error not throw for missing cert (Timothy J Fontaine)
+
+* src: enable native v8 typed arrays (Ben Noordhuis)
+
+* stream: objectMode transform should allow falsey values (Jeff Barczewski)
+
+* slab_allocator: remove SlabAllocator (Trevor Norris)
+
+* crypto: fix memory leak in LoadPKCS12 (Fedor Indutny)
+
+* tls: export TLSSocket (Fedor Indutny)
+
+* zlib: allow changing of level and strategy (Brian White)
+
+* zlib: allow custom flush type for flush() (Brian White)
+
+
+2013.06.26, Version 0.11.3 (Unstable), 38c0c47bbe280ddc42054418091571e532d82a1e
+
+* uv: Upgrade to v0.11.5
+
+* c-ares: upgrade to 1.10.0
+
+* v8: upgrade to v3.19.13
+
+* punycode: update to v1.2.3 (Mathias Bynens)
+
+* debugger: break on uncaught exception (Miroslav Bajtos)
+
+* child_process: emit 'disconnect' asynchronously (Ben Noordhuis)
+
+* dtrace: enable uv's probes if enabled (Timothy J Fontaine)
+
+* dtrace: unify dtrace and systemtap interfaces (Timothy J Fontaine)
+
+* buffer: New API for backing data store (Trevor Norris)
+
+* buffer: return `this` in fill() for chainability (Brian White)
+
+* build: fix include order for building on windows (Timothy J Fontaine)
+
+* build: add android support (Linus Mårtensson)
+
+* readline: strip ctrl chars for prompt width calc (Krzysztof Chrapka)
+
+* tls: introduce TLSSocket based on tls_wrap binding (Fedor Indutny)
+
+* tls: add localAddress and localPort properties (Ben Noordhuis)
+
+* crypto: free excessive memory in NodeBIO (Fedor Indutny)
+
+* process: remove maxTickDepth (Trevor Norris)
+
+* timers: use uv_now instead of Date.now (Timothy J Fontaine)
+
+* util: Add debuglog, deprecate console lookalikes (isaacs)
+
+* module: use path.sep instead of a custom solution (Robert Kowalski)
+
+* http: don't escape request path, reject bad chars (Ben Noordhuis)
+
+* net: emit dns 'lookup' event before connect (Ben Noordhuis)
+
+* dns: add getServers and setServers (Timothy J Fontaine)
+
+
+2013.05.13, Version 0.11.2 (Unstable), 5d3dc0e4c3369dfb00b7b13e08936c2e652fa696
+
+* uv: Upgrade to 0.11.2
+
+* V8: Upgrade to 3.19.0
+
+* npm: Upgrade to 1.2.21
+
+* build: Makefile should respect configure --prefix (Timothy J Fontaine)
+
+* cluster: use round-robin load balancing (Ben Noordhuis)
+
+* debugger, cluster: each worker has new debug port (Miroslav Bajtoš)
+
+* debugger: `restart` with custom debug port (Miroslav Bajtoš)
+
+* debugger: breakpoints in scripts not loaded yet (Miroslav Bajtoš)
+
+* event: EventEmitter#setMaxListeners() returns this (Sam Roberts)
+
+* events: add EventEmitter.defaultMaxListeners (Ben Noordhuis)
+
+* install: Support $(PREFIX) install target directory prefix (Olof Johansson)
+
+* os: Include netmask in os.networkInterfaces() (Ben Kelly)
+
+* path: add path.isAbsolute(path) (Ryan Doenges)
+
+* stream: Guarantee ordering of 'finish' event (isaacs)
+
+* streams: introduce .cork/.uncork/._writev (Fedor Indutny)
+
+* vm: add support for timeout argument (Andrew Paprocki)
+
+
+2013.04.19, Version 0.11.1 (Unstable), 4babd2b46ebf9fbea2c9946af5cfae25a33b2b22
 
 * V8: upgrade to 3.18.0
 
@@ -60,7 +1324,623 @@
 * console: `console.dir()` bypasses inspect() methods (Nathan Rajlich)
 
 
-2013.04.11, Version 0.10.4 (Stable)
+2015.07.09, Version 0.10.40 (Maintenance), 0439a28d519fb6efe228074b0588a59452fc1677
+
+* openssl: upgrade to 1.0.1p
+
+* V8: back-port JitCodeEvent patch from upstream (Ben Noordhuis)
+
+* win,msi: create npm folder in AppData directory (Steven Rockarts)
+
+
+2015.06.18, Version 0.10.39 (Maintenance), 615a35ccd2cb5cba80901862aefe51a940995f44
+
+* openssl: upgrade to 1.0.1o (Addressing multiple CVEs)
+
+* install: fix source path for openssl headers (Oguz Bastemur)
+
+* install: make sure opensslconf.h is overwritten (Oguz Bastemur)
+
+* timers: fix timeout when added in timer's callback (Julien Gilli)
+
+* windows: broadcast WM_SETTINGCHANGE after install (Mathias Küsel)
+
+
+2015.03.23, Version 0.10.38 (Maintenance), 0b5731a63cc40c4fe9275c79158fe0a5dd4d1609
+
+* openssl: upgrade to 1.0.1m (Addressing multiple CVEs)
+
+
+2015.03.11, Version 0.10.37 (Maintenance), 7d6b5b1d5ba726331f9ccaaae59af7cd53eee82e
+
+* uv: update to 0.10.36 (CVE-2015-0278)
+
+* domains: fix stack clearing after error handled (Jonas Dohse)
+
+* buffer: reword Buffer.concat error message (Chris Dickinson)
+
+* console: allow Object.prototype fields as labels (Julien Gilli)
+
+* V8: log version in profiler log file (Ben Noordhuis)
+
+* http: fix performance regression for GET requests (Florin-Cristian Gavrila)
+
+
+2015.01.26, Version 0.10.36 (Stable), 09b482886bdd3d863c3d4e7d71264eac0daaf9e1
+
+* openssl: update to 1.0.1l
+
+* v8: Fix debugger and strict mode regression (Julien Gilli)
+
+* v8: don't busy loop in cpu profiler thread (Ben Noordhuis)
+
+
+2014.12.22, Version 0.10.35 (Stable), a363f61ca839e817eb6853c5dc5af8c3b9b9226b
+
+* tls: re-add 1024-bit SSL certs removed by f9456a2 (Chris Dickinson)
+
+* timers: don't close interval timers when unrefd (Julien Gilli)
+
+* timers: don't mutate unref list while iterating it (Julien Gilli)
+
+
+2014.12.17, Version 0.10.34 (Stable), 52795f8fcc2de77cf997e671ea58614e5e425dfe
+
+* uv: update to v0.10.30
+
+* zlib: upgrade to v1.2.8
+
+* child_process: check execFile args is an array (Sam Roberts)
+
+* child_process: check fork args is an array (Sam Roberts)
+
+* crypto: update root certificates (Ben Noordhuis)
+
+* domains: fix issues with abort on uncaught (Julien Gilli)
+
+* timers: Avoid linear scan in _unrefActive. (Julien Gilli)
+
+* timers: fix unref() memory leak (Trevor Norris)
+
+* v8: add api for aborting on uncaught exception (Julien Gilli)
+
+* debugger: fix when using "use strict" (Julien Gilli)
+
+
+2014.10.20, Version 0.10.33 (Stable), 8d045a30e95602b443eb259a5021d33feb4df079
+
+* openssl: Update to 1.0.1j (Addressing multiple CVEs)
+
+* uv: Update to v0.10.29
+
+* child_process: properly support optional args (cjihrig)
+
+* crypto: Disable autonegotiation for SSLv2/3 by default (Fedor Indutny,
+	Timothy J Fontaine, Alexis Campailla)
+
+	This is a behavior change, by default we will not allow the negotiation to
+	SSLv2 or SSLv3. If you want this behavior, run Node.js with either
+	`--enable-ssl2` or `--enable-ssl3` respectively.
+
+	This does not change the behavior for users specifically requesting
+	`SSLv2_method` or `SSLv3_method`. While this behavior is not advised, it is
+	assumed you know what you're doing since you're specifically asking to use
+	these methods.
+
+
+2014.09.16, Version 0.10.32 (Stable), 0fe0d121551593c23a565db8397f85f17bb0f00e
+
+* npm: Update to 1.4.28
+
+* v8: fix a crash introduced by previous release (Fedor Indutny)
+
+* configure: add --openssl-no-asm flag (Fedor Indutny)
+
+* crypto: use domains for any callback-taking method (Chris Dickinson)
+
+* http: do not send `0\r\n\r\n` in TE HEAD responses (Fedor Indutny)
+
+* querystring: fix unescape override (Tristan Berger)
+
+* url: Add support for RFC 3490 separators (Mathias Bynens)
+
+
+2014.08.19, Version 0.10.31 (Stable), 7fabdc23d843cb705d2d0739e7bbdaaf50aa3292
+
+* v8: backport CVE-2013-6668
+
+* openssl: Update to v1.0.1i
+
+* npm: Update to v1.4.23
+
+* cluster: disconnect should not be synchronous (Sam Roberts)
+
+* fs: fix fs.readFileSync fd leak when get RangeError (Jackson Tian)
+
+* stream: fix Readable.wrap objectMode falsy values (James Halliday)
+
+* timers: fix timers with non-integer delay hanging. (Julien Gilli)
+
+
+2014.07.31, Version 0.10.30 (Stable), bc0ff830aff1e016163d855e86ded5c98b0899e8
+
+* uv: Upgrade to v0.10.28
+
+* npm: Upgrade to v1.4.21
+
+* v8: Interrupts must not mask stack overflow.
+
+* Revert "stream: start old-mode read in a next tick" (Fedor Indutny)
+
+* buffer: fix sign overflow in `readUIn32BE` (Fedor Indutny)
+
+* buffer: improve {read,write}{U}Int* methods (Nick Apperson)
+
+* child_process: handle writeUtf8String error (Fedor Indutny)
+
+* deps: backport 4ed5fde4f from v8 upstream (Fedor Indutny)
+
+* 
+
+* lib: remove and restructure calls to isNaN() (cjihrig)
+
+* module: eliminate double `getenv()` (Maciej Małecki)
+
+* stream2: flush extant data on read of ended stream (Chris Dickinson)
+
+* streams: remove unused require('assert') (Rod Vagg)
+
+* timers: backport f8193ab (Julien Gilli)
+
+* util.h: interface compatibility (Oguz Bastemur)
+
+* zlib: do not crash on write after close (Fedor Indutny)
+
+
+2014.06.05, Version 0.10.29 (Stable), ce82d6b8474bde7ac7df6d425fb88fb1bcba35bc
+
+* openssl: to 1.0.1h (CVE-2014-0224)
+
+* npm: upgrade to 1.4.14
+
+* utf8: Prevent Node from sending invalid UTF-8 (Felix Geisendörfer)
+  - *NOTE* this introduces a breaking change, previously you could construct
+    invalid UTF-8 and invoke an error in a client that was expecting valid
+    UTF-8, now unmatched surrogate pairs are replaced with the unknown UTF-8
+    character. To restore the old functionality simply have NODE_INVALID_UTF8
+    environment variable set.
+
+* child_process: do not set args before throwing (Greg Sabia Tucker)
+
+* child_process: spawn() does not throw TypeError (Greg Sabia Tucker)
+
+* constants: export O_NONBLOCK (Fedor Indutny)
+
+* crypto: improve memory usage (Alexis Campailla)
+
+* fs: close file if fstat() fails in readFile() (cjihrig)
+
+* lib: name EventEmitter prototype methods (Ben Noordhuis)
+
+* tls: fix performance issue (Alexis Campailla)
+
+
+2014.05.01, Version 0.10.28 (Stable), b148cbe09d4657766fdb61575ba985734c2ff0a8
+
+* npm: upgrade to v1.4.9
+
+
+2014.05.01, Version 0.10.27 (Stable), cb7911f78ae96ef7a540df992cc1359ba9636e86
+
+* npm: upgrade to v1.4.8
+
+* openssl: upgrade to 1.0.1g
+
+* uv: update to v0.10.27
+
+* dns: fix certain txt entries (Fedor Indutny)
+
+* assert: Ensure reflexivity of deepEqual (Mike Pennisi)
+
+* child_process: fix deadlock when sending handles (Fedor Indutny)
+
+* child_process: fix sending handle twice (Fedor Indutny)
+
+* crypto: do not lowercase cipher/hash names (Fedor Indutny)
+
+* dtrace: workaround linker bug on FreeBSD (Fedor Indutny)
+
+* http: do not emit EOF non-readable socket (Fedor Indutny)
+
+* http: invoke createConnection when no agent (Nathan Rajlich)
+
+* stream: remove useless check (Brian White)
+
+* timer: don't reschedule timer bucket in a domain (Greg Brail)
+
+* url: treat \ the same as / (isaacs)
+
+* util: format as Error if instanceof Error (Rod Vagg)
+
+
+2014.02.18, Version 0.10.26 (Stable), cc56c62ed879ad4f93b1fdab3235c43e60f48b7e
+
+* uv: Upgrade to v0.10.25 (Timothy J Fontaine)
+
+* npm: upgrade to 1.4.3 (isaacs)
+
+* v8: support compiling with VS2013 (Fedor Indutny)
+
+* cares: backport TXT parsing fix (Fedor Indutny)
+
+* crypto: throw on SignFinal failure (Fedor Indutny)
+
+* crypto: update root certificates (Ben Noordhuis)
+
+* debugger: Fix breakpoint not showing after restart (Farid Neshat)
+
+* fs: make unwatchFile() insensitive to path (iamdoron)
+
+* net: do not re-emit stream errors (Fedor Indutny)
+
+* net: make Socket destroy() re-entrance safe (Jun Ma)
+
+* net: reset `endEmitted` on reconnect (Fedor Indutny)
+
+* node: do not close stdio implicitly (Fedor Indutny)
+
+* zlib: avoid assertion in close (Fedor Indutny)
+
+
+2014.01.23, Version 0.10.25 (Stable), b0e5f195dfce3e2b99f5091373d49f6616682596
+
+* uv: Upgrade to v0.10.23
+
+* npm: Upgrade to v1.3.24
+
+* v8: Fix enumeration for objects with lots of properties
+
+* child_process: fix spawn() optional arguments (Sam Roberts)
+
+* cluster: report more errors to workers (Fedor Indutny)
+
+* domains: exit() only affects active domains (Ryan Graham)
+
+* src: OnFatalError handler must abort() (Timothy J Fontaine)
+
+* stream: writes may return false but forget to emit drain (Yang Tianyang)
+
+
+2013.12.18, Version 0.10.24 (Stable), b7fd6bc899ccb629d790c47aee06aba87e535c41
+
+* uv: Upgrade to v0.10.21
+
+* npm: upgrade to 1.3.21
+
+* v8: backport fix for CVE-2013-{6639|6640}
+
+* build: unix install node and dep library headers (Timothy J Fontaine)
+
+* cluster, v8: fix --logfile=%p.log (Ben Noordhuis)
+
+* module: only cache package main (Wyatt Preul)
+
+
+2013.12.12, Version 0.10.23 (Stable), 0462bc23564e7e950a70ae4577a840b04db6c7c6
+
+* uv: Upgrade to v0.10.20 (Timothy J Fontaine)
+
+* npm: Upgrade to 1.3.17 (isaacs)
+
+* gyp: update to 78b26f7 (Timothy J Fontaine)
+
+* build: include postmortem symbols on linux (Timothy J Fontaine)
+
+* crypto: Make Decipher._flush() emit errors. (Kai Groner)
+
+* dgram: fix abort when getting `fd` of closed dgram (Fedor Indutny)
+
+* events: do not accept NaN in setMaxListeners (Fedor Indutny)
+
+* events: avoid calling `once` functions twice (Tim Wood)
+
+* events: fix TypeError in removeAllListeners (Jeremy Martin)
+
+* fs: report correct path when EEXIST (Fedor Indutny)
+
+* process: enforce allowed signals for kill (Sam Roberts)
+
+* tls: emit 'end' on .receivedShutdown (Fedor Indutny)
+
+* tls: fix potential data corruption (Fedor Indutny)
+
+* tls: handle `ssl.start()` errors appropriately (Fedor Indutny)
+
+* tls: reset NPN callbacks after SNI (Fedor Indutny)
+
+
+2013.11.12, Version 0.10.22 (Stable), cbff8f091c22fb1df6b238c7a1b9145db950fa65
+
+* npm: Upgrade to 1.3.14
+
+* uv: Upgrade to v0.10.19
+
+* child_process: don't assert on stale file descriptor events (Fedor Indutny)
+
+* darwin: Fix "Not Responding" in Mavericks activity monitor (Fedor Indutny)
+
+* debugger: Fix bug in sb() with unnamed script (Maxim Bogushevich)
+
+* repl: do not insert duplicates into completions (Maciej Małecki)
+
+* src: Fix memory leak on closed handles (Timothy J Fontaine)
+
+* tls: prevent stalls by using read(0) (Fedor Indutny)
+
+* v8: use correct timezone information on Solaris (Maciej Małecki)
+
+
+2013.10.18, Version 0.10.21 (Stable), e2da042844a830fafb8031f6c477eb4f96195210
+
+* uv: Upgrade to v0.10.18
+
+* crypto: clear errors from verify failure (Timothy J Fontaine)
+
+* dtrace: interpret two byte strings (Dave Pacheco)
+
+* fs: fix fs.truncate() file content zeroing bug (Ben Noordhuis)
+
+* http: provide backpressure for pipeline flood (isaacs)
+
+* tls: fix premature connection termination (Ben Noordhuis)
+
+
+2013.09.30, Version 0.10.20 (Stable), d7234c8d50a1af73f60d2d3c0cc7eed17429a481
+
+* tls: fix sporadic hang and partial reads (Fedor Indutny)
+  - fixes "npm ERR! cb() never called!"
+
+
+2013.09.24, Version 0.10.19 (Stable), 6b5e6a5a3ec8d994c9aab3b800b9edbf1b287904
+
+* uv: Upgrade to v0.10.17
+
+* npm: upgrade to 1.3.11
+
+* readline: handle input starting with control chars (Eric Schrock)
+
+* configure: add mips-float-abi (soft, hard) option (Andrei Sedoi)
+
+* stream: objectMode transforms allow falsey values (isaacs)
+
+* tls: prevent duplicate values returned from read (Nathan Rajlich)
+
+* tls: NPN protocols are now local to connections (Fedor Indutny)
+
+
+2013.09.04, Version 0.10.18 (Stable), 67a1f0c52e0708e2596f3f2134b8386d6112561e
+
+* uv: Upgrade to v0.10.15
+
+* stream: Don't crash on unset _events property (isaacs)
+
+* stream: Pass 'buffer' encoding with decoded writable chunks (isaacs)
+
+
+2013.08.21, Version 0.10.17 (Stable), 469a4a5091a677df62be319675056b869c31b35c
+
+* uv: Upgrade v0.10.14
+
+* http_parser: Do not accept PUN/GEM methods as PUT/GET (Chris Dickinson)
+
+* tls: fix assertion when ssl is destroyed at read (Fedor Indutny)
+
+* stream: Throw on 'error' if listeners removed (isaacs)
+
+* dgram: fix assertion on bad send() arguments (Ben Noordhuis)
+
+* readline: pause stdin before turning off terminal raw mode (Daniel Chatfield)
+
+
+2013.08.16, Version 0.10.16 (Stable), 50b4c905a4425430ae54db4906f88982309e128d
+
+* v8: back-port fix for CVE-2013-2882
+
+* npm: Upgrade to 1.3.8
+
+* crypto: fix assert() on malformed hex input (Ben Noordhuis)
+
+* crypto: fix memory leak in randomBytes() error path (Ben Noordhuis)
+
+* events: fix memory leak, don't leak event names (Ben Noordhuis)
+
+* http: Handle hex/base64 encodings properly (isaacs)
+
+* http: improve chunked res.write(buf) performance (Ben Noordhuis)
+
+* stream: Fix double pipe error emit (Eran Hammer)
+
+
+2013.07.25, Version 0.10.15 (Stable), 2426d65af860bda7be9f0832a99601cc43c6cf63
+
+* src: fix process.getuid() return value (Ben Noordhuis)
+
+
+2013.07.25, Version 0.10.14 (Stable), fdf57f811f9683a4ec49a74dc7226517e32e6c9d
+
+* uv: Upgrade to v0.10.13
+
+* npm: Upgrade to v1.3.5
+
+* os: Don't report negative times in cpu info (Ben Noordhuis)
+
+* fs: Handle large UID and GID (Ben Noordhuis)
+
+* url: Fix edge-case when protocol is non-lowercase (Shuan Wang)
+
+* doc: Streams API Doc Rewrite (isaacs)
+
+* node: call MakeDomainCallback in all domain cases (Trevor Norris)
+
+* crypto: fix memory leak in LoadPKCS12 (Fedor Indutny)
+
+
+2013.07.09, Version 0.10.13 (Stable), e32660a984427d46af6a144983cf7b8045b7299c
+
+* uv: Upgrade to v0.10.12
+
+* npm: Upgrade to 1.3.2
+
+* windows: get proper errno (Ben Noordhuis)
+
+* tls: only wait for finish if we haven't seen it (Timothy J Fontaine)
+
+* http: Dump response when request is aborted (isaacs)
+
+* http: use an unref'd timer to fix delay in exit (Peter Rust)
+
+* zlib: level can be negative (Brian White)
+
+* zlib: allow zero values for level and strategy (Brian White)
+
+* buffer: add comment explaining buffer alignment (Ben Noordhuis)
+
+* string_bytes: properly detect 64bit (Timothy J Fontaine)
+
+* src: fix memory leak in UsingDomains() (Ben Noordhuis)
+
+
+2013.06.18, Version 0.10.12 (Stable), a088cf4f930d3928c97d239adf950ab43e7794aa
+
+* npm: Upgrade to 1.2.32
+
+* readline: make `ctrl + L` clear the screen (Yuan Chuan)
+
+* v8: add setVariableValue debugger command (Ben Noordhuis)
+
+* net: Do not destroy socket mid-write (isaacs)
+
+* v8: fix build for mips32r2 architecture (Andrei Sedoi)
+
+* configure: fix cross-compilation host_arch_cc() (Andrei Sedoi)
+
+
+2013.06.13, Version 0.10.11 (Stable), d9d5bc465450ae5d60da32e9ffcf71c2767f1fad
+
+* uv: upgrade to 0.10.11
+
+* npm: Upgrade to 1.2.30
+
+* openssl: add missing configuration pieces for MIPS (Andrei Sedoi)
+
+* Revert "http: remove bodyHead from 'upgrade' events" (isaacs)
+
+* v8: fix pointer arithmetic undefined behavior (Trevor Norris)
+
+* crypto: fix utf8/utf-8 encoding check (Ben Noordhuis)
+
+* net: Fix busy loop on POLLERR|POLLHUP on older linux kernels (Ben Noordhuis, isaacs)
+
+
+2013.06.04, Version 0.10.10 (Stable), 25e51c396aa23018603baae2b1d9390f5d9db496
+
+* uv: Upgrade to 0.10.10
+
+* npm: Upgrade to 1.2.25
+
+* url: Properly parse certain oddly formed urls (isaacs)
+
+* stream: unshift('') is a noop (isaacs)
+
+
+2013.05.30, Version 0.10.9 (Stable), 878ffdbe6a8eac918ef3a7f13925681c3778060b
+
+* npm: Upgrade to 1.2.24
+
+* uv: Upgrade to v0.10.9
+
+* repl: fix JSON.parse error check (Brian White)
+
+* tls: proper .destroySoon (Fedor Indutny)
+
+* tls: invoke write cb only after opposite read end (Fedor Indutny)
+
+* tls: ignore .shutdown() syscall error (Fedor Indutny)
+
+
+2013.05.24, Version 0.10.8 (Stable), 30d9e9fdd9d4c33d3d95a129d021cd8b5b91eddb
+
+* v8: update to 3.14.5.9
+
+* uv: upgrade to 0.10.8
+
+* npm: Upgrade to 1.2.23
+
+* http: remove bodyHead from 'upgrade' events (Nathan Zadoks)
+
+* http: Return true on empty writes, not false (isaacs)
+
+* http: save roundtrips, convert buffers to strings (Ben Noordhuis)
+
+* configure: respect the --dest-os flag consistently (Nathan Rajlich)
+
+* buffer: throw when writing beyond buffer (Trevor Norris)
+
+* crypto: Clear error after DiffieHellman key errors (isaacs)
+
+* string_bytes: strip padding from base64 strings (Trevor Norris)
+
+
+2013.05.17, Version 0.10.7 (Stable), d2fdae197ac542f686ee06835d1153dd43b862e5
+
+* uv: upgrade to v0.10.7
+
+* npm: Upgrade to 1.2.21
+
+* crypto: Don't ignore verify encoding argument (isaacs)
+
+* buffer, crypto: fix default encoding regression (Ben Noordhuis)
+
+* timers: fix setInterval() assert (Ben Noordhuis)
+
+
+2013.05.14, Version 0.10.6 (Stable), 5deb1672f2b5794f8be19498a425ea4dc0b0711f
+
+* module: Deprecate require.extensions (isaacs)
+
+* stream: make Readable.wrap support objectMode, empty streams (Daniel Moore)
+
+* child_process: fix handle delivery (Ben Noordhuis)
+
+* crypto: Fix performance regression (isaacs)
+
+* src: DRY string encoding/decoding (isaacs)
+
+
+2013.04.23, Version 0.10.5 (Stable), deeaf8fab978e3cadb364e46fb32dafdebe5f095
+
+* uv: Upgrade to 0.10.5 (isaacs)
+
+* build: added support for Visual Studio 2012 (Miroslav Bajtoš)
+
+* http: Don't try to destroy nonexistent sockets (isaacs)
+
+* crypto: LazyTransform on properties, not methods (isaacs)
+
+* assert: put info in err.message, not err.name (Ryan Doenges)
+
+* dgram: fix no address bind() (Ben Noordhuis)
+
+* handle_wrap: fix NULL pointer dereference (Ben Noordhuis)
+
+* os: fix unlikely buffer overflow in os.type() (Ben Noordhuis)
+
+* stream: Fix unshift() race conditions (isaacs)
+
+
+
+
+2013.04.11, Version 0.10.4 (Stable), 9712aa9f76073c30850b20a188b1ed12ffb74d17
 
 * uv: Upgrade to 0.10.4
 
@@ -684,6 +2564,41 @@
 * Fix #3521 Make process.env more like a regular Object (isaacs)
 
 
+2013.06.13, Version 0.8.25 (maintenance), 0b9bdb2bc7e1c872f0ea4713517fda22a4b0b202
+
+* npm: Upgrade to 1.2.30
+
+* child_process: fix handle delivery (Ben Noordhuis)
+
+
+2013.06.04, Version 0.8.24 (maintenance), c1a1ab067721ea17ef7b05ec5c68b01321017f05
+
+* npm: Upgrade to v1.2.24
+
+* url: Properly parse certain oddly formed urls (isaacs)
+
+* http: Don't try to destroy nonexistent sockets (isaacs)
+
+* handle_wrap: fix NULL pointer dereference (Ben Noordhuis)
+
+
+2013.04.09, Version 0.8.23 (maintenance), c67f8d0500fe15637a623eb759d2ad7eb9fb3b0b
+
+* npm: Upgrade to v1.2.18
+
+* http: Avoid EE warning on ECONNREFUSED handling (isaacs)
+
+* tls: Re-enable check of CN-ID in cert verification (Tobias Müllerleile)
+
+* child_process: fix sending utf-8 to child process (Ben Noordhuis)
+
+* crypto: check key type in GetPeerCertificate() (Ben Noordhuis)
+
+* win/openssl: mark assembled object files as seh safe (Bert Belder)
+
+* windows/msi: fix msi build issue with WiX 3.7/3.8 (Raymond Feng)
+
+
 2013.03.07, Version 0.8.22 (Stable), 67a4cb4fe8c2346e30ffb83f7178e205cc2dab33
 
 * npm: Update to 1.2.14
@@ -1144,7 +3059,7 @@
   - Support for parallel use of the cache folder
   - Retry on registry timeouts or network failures (Trent Mick)
   - Reduce 'engines' failures to a warning
-  - Use new zsh completion if aviailable (Jeremy Cantrell)
+  - Use new zsh completion if available (Jeremy Cantrell)
 
 * Fix #3577 Un-break require('sys')
 

@@ -42,7 +42,8 @@ setTimeout(function() {
 interval = setInterval(function() {
   unref_interval = true;
   clearInterval(interval);
-}, SHORT_TIME).unref();
+}, SHORT_TIME);
+interval.unref();
 
 setTimeout(function() {
   unref_timer = true;
@@ -53,6 +54,13 @@ check_unref = setInterval(function() {
     clearInterval(check_unref);
   checks += 1;
 }, 100);
+
+// Should not assert on args.Holder()->InternalFieldCount() > 0. See #4261.
+(function() {
+  var t = setInterval(function() {}, 1);
+  process.nextTick(t.unref.bind({}));
+  process.nextTick(t.unref.bind(t));
+})();
 
 process.on('exit', function() {
   assert.strictEqual(interval_fired, false, 'Interval should not fire');

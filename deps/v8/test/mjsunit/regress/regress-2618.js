@@ -25,12 +25,12 @@
 // (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
 // OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
-// Flags: --use-osr --allow-natives-syntax
+// Flags: --use-osr --allow-natives-syntax --no-concurrent-osr
 
 function f() {
   do {
     do {
-      for (i = 0; i < 10000000; i++) {
+      for (var i = 0; i < 10000000; i++) {
         // This should run long enough to trigger OSR.
       }
     } while (false);
@@ -38,15 +38,14 @@ function f() {
 }
 
 f();
-assertTrue(%GetOptimizationStatus(f) != 2);
-
+assertTrue(%GetOptimizationCount(f) > 0 || %GetOptimizationStatus(f) == 4);
 
 function g() {
   for (var i = 0; i < 1; i++) { }
 
   do {
     do {
-      for (i = 0; i < 1; i++) { }
+      for (var i = 0; i < 1; i++) { }
     } while (false);
   } while (false);
 
@@ -58,7 +57,7 @@ function g() {
             do {
               do {
                 do {
-                  for (i = 0; i < 10000000; i++) { }
+                  for (var i = 0; i < 10000000; i++) { }
                 } while (false);
               } while (false);
             } while (false);
@@ -70,5 +69,4 @@ function g() {
 }
 
 g();
-assertTrue(%GetOptimizationStatus(g) != 2);
-
+assertTrue(%GetOptimizationCount(g) > 0 || %GetOptimizationStatus(g) == 4);

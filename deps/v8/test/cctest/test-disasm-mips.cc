@@ -28,14 +28,14 @@
 
 #include <stdlib.h>
 
-#include "v8.h"
+#include "src/v8.h"
 
-#include "debug.h"
-#include "disasm.h"
-#include "disassembler.h"
-#include "macro-assembler.h"
-#include "serialize.h"
-#include "cctest.h"
+#include "src/debug.h"
+#include "src/disasm.h"
+#include "src/disassembler.h"
+#include "src/macro-assembler.h"
+#include "src/serialize.h"
+#include "test/cctest/cctest.h"
 
 using namespace v8::internal;
 
@@ -65,7 +65,7 @@ bool DisassembleAndCompare(byte* pc, const char* compare_string) {
 // in the rest of the macros.
 #define SET_UP()                                          \
   CcTest::InitializeVM();                                 \
-  Isolate* isolate = Isolate::Current();                  \
+  Isolate* isolate = CcTest::i_isolate();                  \
   HandleScope scope(isolate);                             \
   byte *buffer = reinterpret_cast<byte*>(malloc(4*1024)); \
   Assembler assm(isolate, buffer, 4*1024);                \

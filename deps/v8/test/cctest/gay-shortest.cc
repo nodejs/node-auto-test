@@ -29,9 +29,9 @@
 // have been generated using Gay's dtoa to produce the shortest representation:
 //          decimal_rep = dtoa(v, 0, 0, &decimal_point, &sign, NULL);
 
-#include "v8.h"
+#include "src/v8.h"
 
-#include "gay-shortest.h"
+#include "test/cctest/gay-shortest.h"
 
 namespace v8 {
 namespace internal {

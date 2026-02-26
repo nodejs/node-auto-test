@@ -1,5 +1,7 @@
 # REPL
 
+    Stability: 3 - Stable
+
 A Read-Eval-Print-Loop (REPL) is available both as a standalone program and
 easily includable in other programs. The REPL provides a way to interactively
 run JavaScript and see the results.  It can be used for debugging, testing, or
@@ -30,8 +32,9 @@ For example, you could add this to your bashrc file:
 
 ## repl.start(options)
 
-Returns and starts a `REPLServer` instance. Accepts an "options" Object that
-takes the following values:
+Returns and starts a `REPLServer` instance, that inherits from 
+[Readline Interface][]. Accepts an "options" Object that takes 
+the following values:
 
  - `prompt` - the prompt and `stream` for all I/O. Defaults to `> `.
 

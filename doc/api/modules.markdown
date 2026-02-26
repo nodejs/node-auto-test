@@ -27,12 +27,33 @@ The contents of `circle.js`:
     };
 
 The module `circle.js` has exported the functions `area()` and
-`circumference()`.  To export an object, add to the special `exports`
-object.
+`circumference()`.  To add functions and objects to the root of your module,
+you can add them to the special `exports` object.
 
-Variables
-local to the module will be private. In this example the variable `PI` is
-private to `circle.js`.
+Variables local to the module will be private, as though the module was wrapped
+in a function. In this example the variable `PI` is private to `circle.js`.
+
+If you want the root of your module's export to be a function (such as a
+constructor) or if you want to export a complete object in one assignment
+instead of building it one property at a time, assign it to `module.exports`
+instead of `exports`.
+
+Below, `bar.js` makes use of the `square` module, which exports a constructor:
+
+    var square = require('./square.js');
+    var mySquare = square(2);
+    console.log('The area of my square is ' + mySquare.area());
+
+The `square` module is defined in `square.js`:
+
+    // assigning to exports will not modify module, must use module.exports
+    module.exports = function(width) {
+      return {
+        area: function() {
+          return width * width;
+        }
+      };
+    }
 
 The module system is implemented in the `require("module")` module.
 
@@ -40,8 +61,8 @@ The module system is implemented in the `require("module")` module.
 
 <!--type=misc-->
 
-When there are circular `require()` calls, a module might not be
-done being executed when it is returned.
+When there are circular `require()` calls, a module might not have finished
+executing when it is returned.
 
 Consider this situation:
 
@@ -72,8 +93,8 @@ Consider this situation:
 
 When `main.js` loads `a.js`, then `a.js` in turn loads `b.js`.  At that
 point, `b.js` tries to load `a.js`.  In order to prevent an infinite
-loop an **unfinished copy** of the `a.js` exports object is returned to the
-`b.js` module.  `b.js` then finishes loading, and its exports object is
+loop, an **unfinished copy** of the `a.js` exports object is returned to the
+`b.js` module.  `b.js` then finishes loading, and its `exports` object is
 provided to the `a.js` module.
 
 By the time `main.js` has loaded both modules, they're both finished.
@@ -140,7 +161,7 @@ parent directory of the current module, and adds `/node_modules`, and
 attempts to load the module from that location.
 
 If it is not found there, then it moves to the parent directory, and so
-on, until the root of the tree is reached.
+on, until the root of the file system is reached.
 
 For example, if the file at `'/home/ry/projects/foo.js'` called
 `require('bar.js')`, then node would look in the following locations, in
@@ -153,6 +174,12 @@ this order:
 
 This allows programs to localize their dependencies, so that they do not
 clash.
+
+You can require specific files or sub modules distributed with a module by
+including a path suffix after the module name. For instance
+`require('example-module/path/to/file')` would resolve `path/to/file`
+relative to where `example-module` is located. The suffixed path follows the
+same module resolution semantics.
 
 ## Folders as Modules
 
@@ -218,18 +245,21 @@ would resolve to different files.
 * {Object}
 
 In each module, the `module` free variable is a reference to the object
-representing the current module.  In particular
-`module.exports` is the same as the `exports` object.
-`module` isn't actually a global but rather local to each module.
+representing the current module.  For convenience, `module.exports` is
+also accessible via the `exports` module-global. `module` isn't actually
+a global but rather local to each module.
 
 ### module.exports
 
 * {Object}
 
-The `exports` object is created by the Module system. Sometimes this is not
-acceptable, many want their module to be an instance of some class. To do this
-assign the desired export object to `module.exports`. For example suppose we
-were making a module called `a.js`
+The `module.exports` object is created by the Module system. Sometimes this is not
+acceptable; many want their module to be an instance of some class. To do this,
+assign the desired export object to `module.exports`. Note that assigning the
+desired object to `exports` will simply rebind the local `exports` variable,
+which is probably not what you want to do.
+
+For example suppose we were making a module called `a.js`
 
     var EventEmitter = require('events').EventEmitter;
 
@@ -263,17 +293,39 @@ y.js:
     var x = require('./x');
     console.log(x.a);
 
+#### exports alias
+
+The `exports` variable that is available within a module starts as a reference
+to `module.exports`. As with any variable, if you assign a new value to it, it
+is no longer bound to the previous value.
+
+To illustrate the behaviour, imagine this hypothetical implementation of
+`require()`:
+
+    function require(...) {
+      // ...
+      function (module, exports) {
+        // Your module code here
+        exports = some_func;        // re-assigns exports, exports is no longer
+                                    // a shortcut, and nothing is exported.
+        module.exports = some_func; // makes your module export 0
+      } (module, module.exports);
+      return module;
+    }
+
+As a guideline, if the relationship between `exports` and `module.exports`
+seems like magic to you, ignore `exports` and only use `module.exports`.
 
 ### module.require(id)
 
 * `id` {String}
-* Return: {Object} `exports` from the resolved module
+* Return: {Object} `module.exports` from the resolved module
 
 The `module.require` method provides a way to load a module as if
 `require()` was called from the original module.
 
 Note that in order to do this, you must get a reference to the `module`
-object.  Since `require()` returns the `exports`, and the `module` is
+object.  Since `require()` returns the `module.exports`, and the `module` is
 typically *only* available within a specific module's code, it must be
 explicitly exported in order to be used.
 
@@ -339,7 +391,8 @@ in pseudocode of what require.resolve does:
     LOAD_AS_FILE(X)
     1. If X is a file, load X as JavaScript text.  STOP
     2. If X.js is a file, load X.js as JavaScript text.  STOP
-    3. If X.node is a file, load X.node as binary addon.  STOP
+    3. If X.json is a file, parse X.json to a JavaScript Object.  STOP
+    4. If X.node is a file, load X.node as binary addon.  STOP
 
     LOAD_AS_DIRECTORY(X)
     1. If X/package.json is a file,
@@ -347,7 +400,8 @@ in pseudocode of what require.resolve does:
        b. let M = X + (json main field)
        c. LOAD_AS_FILE(M)
     2. If X/index.js is a file, load X/index.js as JavaScript text.  STOP
-    3. If X/index.node is a file, load X/index.node as binary addon.  STOP
+    3. If X/index.json is a file, parse X/index.json to a JavaScript object. STOP
+    4. If X/index.node is a file, load X/index.node as binary addon.  STOP
 
     LOAD_NODE_MODULES(X, START)
     1. let DIRS=NODE_MODULES_PATHS(START)
@@ -357,15 +411,14 @@ in pseudocode of what require.resolve does:
 
     NODE_MODULES_PATHS(START)
     1. let PARTS = path split(START)
-    2. let ROOT = index of first instance of "node_modules" in PARTS, or 0
-    3. let I = count of PARTS - 1
-    4. let DIRS = []
-    5. while I > ROOT,
+    2. let I = count of PARTS - 1
+    3. let DIRS = []
+    4. while I >= 0,
        a. if PARTS[I] = "node_modules" CONTINUE
        c. DIR = path join(PARTS[0 .. I] + "node_modules")
        b. DIRS = DIRS + DIR
        c. let I = I - 1
-    6. return DIRS
+    5. return DIRS
 
 ## Loading from the global folders
 

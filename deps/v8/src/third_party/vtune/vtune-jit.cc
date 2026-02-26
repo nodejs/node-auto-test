@@ -64,9 +64,14 @@ using namespace std;
 // To avoid GCC 4.4 compilation warning about hash_map being deprecated.
 #define OLD_DEPRECATED __DEPRECATED
 #undef __DEPRECATED
+#if defined (ANDROID)
+#include <hash_map>
+using namespace std;
+#else
 #include <ext/hash_map>
-#define __DEPRECATED OLD_DEPRECATED
 using namespace __gnu_cxx;
+#endif
+#define __DEPRECATED OLD_DEPRECATED
 #endif
 
 #include <list>
@@ -187,15 +192,14 @@ void VTUNEJITInterface::event_handler(const v8::JitCodeEvent* event) {
         jmethod.method_size = static_cast<unsigned int>(event->code_len);
         jmethod.method_name = temp_method_name;
 
-        Handle<Script> script = event->script;
-		
+        Handle<UnboundScript> script = event->script;
+
         if (*script != NULL) {
           // Get the source file name and set it to jmethod.source_file_name
-         if ((*script->GetScriptName())->IsString()) {
-            Handle<String> script_name =
-                Handle<String>(String::Cast(*script->GetScriptName()));
-            temp_file_name = new char[script_name->Length() + 1];
-            script_name->WriteAscii(temp_file_name);
+          if ((*script->GetScriptName())->IsString()) {
+            Handle<String> script_name = script->GetScriptName()->ToString();
+            temp_file_name = new char[script_name->Utf8Length() + 1];
+            script_name->WriteUtf8(temp_file_name);
             jmethod.source_file_name = temp_file_name;
           }
 
@@ -220,11 +224,11 @@ void VTUNEJITInterface::event_handler(const v8::JitCodeEvent* event) {
               jmethod.line_number_table[index].Offset =
                   static_cast<unsigned int>(Iter->pc_);
               jmethod.line_number_table[index++].LineNumber =
-				  script->GetLineNumber(Iter->pos_)+1;
+                  script->GetLineNumber(Iter->pos_) + 1;
             }
             GetEntries()->erase(event->code_start);
           }
-        } 
+        }
 
         iJIT_NotifyEvent(iJVM_EVENT_TYPE_METHOD_LOAD_FINISHED,
                          reinterpret_cast<void*>(&jmethod));
@@ -257,17 +261,17 @@ void VTUNEJITInterface::event_handler(const v8::JitCodeEvent* event) {
       case v8::JitCodeEvent::CODE_END_LINE_INFO_RECORDING: {
         GetEntries()->insert(std::pair <void*, void*>(event->code_start, event->user_data));
         break;
-      } 
+      }
       default:
         break;
     }
-  } 
+  }
   return;
 }
 
 }  // namespace internal
 
-void InitilizeVtuneForV8() {
+void InitializeVtuneForV8() {
   if (v8::V8::Initialize()) {
     v8::V8::SetFlagsFromString("--nocompact_code_space",
                               (int)strlen("--nocompact_code_space"));
