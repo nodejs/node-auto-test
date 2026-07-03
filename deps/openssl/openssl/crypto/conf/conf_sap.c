@@ -1,5 +1,5 @@
 /*
- * Copyright 2002-2021 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2002-2024 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -17,7 +17,7 @@
 #include <openssl/engine.h>
 
 #if defined(_WIN32) && !defined(__BORLANDC__)
-# define strdup _strdup
+#define strdup _strdup
 #endif
 
 /*
@@ -38,30 +38,39 @@ void OPENSSL_config(const char *appname)
         settings.appname = strdup(appname);
     settings.flags = DEFAULT_CONF_MFLAGS;
     OPENSSL_init_crypto(OPENSSL_INIT_LOAD_CONFIG, &settings);
+
+    free(settings.appname);
 }
 #endif
 
 int ossl_config_int(const OPENSSL_INIT_SETTINGS *settings)
 {
     int ret = 0;
+#if defined(OPENSSL_INIT_DEBUG) || !defined(OPENSSL_SYS_UEFI)
     const char *filename;
     const char *appname;
     unsigned long flags;
+#endif
 
     if (openssl_configured)
         return 1;
 
+#if defined(OPENSSL_INIT_DEBUG) || !defined(OPENSSL_SYS_UEFI)
     filename = settings ? settings->filename : NULL;
     appname = settings ? settings->appname : NULL;
     flags = settings ? settings->flags : DEFAULT_CONF_MFLAGS;
+#endif
 
 #ifdef OPENSSL_INIT_DEBUG
     fprintf(stderr, "OPENSSL_INIT: ossl_config_int(%s, %s, %lu)\n",
-            filename, appname, flags);
+        filename, appname, flags);
 #endif
 
 #ifndef OPENSSL_SYS_UEFI
-    ret = CONF_modules_load_file(filename, appname, flags);
+    ret = CONF_modules_load_file_ex(OSSL_LIB_CTX_get0_global_default(),
+        filename, appname, flags);
+#else
+    ret = 1;
 #endif
     openssl_configured = 1;
     return ret;

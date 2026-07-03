@@ -139,20 +139,25 @@ async function checkLinking() {
     code: 'ERR_VM_MODULE_DIFFERENT_CONTEXT'
   });
 
+  const error = new Error();
   await assert.rejects(async () => {
-    const erroredModule = new SourceTextModule('import "foo";');
+    globalThis.error = error;
+    const erroredModule = new SourceTextModule('throw error;');
+    await erroredModule.link(common.mustNotCall());
     try {
-      await erroredModule.link(common.mustCall(() => ({})));
+      await erroredModule.evaluate();
     } catch {
       // ignored
-    } finally {
-      assert.strictEqual(erroredModule.status, 'errored');
     }
+    delete globalThis.error;
+
+    assert.strictEqual(erroredModule.status, 'errored');
 
     const rootModule = new SourceTextModule('import "errored";');
     await rootModule.link(common.mustCall(() => erroredModule));
   }, {
-    code: 'ERR_VM_MODULE_LINKING_ERRORED'
+    code: 'ERR_VM_MODULE_LINK_FAILURE',
+    cause: error,
   });
 }
 
@@ -210,10 +215,7 @@ async function checkInvalidOptionForEvaluate() {
     ['link', 'evaluate'].forEach(async (method) => {
       await assert.rejects(async () => {
         await Module.prototype[method]();
-      }, {
-        code: 'ERR_VM_MODULE_NOT_MODULE',
-        message: /Provided module is not an instance of Module/
-      });
+      }, { code: 'ERR_INVALID_THIS' });
     });
   }
 }
@@ -235,26 +237,29 @@ function checkInvalidCachedData() {
 }
 
 function checkGettersErrors() {
-  const expectedError = {
-    code: 'ERR_VM_MODULE_NOT_MODULE',
-    message: /Provided module is not an instance of Module/
-  };
+  const expectedError = { name: 'TypeError' };
   const getters = ['identifier', 'context', 'namespace', 'status', 'error'];
   getters.forEach((getter) => {
     assert.throws(() => {
       // eslint-disable-next-line no-unused-expressions
       Module.prototype[getter];
-    }, expectedError);
+    }, expectedError, `Module.prototype.${getter} should throw`);
     assert.throws(() => {
       // eslint-disable-next-line no-unused-expressions
       SourceTextModule.prototype[getter];
-    }, expectedError);
+    }, expectedError, `SourceTextModule.prototype.${getter} should throw`);
   });
-  // `dependencySpecifiers` getter is just part of SourceTextModule
-  assert.throws(() => {
-    // eslint-disable-next-line no-unused-expressions
-    SourceTextModule.prototype.dependencySpecifiers;
-  }, expectedError);
+
+  const sourceTextModuleGetters = [
+    'moduleRequests',
+    'dependencySpecifiers',
+  ];
+  sourceTextModuleGetters.forEach((getter) => {
+    assert.throws(() => {
+      // eslint-disable-next-line no-unused-expressions
+      SourceTextModule.prototype[getter];
+    }, expectedError, `SourceTextModule.prototype.${getter} should throw`);
+  });
 }
 
 const finished = common.mustCall();

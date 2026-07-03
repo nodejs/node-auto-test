@@ -28,119 +28,69 @@
 
 #ifdef HAVE_CONFIG_H
 #  include <config.h>
-#endif /* HAVE_CONFIG_H */
+#endif /* defined(HAVE_CONFIG_H) */
 
 #ifdef HAVE_ARPA_INET_H
 #  include <arpa/inet.h>
-#endif /* HAVE_ARPA_INET_H */
+#endif /* defined(HAVE_ARPA_INET_H) */
 
 #ifdef HAVE_NETINET_IN_H
 #  include <netinet/in.h>
-#endif /* HAVE_NETINET_IN_H */
+#endif /* defined(HAVE_NETINET_IN_H) */
 
 #ifdef HAVE_BYTESWAP_H
 #  include <byteswap.h>
-#endif /* HAVE_BYTESWAP_H */
+#endif /* defined(HAVE_BYTESWAP_H) */
 
 #ifdef HAVE_ENDIAN_H
 #  include <endian.h>
-#endif /* HAVE_ENDIAN_H */
+#endif /* defined(HAVE_ENDIAN_H) */
 
 #ifdef HAVE_SYS_ENDIAN_H
 #  include <sys/endian.h>
-#endif /* HAVE_SYS_ENDIAN_H */
+#endif /* defined(HAVE_SYS_ENDIAN_H) */
+
+#ifdef __APPLE__
+#  include <libkern/OSByteOrder.h>
+#endif /* defined(__APPLE__) */
 
 #include <nghttp3/nghttp3.h>
 
-#if defined(HAVE_BSWAP_64) ||                                                  \
-    (defined(HAVE_DECL_BSWAP_64) && HAVE_DECL_BSWAP_64 > 0)
-#  define nghttp3_bswap64 bswap_64
-#else /* !HAVE_BSWAP_64 */
-#  define nghttp3_bswap64(N)                                                   \
-    ((uint64_t)(ntohl((uint32_t)(N))) << 32 | ntohl((uint32_t)((N) >> 32)))
-#endif /* !HAVE_BSWAP_64 */
+#define NGHTTP3_VARINT_MAX ((1ULL << 62) - 1)
 
-#if defined(HAVE_BE64TOH) ||                                                   \
-    (defined(HAVE_DECL_BE64TOH) && HAVE_DECL_BE64TOH > 0)
+#if HAVE_DECL_BE64TOH
 #  define nghttp3_ntohl64(N) be64toh(N)
 #  define nghttp3_htonl64(N) htobe64(N)
-#else /* !HAVE_BE64TOH */
-#  if defined(WORDS_BIGENDIAN)
+#else /* !HAVE_DECL_BE64TOH */
+#  ifdef WORDS_BIGENDIAN
 #    define nghttp3_ntohl64(N) (N)
 #    define nghttp3_htonl64(N) (N)
-#  else /* !WORDS_BIGENDIAN */
+#  else /* !defined(WORDS_BIGENDIAN) */
+#    if HAVE_DECL_BSWAP_64
+#      define nghttp3_bswap64(N) bswap_64(N)
+#    elif defined(WIN32)
+#      define nghttp3_bswap64(N) _byteswap_uint64(N)
+#    elif defined(__APPLE__)
+#      define nghttp3_bswap64(N) OSSwapInt64(N)
+#    else /* !(HAVE_DECL_BSWAP_64 || defined(WIN32) || defined(__APPLE__)) */
+#      define nghttp3_bswap64(N)                                               \
+        ((uint64_t)(ntohl((uint32_t)(N))) << 32 | ntohl((uint32_t)((N) >> 32)))
+#    endif /* !(HAVE_DECL_BSWAP_64 || defined(WIN32) || defined(__APPLE__)) */
 #    define nghttp3_ntohl64(N) nghttp3_bswap64(N)
 #    define nghttp3_htonl64(N) nghttp3_bswap64(N)
-#  endif /* !WORDS_BIGENDIAN */
-#endif   /* !HAVE_BE64TOH */
+#  endif /* !defined(WORDS_BIGENDIAN) */
+#endif   /* !HAVE_DECL_BE64TOH */
 
-#if defined(WIN32)
-/* Windows requires ws2_32 library for ntonl family of functions.  We
-   define inline functions for those functions so that we don't have
-   dependency on that lib. */
-
-#  ifdef _MSC_VER
-#    define STIN static __inline
-#  else
-#    define STIN static inline
-#  endif
-
-STIN uint32_t htonl(uint32_t hostlong) {
-  uint32_t res;
-  unsigned char *p = (unsigned char *)&res;
-  *p++ = hostlong >> 24;
-  *p++ = (hostlong >> 16) & 0xffu;
-  *p++ = (hostlong >> 8) & 0xffu;
-  *p = hostlong & 0xffu;
-  return res;
-}
-
-STIN uint16_t htons(uint16_t hostshort) {
-  uint16_t res;
-  unsigned char *p = (unsigned char *)&res;
-  *p++ = hostshort >> 8;
-  *p = hostshort & 0xffu;
-  return res;
-}
-
-STIN uint32_t ntohl(uint32_t netlong) {
-  uint32_t res;
-  unsigned char *p = (unsigned char *)&netlong;
-  res = *p++ << 24;
-  res += *p++ << 16;
-  res += *p++ << 8;
-  res += *p;
-  return res;
-}
-
-STIN uint16_t ntohs(uint16_t netshort) {
-  uint16_t res;
-  unsigned char *p = (unsigned char *)&netshort;
-  res = *p++ << 8;
-  res += *p;
-  return res;
-}
-
-#endif /* WIN32 */
-
-/*
- * nghttp3_get_varint reads variable-length integer from |p|, and
- * returns it in host byte order.  The number of bytes read is stored
- * in |*plen|.
- */
-int64_t nghttp3_get_varint(size_t *plen, const uint8_t *p);
-
-/*
- * nghttp3_get_varint_fb reads first byte of encoded variable-length
- * integer from |p|.
- */
-int64_t nghttp3_get_varint_fb(const uint8_t *p);
-
-/*
- * nghttp3_get_varint_len returns the required number of bytes to read
- * variable-length integer starting at |p|.
- */
-size_t nghttp3_get_varint_len(const uint8_t *p);
+#ifdef WIN32
+/* Windows requires ws2_32 library for ntonl family of functions.
+   Instead of using them, use _byteswap_* functions.  This is fine
+   because all platforms that can run Windows these days are little
+   endian. */
+#  define htonl(N) _byteswap_ulong(N)
+#  define htons(N) _byteswap_ushort(N)
+#  define ntohl(N) _byteswap_ulong(N)
+#  define ntohs(N) _byteswap_ushort(N)
+#endif /* defined(WIN32) */
 
 /*
  * nghttp3_put_uint64be writes |n| in host byte order in |p| in
@@ -150,25 +100,11 @@ size_t nghttp3_get_varint_len(const uint8_t *p);
 uint8_t *nghttp3_put_uint64be(uint8_t *p, uint64_t n);
 
 /*
- * nghttp3_put_uint48be writes |n| in host byte order in |p| in
- * network byte order.  It writes only least significant 48 bits.  It
- * returns the one beyond of the last written position.
- */
-uint8_t *nghttp3_put_uint48be(uint8_t *p, uint64_t n);
-
-/*
  * nghttp3_put_uint32be writes |n| in host byte order in |p| in
  * network byte order.  It returns the one beyond of the last written
  * position.
  */
 uint8_t *nghttp3_put_uint32be(uint8_t *p, uint32_t n);
-
-/*
- * nghttp3_put_uint24be writes |n| in host byte order in |p| in
- * network byte order.  It writes only least significant 24 bits.  It
- * returns the one beyond of the last written position.
- */
-uint8_t *nghttp3_put_uint24be(uint8_t *p, uint32_t n);
 
 /*
  * nghttp3_put_uint16be writes |n| in host byte order in |p| in
@@ -178,44 +114,8 @@ uint8_t *nghttp3_put_uint24be(uint8_t *p, uint32_t n);
 uint8_t *nghttp3_put_uint16be(uint8_t *p, uint16_t n);
 
 /*
- * nghttp3_put_varint writes |n| in |p| using variable-length integer
- * encoding.  It returns the one beyond of the last written position.
- */
-uint8_t *nghttp3_put_varint(uint8_t *p, int64_t n);
-
-/*
- * nghttp3_put_varint_len returns the required number of bytes to
- * encode |n|.
- */
-size_t nghttp3_put_varint_len(int64_t n);
-
-/*
  * nghttp3_ord_stream_id returns the ordinal number of |stream_id|.
  */
 uint64_t nghttp3_ord_stream_id(int64_t stream_id);
 
-/*
- * NGHTTP3_PRI_INC_MASK is a bit mask to retrieve incremental bit from
- * a value produced by nghttp3_pri_to_uint8.
- */
-#define NGHTTP3_PRI_INC_MASK (1 << 7)
-
-/*
- * nghttp3_pri_to_uint8 encodes |pri| into uint8_t variable.
- */
-uint8_t nghttp3_pri_to_uint8(const nghttp3_pri *pri);
-
-/*
- * nghttp3_pri_uint8_urgency extracts urgency from |PRI| which is
- * supposed to be constructed by nghttp3_pri_to_uint8.
- */
-#define nghttp3_pri_uint8_urgency(PRI)                                         \
-  ((uint32_t)((PRI) & ~NGHTTP3_PRI_INC_MASK))
-
-/*
- * nghttp3_pri_uint8_inc extracts inc from |PRI| which is supposed to
- * be constructed by nghttp3_pri_to_uint8.
- */
-#define nghttp3_pri_uint8_inc(PRI) (((PRI)&NGHTTP3_PRI_INC_MASK) != 0)
-
-#endif /* NGHTTP3_CONV_H */
+#endif /* !defined(NGHTTP3_CONV_H) */

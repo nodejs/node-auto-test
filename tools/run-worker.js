@@ -5,7 +5,15 @@ if (typeof require === 'undefined') {
 }
 
 const path = require('path');
-const { Worker, SHARE_ENV } = require('worker_threads');
+const { Worker } = require('worker_threads');
 
-new Worker(path.resolve(process.cwd(), process.argv[2]), { env: SHARE_ENV })
+// When --permission is enabled, the process
+// aren't able to spawn any worker unless --allow-worker is passed.
+// Therefore, we skip the permission tests for custom-suites-freestyle
+if (process.permission && !process.permission.has('worker')) {
+  console.log('1..0 # Skipped: Not being run with worker_threads permission');
+  process.exit(0);
+}
+
+new Worker(path.resolve(process.cwd(), process.argv[2]))
   .on('exit', (code) => process.exitCode = code);

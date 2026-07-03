@@ -11,7 +11,11 @@ using v8::Function;
 using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
 using v8::HandleScope;
+using v8::Isolate;
+using v8::Just;
 using v8::Local;
+using v8::Maybe;
+using v8::Nothing;
 using v8::Object;
 using v8::Value;
 
@@ -28,31 +32,6 @@ StreamPipe::StreamPipe(StreamBase* source,
   sink->PushStreamListener(&writable_listener_);
 
   uses_wants_write_ = sink->HasWantsWrite();
-
-  // Set up links between this object and the source/sink objects.
-  // In particular, this makes sure that they are garbage collected as a group,
-  // if that applies to the given streams (for example, Http2Streams use
-  // weak references).
-  if (obj->Set(env()->context(),
-               env()->source_string(),
-               source->GetObject()).IsNothing()) {
-    return;
-  }
-  if (source->GetObject()->Set(env()->context(),
-                               env()->pipe_target_string(),
-                               obj).IsNothing()) {
-      return;
-  }
-  if (obj->Set(env()->context(),
-               env()->sink_string(),
-               sink->GetObject()).IsNothing()) {
-    return;
-  }
-  if (sink->GetObject()->Set(env()->context(),
-                             env()->pipe_source_string(),
-                             obj).IsNothing()) {
-    return;
-  }
 }
 
 StreamPipe::~StreamPipe() {
@@ -261,38 +240,72 @@ void StreamPipe::WritableListener::OnStreamRead(ssize_t nread,
   return previous_listener_->OnStreamRead(nread, buf);
 }
 
+Maybe<StreamPipe*> StreamPipe::New(StreamBase* source,
+                                   StreamBase* sink,
+                                   Local<Object> obj) {
+  std::unique_ptr<StreamPipe> stream_pipe(new StreamPipe(source, sink, obj));
+
+  // Set up links between this object and the source/sink objects.
+  // In particular, this makes sure that they are garbage collected as a group,
+  // if that applies to the given streams (for example, Http2Streams use
+  // weak references).
+  Environment* env = source->stream_env();
+  if (obj->Set(env->context(), env->source_string(), source->GetObject())
+          .IsNothing()) {
+    return Nothing<StreamPipe*>();
+  }
+  if (source->GetObject()
+          ->Set(env->context(), env->pipe_target_string(), obj)
+          .IsNothing()) {
+    return Nothing<StreamPipe*>();
+  }
+  if (obj->Set(env->context(), env->sink_string(), sink->GetObject())
+          .IsNothing()) {
+    return Nothing<StreamPipe*>();
+  }
+  if (sink->GetObject()
+          ->Set(env->context(), env->pipe_source_string(), obj)
+          .IsNothing()) {
+    return Nothing<StreamPipe*>();
+  }
+
+  return Just(stream_pipe.release());
+}
+
 void StreamPipe::New(const FunctionCallbackInfo<Value>& args) {
   CHECK(args.IsConstructCall());
   CHECK(args[0]->IsObject());
   CHECK(args[1]->IsObject());
   StreamBase* source = StreamBase::FromObject(args[0].As<Object>());
   StreamBase* sink = StreamBase::FromObject(args[1].As<Object>());
+  CHECK_NOT_NULL(source);
+  CHECK_NOT_NULL(sink);
 
-  new StreamPipe(source, sink, args.This());
+  if (StreamPipe::New(source, sink, args.This()).IsNothing()) return;
 }
 
 void StreamPipe::Start(const FunctionCallbackInfo<Value>& args) {
   StreamPipe* pipe;
-  ASSIGN_OR_RETURN_UNWRAP(&pipe, args.Holder());
+  ASSIGN_OR_RETURN_UNWRAP(&pipe, args.This());
   pipe->is_closed_ = false;
   pipe->writable_listener_.OnStreamWantsWrite(65536);
 }
 
 void StreamPipe::Unpipe(const FunctionCallbackInfo<Value>& args) {
   StreamPipe* pipe;
-  ASSIGN_OR_RETURN_UNWRAP(&pipe, args.Holder());
+  ASSIGN_OR_RETURN_UNWRAP(&pipe, args.This());
   pipe->Unpipe();
 }
 
 void StreamPipe::IsClosed(const FunctionCallbackInfo<Value>& args) {
   StreamPipe* pipe;
-  ASSIGN_OR_RETURN_UNWRAP(&pipe, args.Holder());
+  ASSIGN_OR_RETURN_UNWRAP(&pipe, args.This());
   args.GetReturnValue().Set(pipe->is_closed_);
 }
 
 void StreamPipe::PendingWrites(const FunctionCallbackInfo<Value>& args) {
   StreamPipe* pipe;
-  ASSIGN_OR_RETURN_UNWRAP(&pipe, args.Holder());
+  ASSIGN_OR_RETURN_UNWRAP(&pipe, args.This());
   args.GetReturnValue().Set(pipe->pending_writes_);
 }
 
@@ -303,22 +316,22 @@ void InitializeStreamPipe(Local<Object> target,
                           Local<Context> context,
                           void* priv) {
   Environment* env = Environment::GetCurrent(context);
+  Isolate* isolate = env->isolate();
 
   // Create FunctionTemplate for FileHandle::CloseReq
-  Local<FunctionTemplate> pipe = env->NewFunctionTemplate(StreamPipe::New);
-  env->SetProtoMethod(pipe, "unpipe", StreamPipe::Unpipe);
-  env->SetProtoMethod(pipe, "start", StreamPipe::Start);
-  env->SetProtoMethod(pipe, "isClosed", StreamPipe::IsClosed);
-  env->SetProtoMethod(pipe, "pendingWrites", StreamPipe::PendingWrites);
+  Local<FunctionTemplate> pipe = NewFunctionTemplate(isolate, StreamPipe::New);
+  SetProtoMethod(isolate, pipe, "unpipe", StreamPipe::Unpipe);
+  SetProtoMethod(isolate, pipe, "start", StreamPipe::Start);
+  SetProtoMethod(isolate, pipe, "isClosed", StreamPipe::IsClosed);
+  SetProtoMethod(isolate, pipe, "pendingWrites", StreamPipe::PendingWrites);
   pipe->Inherit(AsyncWrap::GetConstructorTemplate(env));
   pipe->InstanceTemplate()->SetInternalFieldCount(
       StreamPipe::kInternalFieldCount);
-  env->SetConstructorFunction(target, "StreamPipe", pipe);
+  SetConstructorFunction(context, target, "StreamPipe", pipe);
 }
 
 }  // anonymous namespace
 
 }  // namespace node
 
-NODE_MODULE_CONTEXT_AWARE_INTERNAL(stream_pipe,
-                                   node::InitializeStreamPipe)
+NODE_BINDING_CONTEXT_AWARE_INTERNAL(stream_pipe, node::InitializeStreamPipe)

@@ -13,10 +13,20 @@ const { getEncodingFromLabel } = require('internal/encoding');
   const mappings = {
     'utf-8': [
       'unicode-1-1-utf-8',
+      'unicode11utf8',
+      'unicode20utf8',
       'utf8',
+      'x-unicode20utf8',
     ],
-    'utf-16be': [],
+    'utf-16be': [
+      'unicodefffe',
+    ],
     'utf-16le': [
+      'csunicode',
+      'iso-10646-ucs-2',
+      'ucs-2',
+      'unicode',
+      'unicodefeff',
       'utf-16',
     ],
     'ibm866': [
@@ -258,14 +268,20 @@ const { getEncodingFromLabel } = require('internal/encoding');
       'ksc5601',
       'ksc_5601',
       'windows-949',
-    ]
+    ],
+    'replacement': [
+      'csiso2022kr',
+      'hz-gb-2312',
+      'iso-2022-cn',
+      'iso-2022-cn-ext',
+      'iso-2022-kr',
+    ],
+    'x-user-defined': []
   };
-  Object.entries(mappings).forEach((i) => {
-    const enc = i[0];
-    const labels = i[1];
+  for (const [enc, labels] of Object.entries(mappings)) {
     assert.strictEqual(getEncodingFromLabel(enc), enc);
     labels.forEach((l) => assert.strictEqual(getEncodingFromLabel(l), enc));
-  });
+  }
 
   assert.strictEqual(getEncodingFromLabel('made-up'), undefined);
 }

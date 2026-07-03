@@ -5,8 +5,7 @@
 #ifndef V8_HEAP_CPPGC_MARKING_WORKLISTS_H_
 #define V8_HEAP_CPPGC_MARKING_WORKLISTS_H_
 
-#include <unordered_set>
-
+#include "absl/container/flat_hash_set.h"
 #include "include/cppgc/visitor.h"
 #include "src/base/platform/mutex.h"
 #include "src/heap/base/worklist.h"
@@ -24,7 +23,7 @@ class MarkingWorklists {
     template <AccessMode = AccessMode::kNonAtomic>
     bool Contains(HeapObjectHeader*);
     template <AccessMode = AccessMode::kNonAtomic>
-    std::unordered_set<HeapObjectHeader*> Extract();
+    absl::flat_hash_set<HeapObjectHeader*> Extract();
     template <AccessMode = AccessMode::kNonAtomic>
     void Clear();
     template <AccessMode = AccessMode::kNonAtomic>
@@ -42,7 +41,7 @@ class MarkingWorklists {
     void operator delete[](void*) = delete;
 
     v8::base::Mutex lock_;
-    std::unordered_set<HeapObjectHeader*> objects_;
+    absl::flat_hash_set<HeapObjectHeader*> objects_;
   };
 
  public:
@@ -76,6 +75,8 @@ class MarkingWorklists {
       heap::base::Worklist<HeapObjectHeader*, 16 /* local entries */>;
   using WeakCallbackWorklist =
       heap::base::Worklist<WeakCallbackItem, 64 /* local entries */>;
+  using WeakCustomCallbackWorklist =
+      heap::base::Worklist<WeakCallbackItem, 16 /* local entries */>;
   using WriteBarrierWorklist =
       heap::base::Worklist<HeapObjectHeader*, 64 /*local entries */>;
   using ConcurrentMarkingBailoutWorklist =
@@ -98,8 +99,18 @@ class MarkingWorklists {
   WriteBarrierWorklist* write_barrier_worklist() {
     return &write_barrier_worklist_;
   }
-  WeakCallbackWorklist* weak_callback_worklist() {
-    return &weak_callback_worklist_;
+  WeakCallbackWorklist* weak_container_callback_worklist() {
+    return &weak_container_callback_worklist_;
+  }
+  WeakCallbackWorklist* parallel_weak_callback_worklist() {
+    return &parallel_weak_callback_worklist_;
+  }
+  WeakCustomCallbackWorklist* weak_custom_callback_worklist() {
+    return &weak_custom_callback_worklist_;
+  }
+  const ConcurrentMarkingBailoutWorklist* concurrent_marking_bailout_worklist()
+      const {
+    return &concurrent_marking_bailout_worklist_;
   }
   ConcurrentMarkingBailoutWorklist* concurrent_marking_bailout_worklist() {
     return &concurrent_marking_bailout_worklist_;
@@ -125,7 +136,13 @@ class MarkingWorklists {
   PreviouslyNotFullyConstructedWorklist
       previously_not_fully_constructed_worklist_;
   WriteBarrierWorklist write_barrier_worklist_;
-  WeakCallbackWorklist weak_callback_worklist_;
+  // Hold weak callbacks for weak containers (e.g. containers with WeakMembers).
+  WeakCallbackWorklist weak_container_callback_worklist_;
+  // Hold weak custom callbacks (e.g. for containers with UntracedMembers).
+  WeakCustomCallbackWorklist weak_custom_callback_worklist_;
+  // Hold weak callbacks which can invoke on main or worker thread (used for
+  // regular WeakMember).
+  WeakCallbackWorklist parallel_weak_callback_worklist_;
   ConcurrentMarkingBailoutWorklist concurrent_marking_bailout_worklist_;
   EphemeronPairsWorklist discovered_ephemeron_pairs_worklist_;
   EphemeronPairsWorklist ephemeron_pairs_for_processing_worklist_;
@@ -163,10 +180,10 @@ bool MarkingWorklists::ExternalMarkingWorklist::Contains(
 }
 
 template <AccessMode mode>
-std::unordered_set<HeapObjectHeader*>
+absl::flat_hash_set<HeapObjectHeader*>
 MarkingWorklists::ExternalMarkingWorklist::Extract() {
   ConditionalMutexGuard<mode> guard(&lock_);
-  std::unordered_set<HeapObjectHeader*> extracted;
+  absl::flat_hash_set<HeapObjectHeader*> extracted;
   std::swap(extracted, objects_);
   DCHECK(objects_.empty());
   return extracted;

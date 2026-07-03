@@ -4,40 +4,36 @@ const common = require('../common');
 const assert = require('assert');
 const timers = require('timers');
 const { promisify } = require('util');
-const child_process = require('child_process');
 
-// TODO(benjamingr) - refactor to use getEventListeners when #35991 lands
+const { listenerCount } = require('events');
 const { NodeEventTarget } = require('internal/event_target');
 
 const timerPromises = require('timers/promises');
 
 const setPromiseTimeout = promisify(timers.setTimeout);
-const exec = promisify(child_process.exec);
 
 const { setInterval } = timerPromises;
-
-process.on('multipleResolves', common.mustNotCall());
 
 {
   const iterable = setInterval(1, undefined);
   const iterator = iterable[Symbol.asyncIterator]();
   const promise = iterator.next();
-  promise.then(common.mustCall((result) => {
+  promise.then((result) => {
     assert.ok(!result.done, 'iterator was wrongly marked as done');
     assert.strictEqual(result.value, undefined);
     return iterator.return();
-  })).then(common.mustCall());
+  }).then(common.mustCall());
 }
 
 {
   const iterable = setInterval(1, 'foobar');
   const iterator = iterable[Symbol.asyncIterator]();
   const promise = iterator.next();
-  promise.then(common.mustCall((result) => {
+  promise.then((result) => {
     assert.ok(!result.done, 'iterator was wronly marked as done');
     assert.strictEqual(result.value, 'foobar');
     return iterator.return();
-  })).then(common.mustCall());
+  }).then(common.mustCall());
 }
 
 {
@@ -45,16 +41,16 @@ process.on('multipleResolves', common.mustNotCall());
   const iterator = iterable[Symbol.asyncIterator]();
   const promise = iterator.next();
   promise
-    .then(common.mustCall((result) => {
+    .then((result) => {
       assert.ok(!result.done, 'iterator was wronly marked as done');
       assert.strictEqual(result.value, 'foobar');
       return iterator.next();
-    }))
-    .then(common.mustCall((result) => {
+    })
+    .then((result) => {
       assert.ok(!result.done, 'iterator was wrongly marked as done');
       assert.strictEqual(result.value, 'foobar');
       return iterator.return();
-    }))
+    })
     .then(common.mustCall());
 }
 
@@ -122,10 +118,10 @@ process.on('multipleResolves', common.mustNotCall());
   signal.aborted = false;
   const iterator = setInterval(1, undefined, { signal });
   iterator.next().then(common.mustCall(() => {
-    assert.strictEqual(signal.listenerCount('abort'), 1);
+    assert.strictEqual(listenerCount(signal, 'abort'), 1);
     iterator.return();
   })).finally(common.mustCall(() => {
-    assert.strictEqual(signal.listenerCount('abort'), 0);
+    assert.strictEqual(listenerCount(signal, 'abort'), 0);
   }));
 }
 
@@ -139,7 +135,7 @@ process.on('multipleResolves', common.mustNotCall());
     // eslint-disable-next-line no-unused-vars
     for await (const _ of iterator) {
       if (i === 0) {
-        assert.strictEqual(signal.listenerCount('abort'), 1);
+        assert.strictEqual(listenerCount(signal, 'abort'), 1);
       }
       i++;
       if (i === 2) {
@@ -147,18 +143,18 @@ process.on('multipleResolves', common.mustNotCall());
       }
     }
     assert.strictEqual(i, 2);
-    assert.strictEqual(signal.listenerCount('abort'), 0);
+    assert.strictEqual(listenerCount(signal, 'abort'), 0);
   }
 
   tryBreak().then(common.mustCall());
 }
 
 {
-  exec(`${process.execPath} -pe "const assert = require('assert');` +
+  common.spawnPromisified(process.execPath, ['-pe', "const assert = require('assert');" +
     'const interval = require(\'timers/promises\')' +
     '.setInterval(1000, null, { ref: false });' +
     'interval[Symbol.asyncIterator]().next()' +
-    '.then(assert.fail)"').then(common.mustCall(({ stderr }) => {
+    '.then(assert.fail)']).then(common.mustCall(({ stderr }) => {
     assert.strictEqual(stderr, '');
   }));
 }
@@ -200,7 +196,7 @@ process.on('multipleResolves', common.mustNotCall());
     const { signal } = controller;
     const delay = 10;
     let totalIterations = 0;
-    const timeoutLoop = runInterval(async (iterationNumber) => {
+    const timeoutLoop = runInterval(common.mustCallAtLeast(async (iterationNumber) => {
       await setPromiseTimeout(delay * 4);
       if (iterationNumber <= 2) {
         assert.strictEqual(signal.aborted, false);
@@ -214,7 +210,7 @@ process.on('multipleResolves', common.mustNotCall());
       if (iterationNumber > totalIterations) {
         totalIterations = iterationNumber;
       }
-    }, delay, signal);
+    }, 0), delay, signal);
 
     timeoutLoop.catch(common.mustCall(() => {
       assert.ok(totalIterations >= 3, `iterations was ${totalIterations} < 3`);
@@ -234,15 +230,27 @@ process.on('multipleResolves', common.mustNotCall());
       const iterable = timerPromises.setInterval(time_unit * 2);
       const iterator = iterable[Symbol.asyncIterator]();
 
-      iterator.next().then(() => {
+      res(iterator.next().then(() => {
         assert.ok(pre, 'interval ran too early');
         assert.ok(!post, 'interval ran too late');
         return iterator.next();
       }).then(() => {
         assert.ok(post, 'second interval ran too early');
         return iterator.return();
-      }).then(res);
+      }));
     }),
     setPromiseTimeout(time_unit * 3).then(() => post = true),
   ]).then(common.mustCall());
 }
+
+(async () => {
+  const signal = AbortSignal.abort('boom');
+  try {
+    const iterable = timerPromises.setInterval(2, undefined, { signal });
+    // eslint-disable-next-line no-unused-vars, no-empty
+    for await (const _ of iterable) { }
+    assert.fail('should have failed');
+  } catch (err) {
+    assert.strictEqual(err.cause, 'boom');
+  }
+})().then(common.mustCall());

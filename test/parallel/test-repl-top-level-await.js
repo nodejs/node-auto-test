@@ -3,6 +3,7 @@
 const common = require('../common');
 const ArrayStream = require('../common/arraystream');
 const assert = require('assert');
+const events = require('events');
 const { stripVTControlCharacters } = require('internal/util/inspect');
 const repl = require('repl');
 
@@ -27,31 +28,21 @@ class REPLStream extends ArrayStream {
     if (chunkLines.length > 1) {
       this.lines.push(...chunkLines.slice(1));
     }
-    this.emit('line');
+    this.emit('line', this.lines[this.lines.length - 1]);
     if (callback) callback();
     return true;
   }
 
-  wait() {
+  async wait() {
     if (this.waitingForResponse) {
       throw new Error('Currently waiting for response to another command');
     }
     this.lines = [''];
-    return new Promise((resolve, reject) => {
-      const onError = (err) => {
-        this.removeListener('line', onLine);
-        reject(err);
-      };
-      const onLine = () => {
-        if (this.lines[this.lines.length - 1].includes(PROMPT)) {
-          this.removeListener('error', onError);
-          this.removeListener('line', onLine);
-          resolve(this.lines);
-        }
-      };
-      this.once('error', onError);
-      this.on('line', onLine);
-    });
+    for await (const [line] of events.on(this, 'line')) {
+      if (line.includes(PROMPT)) {
+        return this.lines;
+      }
+    }
   }
 }
 
@@ -105,7 +96,7 @@ async function ordinaryTests() {
     ['const m = foo(await koo());'],
     ['m', '4'],
     ['const n = foo(await\nkoo());',
-     ['const n = foo(await\r', '... koo());\r', 'undefined']],
+     ['const n = foo(await\r', '| koo());\r', 'undefined']],
     ['n', '4'],
     // eslint-disable-next-line no-template-curly-in-string
     ['`status: ${(await Promise.resolve({ status: 200 })).status}`',
@@ -154,20 +145,20 @@ async function ordinaryTests() {
     ],
     ['for (const x of [1,2,3]) {\nawait x\n}', [
       'for (const x of [1,2,3]) {\r',
-      '... await x\r',
-      '... }\r',
+      '| await x\r',
+      '| }\r',
       'undefined',
     ]],
     ['for (const x of [1,2,3]) {\nawait x;\n}', [
       'for (const x of [1,2,3]) {\r',
-      '... await x;\r',
-      '... }\r',
+      '| await x;\r',
+      '| }\r',
       'undefined',
     ]],
     ['for await (const x of [1,2,3]) {\nconsole.log(x)\n}', [
       'for await (const x of [1,2,3]) {\r',
-      '... console.log(x)\r',
-      '... }\r',
+      '| console.log(x)\r',
+      '| }\r',
       '1',
       '2',
       '3',
@@ -175,13 +166,23 @@ async function ordinaryTests() {
     ]],
     ['for await (const x of [1,2,3]) {\nconsole.log(x);\n}', [
       'for await (const x of [1,2,3]) {\r',
-      '... console.log(x);\r',
-      '... }\r',
+      '| console.log(x);\r',
+      '| }\r',
       '1',
       '2',
       '3',
       'undefined',
     ]],
+    // Testing documented behavior of `const`s (see: https://github.com/nodejs/node/issues/45918)
+    ['const k = await Promise.resolve(123)'],
+    ['k', '123'],
+    ['k = await Promise.resolve(234)', '234'],
+    ['k', '234'],
+    ['const k = await Promise.resolve(345)', "Uncaught SyntaxError: Identifier 'k' has already been declared"],
+    // Regression test for https://github.com/nodejs/node/issues/43777.
+    ['await Promise.resolve(123), Promise.resolve(456)', 'Promise { 456 }', { line: 0 }],
+    ['await Promise.resolve(123), await Promise.resolve(456)', '456'],
+    ['await (Promise.resolve(123), Promise.resolve(456))', '456'],
   ];
 
   for (const [input, expected = [`${input}\r`], options = {}] of testCases) {
@@ -197,7 +198,7 @@ async function ordinaryTests() {
     } else if ('line' in options) {
       assert.strictEqual(lines[toBeRun.length + options.line], expected);
     } else {
-      const echoed = toBeRun.map((a, i) => `${i > 0 ? '... ' : ''}${a}\r`);
+      const echoed = toBeRun.map((a, i) => `${i > 0 ? '| ' : ''}${a}\r`);
       assert.deepStrictEqual(lines, [...echoed, expected, PROMPT]);
     }
   }
@@ -212,8 +213,8 @@ async function ctrlCTest() {
   assert.deepStrictEqual(output.slice(0, 3), [
     'await new Promise(() => {})\r',
     'Uncaught:',
-    'Error [ERR_SCRIPT_EXECUTION_INTERRUPTED]: ' +
-      'Script execution was interrupted by `SIGINT`',
+    '[Error [ERR_SCRIPT_EXECUTION_INTERRUPTED]: ' +
+      'Script execution was interrupted by `SIGINT`] {',
   ]);
   assert.deepStrictEqual(output.slice(-2), [
     '}',

@@ -157,14 +157,14 @@ Local<Value> UVException(Isolate* isolate,
 static const char* winapi_strerror(const int errorno, bool* must_free) {
   char* errmsg = nullptr;
 
-  FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
-                    FORMAT_MESSAGE_IGNORE_INSERTS,
-                nullptr,
-                errorno,
-                MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-                reinterpret_cast<LPTSTR>(&errmsg),
-                0,
-                nullptr);
+  FormatMessageA(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+                     FORMAT_MESSAGE_IGNORE_INSERTS,
+                 nullptr,
+                 errorno,
+                 MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                 reinterpret_cast<LPSTR>(&errmsg),
+                 0,
+                 nullptr);
 
   if (errmsg) {
     *must_free = true;
@@ -237,7 +237,7 @@ Local<Value> WinapiErrnoException(Isolate* isolate,
 
   return e;
 }
-#endif
+#endif  // _WIN32
 
 // Implement the legacy name exposed in node.h. This has not been in fact
 // fatal any more, as the user can handle the exception in the

@@ -4,17 +4,18 @@
 
 // TODO(nicohartmann): Discuss whether types used by multiple builtins should be
 // in global namespace
+@cppObjectLayoutDefinition
 extern class BigIntBase extends PrimitiveHeapObject
     generates 'TNode<BigInt>';
 
 type BigInt extends BigIntBase;
 
-@noVerifier
+@cppObjectLayoutDefinition
 @hasSameInstanceTypeAsParent
 @doNotGenerateCast
 extern class MutableBigInt extends BigIntBase generates 'TNode<BigInt>';
 
 Convert<BigInt, MutableBigInt>(i: MutableBigInt): BigInt {
-  assert(bigint::IsCanonicalized(i));
+  dcheck(bigint::IsCanonicalized(i));
   return %RawDownCast<BigInt>(Convert<BigIntBase>(i));
 }

@@ -1,11 +1,11 @@
 'use strict';
 const common = require('../common');
+const { pathToFileURL } = require('url');
 const assert = require('assert');
 
 const relativePath = '../fixtures/es-modules/test-esm-ok.mjs';
-const absolutePath = require.resolve('../fixtures/es-modules/test-esm-ok.mjs');
-const targetURL = new URL('file:///');
-targetURL.pathname = absolutePath;
+const absolutePath = require.resolve(relativePath);
+const targetURL = pathToFileURL(absolutePath);
 
 function expectModuleError(result, code, message) {
   Promise.resolve(result).catch(common.mustCall((error) => {
@@ -19,7 +19,7 @@ function expectOkNamespace(result) {
     .then(common.mustCall((ns) => {
       const expected = { default: true };
       Object.defineProperty(expected, Symbol.toStringTag, {
-        value: 'Module'
+        value: 'Module',
       });
       Object.setPrototypeOf(expected, Object.getPrototypeOf(ns));
       assert.deepStrictEqual(ns, expected);
@@ -35,15 +35,15 @@ function expectFsNamespace(result) {
 }
 
 // For direct use of import expressions inside of CJS or ES modules, including
-// via eval, all kinds of specifiers should work without issue.
+// via direct/indirect eval, all kinds of specifiers should work without issue.
 (function testScriptOrModuleImport() {
-  // Importing another file, both direct & via eval
+  // Importing another file, both direct & via direct eval
   // expectOkNamespace(import(relativePath));
   expectOkNamespace(eval(`import("${relativePath}")`));
   expectOkNamespace(eval(`import("${relativePath}")`));
-  expectOkNamespace(eval(`import("${targetURL}")`));
+  expectOkNamespace(eval(`import(${JSON.stringify(targetURL)})`));
 
-  // Importing a built-in, both direct & via eval
+  // Importing a built-in, both direct & via direct eval
   expectFsNamespace(import('fs'));
   expectFsNamespace(eval('import("fs")'));
   expectFsNamespace(eval('import("fs")'));
@@ -59,11 +59,22 @@ function expectFsNamespace(result) {
                     'ERR_UNSUPPORTED_ESM_URL_SCHEME');
   if (common.isWindows) {
     const msg =
-      'Only file and data URLs are supported by the default ESM loader. ' +
-      'On Windows, absolute paths must be valid file:// URLs. ' +
+      'Only URLs with a scheme in: file, data, and node are supported by the default ' +
+      'ESM loader. On Windows, absolute paths must be valid file:// URLs. ' +
       "Received protocol 'c:'";
     expectModuleError(import('C:\\example\\foo.mjs'),
                       'ERR_UNSUPPORTED_ESM_URL_SCHEME',
                       msg);
   }
+  // If the specifier is an origin-relative URL, it should
+  // be treated as a file: URL.
+  expectOkNamespace(import(targetURL.pathname));
+
+  // Import with an indirect eval. In this case, the referrer is null and
+  // defaults to the realm record.
+  // If the referrer is a realm record, there is no way to resolve the
+  // specifier.
+  // TODO(legendecas): https://github.com/tc39/ecma262/pull/3195
+  expectModuleError(Promise.resolve('import("node:fs")').then(eval),
+                    'ERR_VM_DYNAMIC_IMPORT_CALLBACK_MISSING');
 })();

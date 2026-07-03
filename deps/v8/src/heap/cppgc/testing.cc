@@ -13,13 +13,11 @@ namespace testing {
 OverrideEmbedderStackStateScope::OverrideEmbedderStackStateScope(
     HeapHandle& heap_handle, EmbedderStackState state)
     : heap_handle_(heap_handle) {
-  auto& heap = internal::HeapBase::From(heap_handle_);
-  CHECK_NULL(heap.override_stack_state_.get());
-  heap.override_stack_state_ = std::make_unique<EmbedderStackState>(state);
+  internal::HeapBase::From(heap_handle_).set_override_stack_state(state);
 }
 
 OverrideEmbedderStackStateScope::~OverrideEmbedderStackStateScope() {
-  internal::HeapBase::From(heap_handle_).override_stack_state_.reset();
+  internal::HeapBase::From(heap_handle_).clear_overridden_stack_state();
 }
 
 StandaloneTestingHeap::StandaloneTestingHeap(HeapHandle& heap_handle)
@@ -52,6 +50,14 @@ void StandaloneTestingHeap::ForceCompactionForNextGarbageCollection() {
   internal::HeapBase::From(heap_handle_)
       .compactor()
       .EnableForNextGCForTesting();
+}
+
+bool IsHeapObjectOld(void* object) {
+#if defined(CPPGC_YOUNG_GENERATION)
+  return internal::HeapObjectHeader::FromObject(object).IsMarked();
+#else
+  return true;
+#endif
 }
 
 }  // namespace testing

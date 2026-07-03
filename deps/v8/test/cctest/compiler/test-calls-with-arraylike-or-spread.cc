@@ -4,8 +4,8 @@
 
 #include "include/v8-function.h"
 #include "src/flags/flags.h"
-#include "test/cctest/compiler/node-observer-tester.h"
 #include "test/cctest/test-api.h"
+#include "test/common/node-observer-tester.h"
 
 namespace v8 {
 namespace internal {
@@ -17,11 +17,11 @@ void CompileRunWithNodeObserver(const std::string& js_code,
                                 IrOpcode::Value updated_call_opcode1,
                                 IrOpcode::Value updated_call_opcode2) {
   LocalContext env;
-  v8::Isolate* isolate = env->GetIsolate();
-  v8::HandleScope scope(isolate);
+  v8::Isolate* isolate = env.isolate();
+  v8::HandleScope handle_scope(isolate);
 
-  FLAG_allow_natives_syntax = true;
-  FLAG_turbo_optimize_apply = true;
+  v8_flags.allow_natives_syntax = true;
+  v8_flags.turbo_optimize_apply = true;
 
   // Note: Make sure to not capture stack locations (e.g. `this`) here since
   // these lambdas are executed on another thread.
@@ -127,27 +127,28 @@ TEST(ReduceJSCreateBoundFunction) {
       IrOpcode::kPhi);
 }
 
-static void SumF(const v8::FunctionCallbackInfo<v8::Value>& args) {
+static void SumF(const v8::FunctionCallbackInfo<v8::Value>& info) {
+  CHECK(i::ValidateCallbackInfo(info));
   ApiTestFuzzer::Fuzz();
-  v8::Local<v8::Context> context = args.GetIsolate()->GetCurrentContext();
-  int this_x = args.This()
+  v8::Local<v8::Context> context = info.GetIsolate()->GetCurrentContext();
+  int this_x = info.This()
                    ->Get(context, v8_str("x"))
                    .ToLocalChecked()
                    ->Int32Value(context)
                    .FromJust();
-  args.GetReturnValue().Set(v8_num(
-      args[0]->Int32Value(args.GetIsolate()->GetCurrentContext()).FromJust() +
-      args[1]->Int32Value(args.GetIsolate()->GetCurrentContext()).FromJust() +
+  info.GetReturnValue().Set(v8_num(
+      info[0]->Int32Value(info.GetIsolate()->GetCurrentContext()).FromJust() +
+      info[1]->Int32Value(info.GetIsolate()->GetCurrentContext()).FromJust() +
       this_x));
 }
 
 TEST(ReduceCAPICallWithArrayLike) {
   LocalContext env;
-  v8::Isolate* isolate = env->GetIsolate();
+  v8::Isolate* isolate = env.isolate();
   v8::HandleScope scope(isolate);
 
-  FLAG_allow_natives_syntax = true;
-  FLAG_turbo_optimize_apply = true;
+  v8_flags.allow_natives_syntax = true;
+  v8_flags.turbo_optimize_apply = true;
 
   Local<v8::FunctionTemplate> sum = v8::FunctionTemplate::New(isolate, SumF);
   CHECK(env->Global()

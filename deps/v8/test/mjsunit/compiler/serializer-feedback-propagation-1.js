@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --allow-natives-syntax
+// Flags: --allow-natives-syntax --turboshaft-enable-debug-features
 
 var obj = Object.create(Object.create({blu: 42}));
 obj.bla = 1;
@@ -23,5 +23,5 @@ bar({bla: 1});
 bar({blu: 1});
 bar({blo: 1});
 foo(obj);
-%OptimizeFunctionForTopTier(foo);
+%OptimizeFunctionOnNextCall(foo);
 foo(obj);

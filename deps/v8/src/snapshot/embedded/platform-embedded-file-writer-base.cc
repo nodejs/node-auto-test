@@ -6,12 +6,12 @@
 
 #include <string>
 
-#include "src/base/platform/wrappers.h"
 #include "src/common/globals.h"
 #include "src/snapshot/embedded/platform-embedded-file-writer-aix.h"
 #include "src/snapshot/embedded/platform-embedded-file-writer-generic.h"
 #include "src/snapshot/embedded/platform-embedded-file-writer-mac.h"
 #include "src/snapshot/embedded/platform-embedded-file-writer-win.h"
+#include "src/snapshot/embedded/platform-embedded-file-writer-zos.h"
 
 namespace v8 {
 namespace internal {
@@ -116,10 +116,12 @@ EmbeddedTargetArch ToEmbeddedTargetArch(const char* s) {
 EmbeddedTargetOs DefaultEmbeddedTargetOs() {
 #if defined(V8_OS_AIX)
   return EmbeddedTargetOs::kAIX;
-#elif defined(V8_OS_MACOSX)
+#elif defined(V8_OS_DARWIN)
   return EmbeddedTargetOs::kMac;
 #elif defined(V8_OS_WIN)
   return EmbeddedTargetOs::kWin;
+#elif defined(V8_OS_ZOS)
+  return EmbeddedTargetOs::kZOS;
 #else
   return EmbeddedTargetOs::kGeneric;
 #endif
@@ -131,8 +133,11 @@ EmbeddedTargetOs ToEmbeddedTargetOs(const char* s) {
   }
 
   std::string string(s);
-  if (string == "aix") {
+  // Python 3.9+ on IBM i returns os400 as sys.platform instead of aix
+  if (string == "aix" || string == "os400") {
     return EmbeddedTargetOs::kAIX;
+  } else if (string == "android") {
+    return EmbeddedTargetOs::kAndroid;
   } else if (string == "chromeos") {
     return EmbeddedTargetOs::kChromeOS;
   } else if (string == "fuchsia") {
@@ -143,6 +148,8 @@ EmbeddedTargetOs ToEmbeddedTargetOs(const char* s) {
     return EmbeddedTargetOs::kWin;
   } else if (string == "starboard") {
     return EmbeddedTargetOs::kStarboard;
+  } else if (string == "zos") {
+    return EmbeddedTargetOs::kZOS;
   } else {
     return EmbeddedTargetOs::kGeneric;
   }
@@ -184,6 +191,9 @@ std::unique_ptr<PlatformEmbeddedFileWriterBase> NewPlatformEmbeddedFileWriter(
                                                            embedded_target_os);
   } else if (embedded_target_os == EmbeddedTargetOs::kWin) {
     return std::make_unique<PlatformEmbeddedFileWriterWin>(embedded_target_arch,
+                                                           embedded_target_os);
+  } else if (embedded_target_os == EmbeddedTargetOs::kZOS) {
+    return std::make_unique<PlatformEmbeddedFileWriterZOS>(embedded_target_arch,
                                                            embedded_target_os);
   } else {
     return std::make_unique<PlatformEmbeddedFileWriterGeneric>(

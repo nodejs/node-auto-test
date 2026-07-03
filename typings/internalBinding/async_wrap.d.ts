@@ -68,11 +68,10 @@ declare namespace InternalAsyncWrapBinding {
     SIGNREQUEST: 54;
     TLSWRAP: 55;
     VERIFYREQUEST: 56;
-    INSPECTORJSBINDING: 57;
   }
 }
 
-declare function InternalBinding(binding: 'async_wrap'): {
+export interface AsyncWrapBinding {
   setupHooks(): {
     init: (
       asyncId: number,
@@ -107,7 +106,7 @@ declare function InternalBinding(binding: 'async_wrap'): {
     promiseAfterHook: InternalAsyncWrapBinding.PromiseHook | undefined,
     promiseResolveHook: InternalAsyncWrapBinding.PromiseHook | undefined
   ): void;
-  registerDestroyHook(promise: Promise<unknown>, asyncId: number, destroyed: { destroyed: boolean }): void;
+  registerDestroyHook(resource: object, asyncId: number, destroyed?: { destroyed: boolean }): void;
   async_hook_fields: Uint32Array;
   async_id_fields: Float64Array;
   async_ids_stack: Float64Array;
@@ -129,4 +128,4 @@ declare function InternalBinding(binding: 'async_wrap'): {
     kDefaultTriggerAsyncId: 3;
   };
   Providers: InternalAsyncWrapBinding.Providers;
-};
+}

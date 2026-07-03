@@ -1,20 +1,22 @@
 'use strict';
 
 const fs = require('fs');
-const path = require('path');
 const common = require('../common.js');
 const tmpdir = require('../../test/common/tmpdir');
-const benchmarkDirectory = path.join(tmpdir.path, 'nodejs-benchmark-module');
+const benchmarkDirectory = tmpdir.resolve('nodejs-benchmark-module');
 
 const bench = common.createBenchmark(main, {
   type: ['.js', '.json', 'dir'],
   n: [1e4],
+}, {
+  setup(configs) {
+    tmpdir.refresh();
+    const maxN = configs.reduce((max, c) => Math.max(max, c.n), 0);
+    createEntryPoint(maxN);
+  },
 });
 
 function main({ type, n }) {
-  tmpdir.refresh();
-  createEntryPoint(n);
-
   switch (type) {
     case '.js':
       measureJSFile(n);
@@ -25,8 +27,6 @@ function main({ type, n }) {
     case 'dir':
       measureDir(n);
   }
-
-  tmpdir.refresh();
 }
 
 function measureJSFile(n) {
@@ -70,11 +70,11 @@ function createEntryPoint(n) {
     fs.mkdirSync(`${benchmarkDirectory}${i}`);
     fs.writeFileSync(
       `${benchmarkDirectory}${i}/package.json`,
-      '{"main": "index.js"}'
+      '{"main": "index.js"}',
     );
     fs.writeFileSync(
       `${benchmarkDirectory}${i}/index.js`,
-      JSFileContent
+      JSFileContent,
     );
   }
 }

@@ -1,11 +1,25 @@
-import { AsyncIterator } from "internal/webstreams/util";
-
 type UncurryThis<T extends (this: unknown, ...args: unknown[]) => unknown> =
   (self: ThisParameterType<T>, ...args: Parameters<T>) => ReturnType<T>;
 type UncurryThisStaticApply<T extends (this: unknown, ...args: unknown[]) => unknown> =
   (self: ThisParameterType<T>, args: Parameters<T>) => ReturnType<T>;
 type StaticApply<T extends (this: unknown, ...args: unknown[]) => unknown> =
   (args: Parameters<T>) => ReturnType<T>;
+
+type UncurryMethod<O, K extends keyof O, T = O> =
+  O[K] extends (this: infer U, ...args: infer A) => infer R
+    ? (self: unknown extends U ? T : U, ...args: A) => R
+    : never;
+type UncurryMethodApply<O, K extends keyof O, T = O> =
+  O[K] extends (this: infer U, ...args: infer A) => infer R
+    ? (self: unknown extends U ? T : U, args: A) => R
+    : never;
+
+type UncurryGetter<O, K extends keyof O, T = O> =
+  O[K] extends infer V ? (self: T) => V : never;
+type UncurrySetter<O, K extends keyof O, T = O> =
+  O[K] extends infer V ? (self: T, value: V) => void : never;
+
+type TypedArrayContentType<T extends TypedArrayConstructor> = InstanceType<T>[number];
 
 /**
  * Primordials are a way to safely use globals without fear of global mutation
@@ -24,17 +38,27 @@ type StaticApply<T extends (this: unknown, ...args: unknown[]) => unknown> =
  * primordials.StringPrototypeStartsWith('thing', 'hello')
  * ```
  */
-declare namespace Primordials {
-  export function uncurryThis<
-      T extends (...args: unknown[]) => unknown
-    > (fn: T):
-      (self: ThisType<T>, ...args: Parameters<T>) => ReturnType<T>;
-  export function makeSafe<T extends NewableFunction>(unsafe: NewableFunction, safe: T): T;
+declare namespace primordials {
+  export function uncurryThis<T extends (...args: unknown[]) => unknown>(fn: T): UncurryThis<T>;
+  export function makeSafe<T extends NewableFunction>(unsafe: NewableFunction, safe: T, next?: Function): T;
 
-  export const decodeURI: typeof globalThis.decodeURI;
-  export const decodeURIComponent: typeof globalThis.decodeURIComponent;
-  export const encodeURI: typeof globalThis.encodeURI;
-  export const encodeURIComponent: typeof globalThis.encodeURIComponent;
+  export import decodeURI = globalThis.decodeURI;
+  export import decodeURIComponent = globalThis.decodeURIComponent;
+  export import encodeURI = globalThis.encodeURI;
+  export import encodeURIComponent = globalThis.encodeURIComponent;
+  export const AtomicsAdd: typeof Atomics.add
+  export const AtomicsAnd: typeof Atomics.and
+  export const AtomicsCompareExchange: typeof Atomics.compareExchange
+  export const AtomicsExchange: typeof Atomics.exchange
+  export const AtomicsIsLockFree: typeof Atomics.isLockFree
+  export const AtomicsLoad: typeof Atomics.load
+  export const AtomicsNotify: typeof Atomics.notify
+  export const AtomicsOr: typeof Atomics.or
+  export const AtomicsStore: typeof Atomics.store
+  export const AtomicsSub: typeof Atomics.sub
+  export const AtomicsWait: typeof Atomics.wait
+  export const AtomicsWaitAsync: typeof Atomics.waitAsync
+  export const AtomicsXor: typeof Atomics.xor
   export const JSONParse: typeof JSON.parse
   export const JSONStringify: typeof JSON.stringify
   export const MathAbs: typeof Math.abs
@@ -94,16 +118,13 @@ declare namespace Primordials {
   export const ReflectPreventExtensions: typeof Reflect.preventExtensions
   export const ReflectSet: typeof Reflect.set
   export const ReflectSetPrototypeOf: typeof Reflect.setPrototypeOf
-  export const AggregateError: typeof globalThis.AggregateError;
-  export const AggregateErrorLength: typeof AggregateError.length
-  export const AggregateErrorName: typeof AggregateError.name
+  export import AggregateError = globalThis.AggregateError;
   export const AggregateErrorPrototype: typeof AggregateError.prototype
-  export const Array: typeof globalThis.Array;
-  export const ArrayLength: typeof Array.length
-  export const ArrayName: typeof Array.name
+  export import Array = globalThis.Array;
   export const ArrayPrototype: typeof Array.prototype
   export const ArrayIsArray: typeof Array.isArray
   export const ArrayFrom: typeof Array.from
+  export const ArrayFromAsync: typeof Array.fromAsync
   export const ArrayOf: typeof Array.of
   export const ArrayPrototypeConcat: UncurryThis<typeof Array.prototype.concat>
   export const ArrayPrototypeCopyWithin: UncurryThis<typeof Array.prototype.copyWithin>
@@ -121,6 +142,7 @@ declare namespace Primordials {
   export const ArrayPrototypeSlice: UncurryThis<typeof Array.prototype.slice>
   export const ArrayPrototypeSort: UncurryThis<typeof Array.prototype.sort>
   export const ArrayPrototypeSplice: UncurryThis<typeof Array.prototype.splice>
+  export const ArrayPrototypeToSorted: UncurryThis<typeof Array.prototype.toSorted>
   export const ArrayPrototypeIncludes: UncurryThis<typeof Array.prototype.includes>
   export const ArrayPrototypeIndexOf: UncurryThis<typeof Array.prototype.indexOf>
   export const ArrayPrototypeJoin: UncurryThis<typeof Array.prototype.join>
@@ -138,41 +160,32 @@ declare namespace Primordials {
   export const ArrayPrototypeReduceRight: UncurryThis<typeof Array.prototype.reduceRight>
   export const ArrayPrototypeToLocaleString: UncurryThis<typeof Array.prototype.toLocaleString>
   export const ArrayPrototypeToString: UncurryThis<typeof Array.prototype.toString>
-  export const ArrayBuffer: typeof globalThis.ArrayBuffer;
-  export const ArrayBufferLength: typeof ArrayBuffer.length
-  export const ArrayBufferName: typeof ArrayBuffer.name
+  export const ArrayPrototypeSymbolIterator: UncurryMethod<typeof Array.prototype, typeof Symbol.iterator>;
+  export import ArrayBuffer = globalThis.ArrayBuffer;
   export const ArrayBufferPrototype: typeof ArrayBuffer.prototype
   export const ArrayBufferIsView: typeof ArrayBuffer.isView
+  export const ArrayBufferPrototypeGetDetached: UncurryGetter<typeof ArrayBuffer.prototype, 'detached'>;
   export const ArrayBufferPrototypeSlice: UncurryThis<typeof ArrayBuffer.prototype.slice>
-  export const AsyncIteratorPrototype: UncurryThis<typeof AsyncIterator>
-  export const BigInt: typeof globalThis.BigInt;
-  export const BigIntLength: typeof BigInt.length
-  export const BigIntName: typeof BigInt.name
+  export const ArrayBufferPrototypeTransfer: UncurryThis<typeof ArrayBuffer.prototype.transfer>
+  export const ArrayBufferPrototypeGetByteLength: UncurryGetter<typeof ArrayBuffer.prototype , "byteLength">;
+  export import BigInt = globalThis.BigInt;
   export const BigIntPrototype: typeof BigInt.prototype
   export const BigIntAsUintN: typeof BigInt.asUintN
   export const BigIntAsIntN: typeof BigInt.asIntN
   export const BigIntPrototypeToLocaleString: UncurryThis<typeof BigInt.prototype.toLocaleString>
   export const BigIntPrototypeToString: UncurryThis<typeof BigInt.prototype.toString>
   export const BigIntPrototypeValueOf: UncurryThis<typeof BigInt.prototype.valueOf>
-  export const BigInt64Array: typeof globalThis.BigInt64Array;
-  export const BigInt64ArrayLength: typeof BigInt64Array.length
-  export const BigInt64ArrayName: typeof BigInt64Array.name
+  export import BigInt64Array = globalThis.BigInt64Array;
   export const BigInt64ArrayPrototype: typeof BigInt64Array.prototype
   export const BigInt64ArrayBYTES_PER_ELEMENT: typeof BigInt64Array.BYTES_PER_ELEMENT
-  export const BigUint64Array: typeof globalThis.BigUint64Array;
-  export const BigUint64ArrayLength: typeof BigUint64Array.length
-  export const BigUint64ArrayName: typeof BigUint64Array.name
+  export import BigUint64Array = globalThis.BigUint64Array;
   export const BigUint64ArrayPrototype: typeof BigUint64Array.prototype
   export const BigUint64ArrayBYTES_PER_ELEMENT: typeof BigUint64Array.BYTES_PER_ELEMENT
-  export const Boolean: typeof globalThis.Boolean;
-  export const BooleanLength: typeof Boolean.length
-  export const BooleanName: typeof Boolean.name
+  export import Boolean = globalThis.Boolean;
   export const BooleanPrototype: typeof Boolean.prototype
   export const BooleanPrototypeToString: UncurryThis<typeof Boolean.prototype.toString>
   export const BooleanPrototypeValueOf: UncurryThis<typeof Boolean.prototype.valueOf>
-  export const DataView: typeof globalThis.DataView;
-  export const DataViewLength: typeof DataView.length
-  export const DataViewName: typeof DataView.name
+  export import DataView = globalThis.DataView;
   export const DataViewPrototype: typeof DataView.prototype
   export const DataViewPrototypeGetInt8: UncurryThis<typeof DataView.prototype.getInt8>
   export const DataViewPrototypeSetInt8: UncurryThis<typeof DataView.prototype.setInt8>
@@ -194,9 +207,10 @@ declare namespace Primordials {
   export const DataViewPrototypeSetBigInt64: UncurryThis<typeof DataView.prototype.setBigInt64>
   export const DataViewPrototypeGetBigUint64: UncurryThis<typeof DataView.prototype.getBigUint64>
   export const DataViewPrototypeSetBigUint64: UncurryThis<typeof DataView.prototype.setBigUint64>
-  export const Date: typeof globalThis.Date;
-  export const DateLength: typeof Date.length
-  export const DateName: typeof Date.name
+  export const DataViewPrototypeGetBuffer: UncurryGetter<typeof DataView.prototype, "buffer">;
+  export const DataViewPrototypeGetByteLength: UncurryGetter<typeof DataView.prototype, "byteLength">;
+  export const DataViewPrototypeGetByteOffset: UncurryGetter<typeof DataView.prototype, "byteOffset">;
+  export import Date = globalThis.Date;
   export const DatePrototype: typeof Date.prototype
   export const DateNow: typeof Date.now
   export const DateParse: typeof Date.parse
@@ -206,7 +220,6 @@ declare namespace Primordials {
   export const DatePrototypeToTimeString: UncurryThis<typeof Date.prototype.toTimeString>
   export const DatePrototypeToISOString: UncurryThis<typeof Date.prototype.toISOString>
   export const DatePrototypeToUTCString: UncurryThis<typeof Date.prototype.toUTCString>
-  export const DatePrototypeToGMTString: UncurryThis<typeof Date.prototype.toGMTString>
   export const DatePrototypeGetDate: UncurryThis<typeof Date.prototype.getDate>
   export const DatePrototypeSetDate: UncurryThis<typeof Date.prototype.setDate>
   export const DatePrototypeGetDay: UncurryThis<typeof Date.prototype.getDay>
@@ -241,59 +254,43 @@ declare namespace Primordials {
   export const DatePrototypeGetUTCSeconds: UncurryThis<typeof Date.prototype.getUTCSeconds>
   export const DatePrototypeSetUTCSeconds: UncurryThis<typeof Date.prototype.setUTCSeconds>
   export const DatePrototypeValueOf: UncurryThis<typeof Date.prototype.valueOf>
-  export const DatePrototypeGetYear: UncurryThis<typeof Date.prototype.getYear>
-  export const DatePrototypeSetYear: UncurryThis<typeof Date.prototype.setYear>
   export const DatePrototypeToJSON: UncurryThis<typeof Date.prototype.toJSON>
   export const DatePrototypeToLocaleString: UncurryThis<typeof Date.prototype.toLocaleString>
   export const DatePrototypeToLocaleDateString: UncurryThis<typeof Date.prototype.toLocaleDateString>
   export const DatePrototypeToLocaleTimeString: UncurryThis<typeof Date.prototype.toLocaleTimeString>
-  export const Error: typeof globalThis.Error;
-  export const ErrorLength: typeof Error.length
-  export const ErrorName: typeof Error.name
+  export const DatePrototypeSymbolToPrimitive: UncurryMethod<typeof Date.prototype, typeof Symbol.toPrimitive>;
+  export import Error = globalThis.Error;
   export const ErrorPrototype: typeof Error.prototype
+  // @ts-ignore
   export const ErrorCaptureStackTrace: typeof Error.captureStackTrace
-  export const ErrorStackTraceLimit: typeof Error.stackTraceLimit
   export const ErrorPrototypeToString: UncurryThis<typeof Error.prototype.toString>
-  export const EvalError: typeof globalThis.EvalError;
-  export const EvalErrorLength: typeof EvalError.length
-  export const EvalErrorName: typeof EvalError.name
+  export import EvalError = globalThis.EvalError;
   export const EvalErrorPrototype: typeof EvalError.prototype
-  export const Float32Array: typeof globalThis.Float32Array;
-  export const Float32ArrayLength: typeof Float32Array.length
-  export const Float32ArrayName: typeof Float32Array.name
+  export import Float32Array = globalThis.Float32Array;
   export const Float32ArrayPrototype: typeof Float32Array.prototype
   export const Float32ArrayBYTES_PER_ELEMENT: typeof Float32Array.BYTES_PER_ELEMENT
-  export const Float64Array: typeof globalThis.Float64Array;
-  export const Float64ArrayLength: typeof Float64Array.length
-  export const Float64ArrayName: typeof Float64Array.name
+  export import Float64Array = globalThis.Float64Array;
   export const Float64ArrayPrototype: typeof Float64Array.prototype
   export const Float64ArrayBYTES_PER_ELEMENT: typeof Float64Array.BYTES_PER_ELEMENT
-  export const Function: typeof globalThis.Function;
+  export import Function = globalThis.Function;
   export const FunctionLength: typeof Function.length
   export const FunctionName: typeof Function.name
   export const FunctionPrototype: typeof Function.prototype
   export const FunctionPrototypeApply: UncurryThis<typeof Function.prototype.apply>
   export const FunctionPrototypeBind: UncurryThis<typeof Function.prototype.bind>
   export const FunctionPrototypeCall: UncurryThis<typeof Function.prototype.call>
+  export const FunctionPrototypeSymbolHasInstance: UncurryMethod<typeof Function.prototype, typeof Symbol.hasInstance>
   export const FunctionPrototypeToString: UncurryThis<typeof Function.prototype.toString>
-  export const Int16Array: typeof globalThis.Int16Array;
-  export const Int16ArrayLength: typeof Int16Array.length
-  export const Int16ArrayName: typeof Int16Array.name
+  export import Int16Array = globalThis.Int16Array;
   export const Int16ArrayPrototype: typeof Int16Array.prototype
   export const Int16ArrayBYTES_PER_ELEMENT: typeof Int16Array.BYTES_PER_ELEMENT
-  export const Int32Array: typeof globalThis.Int32Array;
-  export const Int32ArrayLength: typeof Int32Array.length
-  export const Int32ArrayName: typeof Int32Array.name
+  export import Int32Array = globalThis.Int32Array;
   export const Int32ArrayPrototype: typeof Int32Array.prototype
   export const Int32ArrayBYTES_PER_ELEMENT: typeof Int32Array.BYTES_PER_ELEMENT
-  export const Int8Array: typeof globalThis.Int8Array;
-  export const Int8ArrayLength: typeof Int8Array.length
-  export const Int8ArrayName: typeof Int8Array.name
+  export import Int8Array = globalThis.Int8Array;
   export const Int8ArrayPrototype: typeof Int8Array.prototype
   export const Int8ArrayBYTES_PER_ELEMENT: typeof Int8Array.BYTES_PER_ELEMENT
-  export const Map: typeof globalThis.Map;
-  export const MapLength: typeof Map.length
-  export const MapName: typeof Map.name
+  export import Map = globalThis.Map;
   export const MapPrototype: typeof Map.prototype
   export const MapPrototypeGet: UncurryThis<typeof Map.prototype.get>
   export const MapPrototypeSet: UncurryThis<typeof Map.prototype.set>
@@ -304,9 +301,8 @@ declare namespace Primordials {
   export const MapPrototypeForEach: UncurryThis<typeof Map.prototype.forEach>
   export const MapPrototypeKeys: UncurryThis<typeof Map.prototype.keys>
   export const MapPrototypeValues: UncurryThis<typeof Map.prototype.values>
-  export const Number: typeof globalThis.Number;
-  export const NumberLength: typeof Number.length
-  export const NumberName: typeof Number.name
+  export const MapPrototypeGetSize: UncurryGetter<typeof Map.prototype, "size">;
+  export import Number = globalThis.Number;
   export const NumberPrototype: typeof Number.prototype
   export const NumberIsFinite: typeof Number.isFinite
   export const NumberIsInteger: typeof Number.isInteger
@@ -328,9 +324,7 @@ declare namespace Primordials {
   export const NumberPrototypeToString: UncurryThis<typeof Number.prototype.toString>
   export const NumberPrototypeValueOf: UncurryThis<typeof Number.prototype.valueOf>
   export const NumberPrototypeToLocaleString: UncurryThis<typeof Number.prototype.toLocaleString>
-  export const Object: typeof globalThis.Object;
-  export const ObjectLength: typeof Object.length
-  export const ObjectName: typeof Object.name
+  export import Object = globalThis.Object;
   export const ObjectPrototype: typeof Object.prototype
   export const ObjectAssign: typeof Object.assign
   export const ObjectGetOwnPropertyDescriptor: typeof Object.getOwnPropertyDescriptor
@@ -353,33 +347,34 @@ declare namespace Primordials {
   export const ObjectEntries: typeof Object.entries
   export const ObjectFromEntries: typeof Object.fromEntries
   export const ObjectValues: typeof Object.values
-  export const ObjectPrototype__defineGetter__: UncurryThis<typeof Object.prototype.__defineGetter__>
-  export const ObjectPrototype__defineSetter__: UncurryThis<typeof Object.prototype.__defineSetter__>
   export const ObjectPrototypeHasOwnProperty: UncurryThis<typeof Object.prototype.hasOwnProperty>
-  export const ObjectPrototype__lookupGetter__: UncurryThis<typeof Object.prototype.__lookupGetter__>
-  export const ObjectPrototype__lookupSetter__: UncurryThis<typeof Object.prototype.__lookupSetter__>
   export const ObjectPrototypeIsPrototypeOf: UncurryThis<typeof Object.prototype.isPrototypeOf>
   export const ObjectPrototypePropertyIsEnumerable: UncurryThis<typeof Object.prototype.propertyIsEnumerable>
   export const ObjectPrototypeToString: UncurryThis<typeof Object.prototype.toString>
   export const ObjectPrototypeValueOf: UncurryThis<typeof Object.prototype.valueOf>
   export const ObjectPrototypeToLocaleString: UncurryThis<typeof Object.prototype.toLocaleString>
-  export const RangeError: typeof globalThis.RangeError;
-  export const RangeErrorLength: typeof RangeError.length
-  export const RangeErrorName: typeof RangeError.name
+  export import RangeError = globalThis.RangeError;
   export const RangeErrorPrototype: typeof RangeError.prototype
-  export const ReferenceError: typeof globalThis.ReferenceError;
-  export const ReferenceErrorLength: typeof ReferenceError.length
-  export const ReferenceErrorName: typeof ReferenceError.name
+  export import ReferenceError = globalThis.ReferenceError;
   export const ReferenceErrorPrototype: typeof ReferenceError.prototype
-  export const RegExp: typeof globalThis.RegExp;
-  export const RegExpLength: typeof RegExp.length
-  export const RegExpName: typeof RegExp.name
+  export import RegExp = globalThis.RegExp;
   export const RegExpPrototype: typeof RegExp.prototype
   export const RegExpPrototypeExec: UncurryThis<typeof RegExp.prototype.exec>
   export const RegExpPrototypeCompile: UncurryThis<typeof RegExp.prototype.compile>
   export const RegExpPrototypeToString: UncurryThis<typeof RegExp.prototype.toString>
   export const RegExpPrototypeTest: UncurryThis<typeof RegExp.prototype.test>
-  export const Set: typeof globalThis.Set;
+  export const RegExpPrototypeGetDotAll: UncurryGetter<typeof RegExp.prototype, "dotAll">;
+  export const RegExpPrototypeGetFlags: UncurryGetter<typeof RegExp.prototype, "flags">;
+  export const RegExpPrototypeGetGlobal: UncurryGetter<typeof RegExp.prototype, "global">;
+  export const RegExpPrototypeGetIgnoreCase: UncurryGetter<typeof RegExp.prototype, "ignoreCase">;
+  export const RegExpPrototypeGetMultiline: UncurryGetter<typeof RegExp.prototype, "multiline">;
+  export const RegExpPrototypeGetSource: UncurryGetter<typeof RegExp.prototype, "source">;
+  export const RegExpPrototypeGetSticky: UncurryGetter<typeof RegExp.prototype, "sticky">;
+  export const RegExpPrototypeGetUnicode: UncurryGetter<typeof RegExp.prototype, "unicode">;
+  export const RegExpPrototypeSymbolReplace: UncurryMethod<typeof RegExp.prototype, typeof Symbol.replace>
+  export const RegExpPrototypeSymbolSplit: UncurryMethod<typeof RegExp.prototype, typeof Symbol.split>
+  export const SafeArrayPrototypePushApply: typeof ArrayPrototypePushApply;
+  export import Set = globalThis.Set;
   export const SetLength: typeof Set.length
   export const SetName: typeof Set.name
   export const SetPrototype: typeof Set.prototype
@@ -391,12 +386,15 @@ declare namespace Primordials {
   export const SetPrototypeForEach: UncurryThis<typeof Set.prototype.forEach>
   export const SetPrototypeValues: UncurryThis<typeof Set.prototype.values>
   export const SetPrototypeKeys: UncurryThis<typeof Set.prototype.keys>
-  export const String: typeof globalThis.String;
+  export const SetPrototypeGetSize: UncurryGetter<typeof Set.prototype, "size">;
+  export import String = globalThis.String;
   export const StringLength: typeof String.length
   export const StringName: typeof String.name
   export const StringPrototype: typeof String.prototype
   export const StringFromCharCode: typeof String.fromCharCode
+  export const StringFromCharCodeApply: StaticApply<typeof String.fromCharCode>
   export const StringFromCodePoint: typeof String.fromCodePoint
+  export const StringFromCodePointApply: StaticApply<typeof String.fromCodePoint>
   export const StringRaw: typeof String.raw
   export const StringPrototypeAnchor: UncurryThis<typeof String.prototype.anchor>
   export const StringPrototypeBig: UncurryThis<typeof String.prototype.big>
@@ -443,15 +441,16 @@ declare namespace Primordials {
   export const StringPrototypeToLocaleUpperCase: UncurryThis<typeof String.prototype.toLocaleUpperCase>
   export const StringPrototypeToLowerCase: UncurryThis<typeof String.prototype.toLowerCase>
   export const StringPrototypeToUpperCase: UncurryThis<typeof String.prototype.toUpperCase>
+  export const StringPrototypeToWellFormed: UncurryThis<typeof String.prototype.toWellFormed>
   export const StringPrototypeValueOf: UncurryThis<typeof String.prototype.valueOf>
   export const StringPrototypeReplaceAll: UncurryThis<typeof String.prototype.replaceAll>
-  export const Symbol: typeof globalThis.Symbol;
-  export const SymbolLength: typeof Symbol.length
-  export const SymbolName: typeof Symbol.name
+  export import Symbol = globalThis.Symbol;
   export const SymbolPrototype: typeof Symbol.prototype
   export const SymbolFor: typeof Symbol.for
   export const SymbolKeyFor: typeof Symbol.keyFor
+  export const SymbolAsyncDispose: typeof Symbol.asyncDispose
   export const SymbolAsyncIterator: typeof Symbol.asyncIterator
+  export const SymbolDispose: typeof Symbol.dispose
   export const SymbolHasInstance: typeof Symbol.hasInstance
   export const SymbolIsConcatSpreadable: typeof Symbol.isConcatSpreadable
   export const SymbolIterator: typeof Symbol.iterator
@@ -466,56 +465,73 @@ declare namespace Primordials {
   export const SymbolUnscopables: typeof Symbol.unscopables
   export const SymbolPrototypeToString: UncurryThis<typeof Symbol.prototype.toString>
   export const SymbolPrototypeValueOf: UncurryThis<typeof Symbol.prototype.valueOf>
-  export const SyntaxError: typeof globalThis.SyntaxError;
-  export const SyntaxErrorLength: typeof SyntaxError.length
-  export const SyntaxErrorName: typeof SyntaxError.name
+  export const SymbolPrototypeSymbolToPrimitive: UncurryMethod<typeof Symbol.prototype, typeof Symbol.toPrimitive, symbol | Symbol>;
+  export const SymbolPrototypeGetDescription: UncurryGetter<typeof Symbol.prototype, "description", symbol | Symbol>;
+  export import SyntaxError = globalThis.SyntaxError;
   export const SyntaxErrorPrototype: typeof SyntaxError.prototype
-  export const TypeError: typeof globalThis.TypeError;
-  export const TypeErrorLength: typeof TypeError.length
-  export const TypeErrorName: typeof TypeError.name
+  export import TypeError = globalThis.TypeError;
   export const TypeErrorPrototype: typeof TypeError.prototype
-  export const URIError: typeof globalThis.URIError;
-  export const URIErrorLength: typeof URIError.length
-  export const URIErrorName: typeof URIError.name
+  export function TypedArrayFrom<T extends TypedArrayConstructor>(
+    constructor: T,
+    source: Iterable<TypedArrayContentType<T>> | ArrayLike<TypedArrayContentType<T>>,
+  ): InstanceType<T>
+  export function TypedArrayFrom<T extends TypedArrayConstructor, U, THIS_ARG = undefined>(
+    constructor: T,
+    source: Iterable<U> | ArrayLike<U>,
+    mapfn: (
+      this: THIS_ARG,
+      value: U,
+      index: number,
+    ) => TypedArrayContentType<T>,
+    thisArg?: THIS_ARG,
+  ): InstanceType<T>;
+  export function TypedArrayOf<T extends TypedArrayConstructor>(
+    constructor: T,
+    ...items: TypedArrayContentType<T>[],
+  ): InstanceType<T>;
+  export function TypedArrayOfApply<T extends TypedArrayConstructor>(
+    constructor: T,
+    items: readonly TypedArrayContentType<T>[],
+  ): InstanceType<T>;
+  export const TypedArray: TypedArrayConstructor;
+  export const TypedArrayPrototype: TypedArrayConstructor["prototype"];
+  export const TypedArrayPrototypeGetBuffer: UncurryGetter<TypedArray, "buffer">;
+  export const TypedArrayPrototypeGetByteLength: UncurryGetter<TypedArray, "byteLength">;
+  export const TypedArrayPrototypeGetByteOffset: UncurryGetter<TypedArray, "byteOffset">;
+  export const TypedArrayPrototypeGetLength: UncurryGetter<TypedArray, "length">;
+  export function TypedArrayPrototypeAt<T extends TypedArray>(self: T, ...args: Parameters<T["at"]>): ReturnType<T["at"]>;
+  export function TypedArrayPrototypeIncludes<T extends TypedArray>(self: T, ...args: Parameters<T["includes"]>): ReturnType<T["includes"]>;
+  export function TypedArrayPrototypeFill<T extends TypedArray>(self: T, ...args: Parameters<T["fill"]>): ReturnType<T["fill"]>;
+  export function TypedArrayPrototypeSet<T extends TypedArray>(self: T, ...args: Parameters<T["set"]>): ReturnType<T["set"]>;
+  export function TypedArrayPrototypeSubarray<T extends TypedArray>(self: T, ...args: Parameters<T["subarray"]>): ReturnType<T["subarray"]>;
+  export function TypedArrayPrototypeSlice<T extends TypedArray>(self: T, ...args: Parameters<T["slice"]>): ReturnType<T["slice"]>;
+  export function TypedArrayPrototypeGetSymbolToStringTag(self: unknown): TypedArray[typeof Symbol.toStringTag] | undefined;
+  export import URIError = globalThis.URIError;
   export const URIErrorPrototype: typeof URIError.prototype
-  export const Uint16Array: typeof globalThis.Uint16Array;
-  export const Uint16ArrayLength: typeof Uint16Array.length
-  export const Uint16ArrayName: typeof Uint16Array.name
+  export import Uint16Array = globalThis.Uint16Array;
   export const Uint16ArrayPrototype: typeof Uint16Array.prototype
   export const Uint16ArrayBYTES_PER_ELEMENT: typeof Uint16Array.BYTES_PER_ELEMENT
-  export const Uint32Array: typeof globalThis.Uint32Array;
-  export const Uint32ArrayLength: typeof Uint32Array.length
-  export const Uint32ArrayName: typeof Uint32Array.name
+  export import Uint32Array = globalThis.Uint32Array;
   export const Uint32ArrayPrototype: typeof Uint32Array.prototype
   export const Uint32ArrayBYTES_PER_ELEMENT: typeof Uint32Array.BYTES_PER_ELEMENT
-  export const Uint8Array: typeof globalThis.Uint8Array;
-  export const Uint8ArrayLength: typeof Uint8Array.length
-  export const Uint8ArrayName: typeof Uint8Array.name
+  export import Uint8Array = globalThis.Uint8Array;
   export const Uint8ArrayPrototype: typeof Uint8Array.prototype
   export const Uint8ArrayBYTES_PER_ELEMENT: typeof Uint8Array.BYTES_PER_ELEMENT
-  export const Uint8ClampedArray: typeof globalThis.Uint8ClampedArray;
-  export const Uint8ClampedArrayLength: typeof Uint8ClampedArray.length
-  export const Uint8ClampedArrayName: typeof Uint8ClampedArray.name
+  export import Uint8ClampedArray = globalThis.Uint8ClampedArray;
   export const Uint8ClampedArrayPrototype: typeof Uint8ClampedArray.prototype
   export const Uint8ClampedArrayBYTES_PER_ELEMENT: typeof Uint8ClampedArray.BYTES_PER_ELEMENT
-  export const WeakMap: typeof globalThis.WeakMap;
-  export const WeakMapLength: typeof WeakMap.length
-  export const WeakMapName: typeof WeakMap.name
+  export import WeakMap = globalThis.WeakMap;
   export const WeakMapPrototype: typeof WeakMap.prototype
   export const WeakMapPrototypeDelete: UncurryThis<typeof WeakMap.prototype.delete>
   export const WeakMapPrototypeGet: UncurryThis<typeof WeakMap.prototype.get>
   export const WeakMapPrototypeSet: UncurryThis<typeof WeakMap.prototype.set>
   export const WeakMapPrototypeHas: UncurryThis<typeof WeakMap.prototype.has>
-  export const WeakSet: typeof globalThis.WeakSet;
-  export const WeakSetLength: typeof WeakSet.length
-  export const WeakSetName: typeof WeakSet.name
+  export import WeakSet = globalThis.WeakSet;
   export const WeakSetPrototype: typeof WeakSet.prototype
   export const WeakSetPrototypeDelete: UncurryThis<typeof WeakSet.prototype.delete>
   export const WeakSetPrototypeHas: UncurryThis<typeof WeakSet.prototype.has>
   export const WeakSetPrototypeAdd: UncurryThis<typeof WeakSet.prototype.add>
-  export const Promise: typeof globalThis.Promise;
-  export const PromiseLength: typeof Promise.length
-  export const PromiseName: typeof Promise.name
+  export import Promise = globalThis.Promise;
   export const PromisePrototype: typeof Promise.prototype
   export const PromiseAll: typeof Promise.all
   export const PromiseRace: typeof Promise.race
@@ -526,8 +542,39 @@ declare namespace Primordials {
   export const PromisePrototypeThen: UncurryThis<typeof Promise.prototype.then>
   export const PromisePrototypeCatch: UncurryThis<typeof Promise.prototype.catch>
   export const PromisePrototypeFinally: UncurryThis<typeof Promise.prototype.finally>
-}
-
-declare global {
-  const primordials: typeof Primordials;
+  export const PromiseWithResolvers: typeof Promise.withResolvers
+  export import Proxy = globalThis.Proxy
+  export import Iterator = globalThis.Iterator
+  export const IteratorFrom: typeof Iterator.from
+  export const IteratorPrototype: typeof Iterator.prototype
+  export const IteratorPrototypeDrop: UncurryThis<typeof Iterator.prototype.drop>
+  export const IteratorPrototypeEvery: UncurryThis<typeof Iterator.prototype.every>
+  export const IteratorPrototypeFilter: UncurryThis<typeof Iterator.prototype.filter>
+  export const IteratorPrototypeFind: UncurryThis<typeof Iterator.prototype.find>
+  export const IteratorPrototypeFlatMap: UncurryThis<typeof Iterator.prototype.flatMap>
+  export const IteratorPrototypeForEach: UncurryThis<typeof Iterator.prototype.forEach>
+  export const IteratorPrototypeMap: UncurryThis<typeof Iterator.prototype.map>
+  export const IteratorPrototypeReduce: UncurryThis<typeof Iterator.prototype.reduce>
+  export const IteratorPrototypeSome: UncurryThis<typeof Iterator.prototype.some>
+  export const IteratorPrototypeTake: UncurryThis<typeof Iterator.prototype.take>
+  export const IteratorPrototypeToArray: UncurryThis<typeof Iterator.prototype.toArray>
+  export const IteratorPrototypeSymbolIterator: UncurryMethod<typeof Iterator.prototype, typeof Symbol.iterator>
+  export const ArrayIteratorPrototype: ReturnType<typeof Array.prototype[typeof Symbol.iterator]>
+  export const ArrayIteratorPrototypeNext: UncurryThis<typeof ArrayIteratorPrototype.next>
+  export const AsyncFunctionPrototype: Function
+  export const AsyncGeneratorFunctionPrototype: Function
+  export const AsyncIteratorPrototype: AsyncIterable<any>
+  export const GeneratorFunctionPrototype: Function
+  export const IteratorHelperPrototype: ReturnType<typeof Iterator.prototype.drop>
+  export const MapIteratorPrototype: ReturnType<typeof Map.prototype[typeof Symbol.iterator]>
+  export const MapIteratorPrototypeNext: UncurryThis<typeof MapIteratorPrototype.next>
+  export const RegExpStringIteratorPrototype: ReturnType<typeof RegExp.prototype[typeof Symbol.matchAll]>
+  export const RegExpStringIteratorPrototypeNext: UncurryThis<typeof RegExpStringIteratorPrototype.next>
+  export const SetIteratorPrototype: ReturnType<typeof Set.prototype[typeof Symbol.iterator]>
+  export const SetIteratorPrototypeNext: UncurryThis<typeof SetIteratorPrototype.next>
+  export const StringIteratorPrototype: ReturnType<typeof String.prototype[typeof Symbol.iterator]>
+  export const StringIteratorPrototypeNext: UncurryThis<typeof StringIteratorPrototype.next>
+  export const WrapForValidIteratorPrototype: ReturnType<typeof Iterator.from>
+  import _globalThis = globalThis
+  export { _globalThis as globalThis }
 }

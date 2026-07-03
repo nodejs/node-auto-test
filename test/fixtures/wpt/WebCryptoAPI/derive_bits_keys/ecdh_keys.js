@@ -143,7 +143,7 @@ function define_tests() {
             promise_test(function(test) {
                 return subtle.generateKey({name: "HMAC", hash: "SHA-256", length: 256}, true, ["sign", "verify"])
                 .then(function(secretKey) {
-                    subtle.deriveKey({name: "ECDH", public: secretKey}, privateKeys[namedCurve], {name: "AES-CBC", length: 256}, true, ["sign", "verify"])
+                    return subtle.deriveKey({name: "ECDH", public: secretKey}, privateKeys[namedCurve], {name: "AES-CBC", length: 256}, true, ["sign", "verify"])
                     .then(function(key) {return crypto.subtle.exportKey("raw", key);})
                     .then(function(exportedKey) {
                         assert_unreached("deriveKey succeeded but should have failed with InvalidAccessError");
@@ -168,6 +168,8 @@ function define_tests() {
                                             false, ["deriveBits", "deriveKey"])
                             .then(function(key) {
                                 privateKeys[namedCurve] = key;
+                            }, function (err) {
+                                privateKeys[namedCurve] = null;
                             });
             promises.push(operation);
         });
@@ -177,6 +179,8 @@ function define_tests() {
                                             false, ["deriveBits"])
                             .then(function(key) {
                                 noDeriveKeyKeys[namedCurve] = key;
+                            }, function (err) {
+                                noDeriveKeyKeys[namedCurve] = null;
                             });
             promises.push(operation);
         });
@@ -186,6 +190,8 @@ function define_tests() {
                                             false, [])
                             .then(function(key) {
                                 publicKeys[namedCurve] = key;
+                            }, function (err) {
+                                publicKeys[namedCurve] = null;
                             });
             promises.push(operation);
         });
@@ -193,45 +199,14 @@ function define_tests() {
             var operation = subtle.generateKey({name: "ECDSA", namedCurve: namedCurve}, false, ["sign", "verify"])
                             .then(function(keyPair) {
                                 ecdsaKeyPairs[namedCurve] = keyPair;
+                            }, function (err) {
+                                ecdsaKeyPairs[namedCurve] = null;
                             });
             promises.push(operation);
         });
 
         return Promise.all(promises)
                .then(function(results) {return {privateKeys: privateKeys, publicKeys: publicKeys, ecdsaKeyPairs: ecdsaKeyPairs, noDeriveKeyKeys: noDeriveKeyKeys}});
-    }
-
-    // Compares two ArrayBuffer or ArrayBufferView objects. If bitCount is
-    // omitted, the two values must be the same length and have the same contents
-    // in every byte. If bitCount is included, only that leading number of bits
-    // have to match.
-    function equalBuffers(a, b, bitCount) {
-        var remainder;
-
-        if (typeof bitCount === "undefined" && a.byteLength !== b.byteLength) {
-            return false;
-        }
-
-        var aBytes = new Uint8Array(a);
-        var bBytes = new Uint8Array(b);
-
-        var length = a.byteLength;
-        if (typeof bitCount !== "undefined") {
-            length = Math.floor(bitCount / 8);
-        }
-
-        for (var i=0; i<length; i++) {
-            if (aBytes[i] !== bBytes[i]) {
-                return false;
-            }
-        }
-
-        if (typeof bitCount !== "undefined") {
-            remainder = bitCount % 8;
-            return aBytes[length] >> (8 - remainder) === bBytes[length] >> (8 - remainder);
-        }
-
-        return true;
     }
 
 }

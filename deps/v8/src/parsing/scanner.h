@@ -2,13 +2,14 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Features shared by parsing and pre-parsing scanners.
-
 #ifndef V8_PARSING_SCANNER_H_
 #define V8_PARSING_SCANNER_H_
 
+// Features shared by parsing and pre-parsing scanners.
+
 #include <algorithm>
 #include <memory>
+#include <optional>
 
 #include "src/base/logging.h"
 #include "src/base/strings.h"
@@ -21,10 +22,8 @@
 #include "src/strings/char-predicates.h"
 #include "src/strings/unicode.h"
 #include "src/utils/allocation.h"
-#include "src/utils/pointer-with-payload.h"
 
-namespace v8 {
-namespace internal {
+namespace v8::internal {
 
 class AstRawString;
 class AstValueFactory;
@@ -45,7 +44,9 @@ class Utf16CharacterStream {
   virtual ~Utf16CharacterStream() = default;
 
   V8_INLINE void set_parser_error() {
-    buffer_cursor_ = buffer_end_;
+    // source_pos() returns one previous position of the cursor.
+    // Offset 1 cancels this out and makes it return exactly buffer_end_.
+    buffer_cursor_ = buffer_end_ + 1;
     has_parser_error_ = true;
   }
   V8_INLINE void reset_parser_error_flag() { has_parser_error_ = false; }
@@ -54,7 +55,7 @@ class Utf16CharacterStream {
   inline base::uc32 Peek() {
     if (V8_LIKELY(buffer_cursor_ < buffer_end_)) {
       return static_cast<base::uc32>(*buffer_cursor_);
-    } else if (ReadBlockChecked()) {
+    } else if (ReadBlockChecked(pos())) {
       return static_cast<base::uc32>(*buffer_cursor_);
     } else {
       return kEndOfInput;
@@ -83,7 +84,7 @@ class Utf16CharacterStream {
 
       if (next_cursor_pos == buffer_end_) {
         buffer_cursor_ = buffer_end_;
-        if (!ReadBlockChecked()) {
+        if (!ReadBlockChecked(pos())) {
           buffer_cursor_++;
           return kEndOfInput;
         }
@@ -103,7 +104,7 @@ class Utf16CharacterStream {
     if (V8_LIKELY(buffer_cursor_ > buffer_start_)) {
       buffer_cursor_--;
     } else {
-      ReadBlockAt(pos() - 1);
+      ReadBlockChecked(pos() - 1);
     }
   }
 
@@ -116,7 +117,7 @@ class Utf16CharacterStream {
                   pos < (buffer_pos_ + (buffer_end_ - buffer_start_)))) {
       buffer_cursor_ = buffer_start_ + (pos - buffer_pos_);
     } else {
-      ReadBlockAt(pos);
+      ReadBlockChecked(pos);
     }
   }
 
@@ -151,10 +152,15 @@ class Utf16CharacterStream {
         buffer_pos_(buffer_pos) {}
   Utf16CharacterStream() : Utf16CharacterStream(nullptr, nullptr, nullptr, 0) {}
 
-  bool ReadBlockChecked() {
-    size_t position = pos();
-    USE(position);
-    bool success = !has_parser_error() && ReadBlock();
+  bool ReadBlockChecked(size_t position) {
+    // The callers of this method (Back/Back2/Seek) should handle the easy
+    // case (seeking within the current buffer), and we should only get here
+    // if we actually require new data.
+    // (This is really an efficiency check, not a correctness invariant.)
+    DCHECK(position < buffer_pos_ ||
+           position >= buffer_pos_ + (buffer_end_ - buffer_start_));
+
+    bool success = !has_parser_error() && ReadBlock(position);
 
     // Post-conditions: 1, We should always be at the right position.
     //                  2, Cursor should be inside the buffer.
@@ -166,26 +172,11 @@ class Utf16CharacterStream {
     return success;
   }
 
-  void ReadBlockAt(size_t new_pos) {
-    // The callers of this method (Back/Back2/Seek) should handle the easy
-    // case (seeking within the current buffer), and we should only get here
-    // if we actually require new data.
-    // (This is really an efficiency check, not a correctness invariant.)
-    DCHECK(new_pos < buffer_pos_ ||
-           new_pos >= buffer_pos_ + (buffer_end_ - buffer_start_));
-
-    // Change pos() to point to new_pos.
-    buffer_pos_ = new_pos;
-    buffer_cursor_ = buffer_start_;
-    DCHECK_EQ(pos(), new_pos);
-    ReadBlockChecked();
-  }
-
   // Read more data, and update buffer_*_ to point to it.
   // Returns true if more data was available.
   //
-  // ReadBlock() may modify any of the buffer_*_ members, but must sure that
-  // the result of pos() remains unaffected.
+  // ReadBlock(position) may modify any of the buffer_*_ members, but must make
+  // sure that the result of pos() becomes |position|.
   //
   // Examples:
   // - a stream could either fill a separate buffer. Then buffer_start_ and
@@ -195,13 +186,26 @@ class Utf16CharacterStream {
   //   buffer_end_ to cover the full chunk, and then buffer_cursor_ would
   //   point into the middle of the buffer, while buffer_pos_ would describe
   //   the start of the buffer.
-  virtual bool ReadBlock() = 0;
+  virtual bool ReadBlock(size_t position) = 0;
 
+  // Fields describing the location of the current buffer physically in memory,
+  // and semantically within the source string.
+  //
+  //                  0              buffer_pos_   pos()
+  //                  |                        |   |
+  //                  v________________________v___v_____________
+  //                  |                        |        |        |
+  //   Source string: |                        | Buffer |        |
+  //                  |________________________|________|________|
+  //                                           ^   ^    ^
+  //                                           |   |    |
+  //                   Pointers:   buffer_start_   |    buffer_end_
+  //                                         buffer_cursor_
   const uint16_t* buffer_start_;
   const uint16_t* buffer_cursor_;
   const uint16_t* buffer_end_;
   size_t buffer_pos_;
-  RuntimeCallStats* runtime_call_stats_;
+  RuntimeCallStats* runtime_call_stats_ = nullptr;
   bool has_parser_error_ = false;
 };
 
@@ -238,12 +242,14 @@ class V8_EXPORT_PRIVATE Scanner {
   };
 
   // Sets the Scanner into an error state to stop further scanning and terminate
-  // the parsing by only returning ILLEGAL tokens after that.
+  // the parsing by only returning kIllegal tokens after that.
   V8_INLINE void set_parser_error() {
     if (!has_parser_error()) {
       c0_ = kEndOfInput;
       source_->set_parser_error();
-      for (TokenDesc& desc : token_storage_) desc.token = Token::ILLEGAL;
+      for (TokenDesc& desc : token_storage_) {
+        if (desc.token != Token::kUninitialized) desc.token = Token::kIllegal;
+      }
     }
   }
   V8_INLINE void reset_parser_error_flag() {
@@ -282,6 +288,8 @@ class V8_EXPORT_PRIVATE Scanner {
   Token::Value Next();
   // Returns the token following peek()
   Token::Value PeekAhead();
+  // Returns the token following PeekAhead()
+  Token::Value PeekAheadAhead();
   // Returns the current token again.
   Token::Value current_token() const { return current().token; }
 
@@ -334,6 +342,9 @@ class V8_EXPORT_PRIVATE Scanner {
       AstValueFactory* ast_value_factory) const;
 
   double DoubleValue();
+  base::Vector<const uint8_t> BigIntLiteral() const {
+    return literal_one_byte_string();
+  }
 
   const char* CurrentLiteralAsCString(Zone* zone) const;
 
@@ -375,7 +386,7 @@ class V8_EXPORT_PRIVATE Scanner {
   MessageTemplate octal_message() const { return octal_message_; }
 
   // Returns the value of the last smi that was scanned.
-  uint32_t smi_value() const { return current().smi_value_; }
+  uint32_t smi_value() const { return current().smi_value; }
 
   // Seek forward to the given position.  This operation does not
   // work in general, for instance when there are pushed back
@@ -395,23 +406,41 @@ class V8_EXPORT_PRIVATE Scanner {
     return next_next().after_line_terminator;
   }
 
+  bool HasLineTerminatorAfterNextNext() {
+    Token::Value ensure_next_next_next = PeekAheadAhead();
+    USE(ensure_next_next_next);
+    return next_next_next().after_line_terminator;
+  }
+
   // Scans the input as a regular expression pattern, next token must be /(=).
   // Returns true if a pattern is scanned.
   bool ScanRegExpPattern();
   // Scans the input as regular expression flags. Returns the flags on success.
-  base::Optional<RegExpFlags> ScanRegExpFlags();
+  std::optional<RegExpFlags> ScanRegExpFlags();
 
   // Scans the input as a template literal
   Token::Value ScanTemplateContinuation() {
-    DCHECK_EQ(next().token, Token::RBRACE);
+    DCHECK_EQ(next().token, Token::kRightBrace);
     DCHECK_EQ(source_pos() - 1, next().location.beg_pos);
     return ScanTemplateSpan();
   }
 
   template <typename IsolateT>
-  Handle<String> SourceUrl(IsolateT* isolate) const;
+  DirectHandle<String> SourceUrl(IsolateT* isolate) const;
   template <typename IsolateT>
-  Handle<String> SourceMappingUrl(IsolateT* isolate) const;
+  DirectHandle<String> SourceMappingUrl(IsolateT* isolate) const;
+  template <typename IsolateT>
+  DirectHandle<String> DebugId(IsolateT* isolate) const;
+
+  bool SawSourceMappingUrlMagicCommentAtSign() const {
+    return saw_source_mapping_url_magic_comment_at_sign_;
+  }
+
+  bool SawMagicCommentCompileHintsAll() const {
+    return saw_magic_comment_compile_hints_all_;
+  }
+
+  bool HasPerFunctionCompileHint(int position);
 
   bool FoundHtmlComment() const { return found_html_comment_; }
 
@@ -423,33 +452,6 @@ class V8_EXPORT_PRIVATE Scanner {
   // escape sequences are allowed.
   class ErrorState;
 
-  // The current and look-ahead token.
-  struct TokenDesc {
-    Location location = {0, 0};
-    LiteralBuffer literal_chars;
-    LiteralBuffer raw_literal_chars;
-    Token::Value token = Token::UNINITIALIZED;
-    MessageTemplate invalid_template_escape_message = MessageTemplate::kNone;
-    Location invalid_template_escape_location;
-    uint32_t smi_value_ = 0;
-    bool after_line_terminator = false;
-
-#ifdef DEBUG
-    bool CanAccessLiteral() const {
-      return token == Token::PRIVATE_NAME || token == Token::ILLEGAL ||
-             token == Token::ESCAPED_KEYWORD || token == Token::UNINITIALIZED ||
-             token == Token::REGEXP_LITERAL ||
-             base::IsInRange(token, Token::NUMBER, Token::STRING) ||
-             Token::IsAnyIdentifier(token) || Token::IsKeyword(token) ||
-             base::IsInRange(token, Token::TEMPLATE_SPAN, Token::TEMPLATE_TAIL);
-    }
-    bool CanAccessRawLiteral() const {
-      return token == Token::ILLEGAL || token == Token::UNINITIALIZED ||
-             base::IsInRange(token, Token::TEMPLATE_SPAN, Token::TEMPLATE_TAIL);
-    }
-#endif  // DEBUG
-  };
-
   enum NumberKind {
     IMPLICIT_OCTAL,
     BINARY,
@@ -457,6 +459,34 @@ class V8_EXPORT_PRIVATE Scanner {
     HEX,
     DECIMAL,
     DECIMAL_WITH_LEADING_ZERO
+  };
+
+  // The current and look-ahead tokens.
+  struct TokenDesc {
+    Location location = {0, 0};
+    LiteralBuffer literal_chars;
+    LiteralBuffer raw_literal_chars;
+    Token::Value token = Token::kUninitialized;
+    MessageTemplate invalid_template_escape_message = MessageTemplate::kNone;
+    Location invalid_template_escape_location;
+    NumberKind number_kind;
+    uint32_t smi_value = 0;
+    bool after_line_terminator = false;
+
+#ifdef DEBUG
+    bool CanAccessLiteral() const {
+      return token == Token::kPrivateName || token == Token::kIllegal ||
+             token == Token::kEscapedKeyword ||
+             token == Token::kUninitialized || token == Token::kRegExpLiteral ||
+             base::IsInRange(token, Token::kNumber, Token::kString) ||
+             Token::IsAnyIdentifier(token) || Token::IsKeyword(token) ||
+             base::IsInRange(token, Token::kTemplateSpan, Token::kTemplateTail);
+    }
+    bool CanAccessRawLiteral() const {
+      return token == Token::kIllegal || token == Token::kUninitialized ||
+             base::IsInRange(token, Token::kTemplateSpan, Token::kTemplateTail);
+    }
+#endif  // DEBUG
   };
 
   inline bool IsValidBigIntKind(NumberKind kind) {
@@ -477,12 +507,13 @@ class V8_EXPORT_PRIVATE Scanner {
   // Call this after setting source_ to the input.
   void Init() {
     // Set c0_ (one character ahead)
-    STATIC_ASSERT(kCharacterLookaheadBufferSize == 1);
+    static_assert(kCharacterLookaheadBufferSize == 1);
     Advance();
 
     current_ = &token_storage_[0];
     next_ = &token_storage_[1];
     next_next_ = &token_storage_[2];
+    next_next_next_ = &token_storage_[3];
 
     found_html_comment_ = false;
     scanner_error_ = MessageTemplate::kNone;
@@ -581,21 +612,21 @@ class V8_EXPORT_PRIVATE Scanner {
   // Current usage of these functions is unfortunately a little undisciplined,
   // and is_literal_one_byte() + is_literal_one_byte_string() is also
   // requested for tokens that do not have a literal. Hence, we treat any
-  // token as a one-byte literal. E.g. Token::FUNCTION pretends to have a
+  // token as a one-byte literal. E.g. Token::kFunction pretends to have a
   // literal "function".
   base::Vector<const uint8_t> literal_one_byte_string() const {
     DCHECK(current().CanAccessLiteral() || Token::IsKeyword(current().token) ||
-           current().token == Token::ESCAPED_KEYWORD);
+           current().token == Token::kEscapedKeyword);
     return current().literal_chars.one_byte_literal();
   }
   base::Vector<const uint16_t> literal_two_byte_string() const {
     DCHECK(current().CanAccessLiteral() || Token::IsKeyword(current().token) ||
-           current().token == Token::ESCAPED_KEYWORD);
+           current().token == Token::kEscapedKeyword);
     return current().literal_chars.two_byte_literal();
   }
   bool is_literal_one_byte() const {
     DCHECK(current().CanAccessLiteral() || Token::IsKeyword(current().token) ||
-           current().token == Token::ESCAPED_KEYWORD);
+           current().token == Token::kEscapedKeyword);
     return current().literal_chars.is_one_byte();
   }
   // Returns the literal string for the next token (the token that
@@ -645,8 +676,8 @@ class V8_EXPORT_PRIVATE Scanner {
   V8_INLINE Token::Value SkipWhiteSpace();
   Token::Value SkipSingleHTMLComment();
   Token::Value SkipSingleLineComment();
-  Token::Value SkipSourceURLComment();
-  void TryToParseSourceURLComment();
+  Token::Value SkipMagicComment(base::uc32 hash_or_at_sign);
+  void TryToParseMagicComment(base::uc32 hash_or_at_sign);
   Token::Value SkipMultiLineComment();
   // Scans a possible HTML comment -- begins with '<!'.
   Token::Value ScanHtmlComment();
@@ -695,7 +726,7 @@ class V8_EXPORT_PRIVATE Scanner {
   static bool LiteralContainsEscapes(const TokenDesc& token) {
     Location location = token.location;
     int source_length = (location.end_pos - location.beg_pos);
-    if (token.token == Token::STRING) {
+    if (token.token == Token::kString) {
       // Subtract delimiters.
       source_length -= 2;
     }
@@ -711,12 +742,15 @@ class V8_EXPORT_PRIVATE Scanner {
   const TokenDesc& current() const { return *current_; }
   const TokenDesc& next() const { return *next_; }
   const TokenDesc& next_next() const { return *next_next_; }
+  const TokenDesc& next_next_next() const { return *next_next_next_; }
 
   UnoptimizedCompileFlags flags_;
 
   TokenDesc* current_;    // desc for current token (as returned by Next())
   TokenDesc* next_;       // desc for next token (one token look-ahead)
-  TokenDesc* next_next_;  // desc for the token after next (after PeakAhead())
+  TokenDesc* next_next_;  // desc for the token after next (after peek())
+  TokenDesc* next_next_next_;  // desc for the token after next of next (after
+                               // PeekAhead())
 
   // Input stream. Must be initialized to an Utf16CharacterStream.
   Utf16CharacterStream* const source_;
@@ -724,7 +758,7 @@ class V8_EXPORT_PRIVATE Scanner {
   // One Unicode character look-ahead; c0_ < 0 at the end of the input.
   base::uc32 c0_;
 
-  TokenDesc token_storage_[3];
+  TokenDesc token_storage_[4];
 
   // Whether this scanner encountered an HTML comment.
   bool found_html_comment_;
@@ -732,6 +766,12 @@ class V8_EXPORT_PRIVATE Scanner {
   // Values parsed from magic comments.
   LiteralBuffer source_url_;
   LiteralBuffer source_mapping_url_;
+  LiteralBuffer debug_id_;
+  bool saw_source_mapping_url_magic_comment_at_sign_ = false;
+  bool saw_magic_comment_compile_hints_all_ = false;
+  bool saw_non_comment_ = false;
+  std::vector<int> per_function_compile_hint_positions_;
+  size_t per_function_compile_hint_positions_idx_ = 0;
 
   // Last-seen positions of potentially problematic tokens.
   Location octal_pos_;
@@ -741,7 +781,6 @@ class V8_EXPORT_PRIVATE Scanner {
   Location scanner_error_location_;
 };
 
-}  // namespace internal
-}  // namespace v8
+}  // namespace v8::internal
 
 #endif  // V8_PARSING_SCANNER_H_

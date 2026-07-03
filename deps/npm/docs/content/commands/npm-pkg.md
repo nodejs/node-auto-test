@@ -7,21 +7,20 @@ description: Manages your package.json
 ### Synopsis
 
 ```bash
-npm pkg get [<field> [.<subfield> ...]]
-npm pkg set <field>=<value> [.<subfield>=<value> ...]
-npm pkg delete <field> [.<subfield> ...]
+npm pkg set <key>=<value> [<key>=<value> ...]
+npm pkg get [<key> [<key> ...]]
+npm pkg delete <key> [<key> ...]
+npm pkg set [<array>[<index>].<key>=<value> ...]
+npm pkg set [<array>[].<key>=<value> ...]
+npm pkg fix
 ```
 
 ### Description
 
 A command that automates the management of `package.json` files.
-`npm pkg` provide 3 different sub commands that allow you to modify or retrieve
-values for given object keys in your `package.json`.
+`npm pkg` provide 3 different sub commands that allow you to modify or retrieve values for given object keys in your `package.json`.
 
-The syntax to retrieve and set fields is a dot separated representation of
-the nested object properties to be found within your `package.json`, it's the
-same notation used in [`npm view`](/commands/npm-view) to retrieve information
-from the registry manifest, below you can find more examples on how to use it.
+The syntax to retrieve and set fields is a dot separated representation of the nested object properties to be found within your `package.json`, it's the same notation used in [`npm view`](/commands/npm-view) to retrieve information from the registry manifest, below you can find more examples on how to use it.
 
 Returned values are always in **json** format.
 
@@ -29,8 +28,7 @@ Returned values are always in **json** format.
 
     Retrieves a value `key`, defined in your `package.json` file.
 
-    For example, in order to retrieve the name of the current package, you
-    can run:
+    For example, in order to retrieve the name of the current package, you can run:
 
     ```bash
     npm pkg get name
@@ -42,44 +40,42 @@ Returned values are always in **json** format.
     npm pkg get name version
     ```
 
-    You can view child fields by separating them with a period. To retrieve
-    the value of a test `script` value, you would run the following command:
+    You can view child fields by separating them with a period.
+    To retrieve the value of a test `script` value, you would run the following command:
 
     ```bash
     npm pkg get scripts.test
     ```
 
-    For fields that are arrays, requesting a non-numeric field will return
-    all of the values from the objects in the list. For example, to get all
-    the contributor emails for a package, you would run:
+    For fields that are arrays, requesting a non-numeric field will return all of the values from the objects in the list.
+    For example, to get all the contributor emails for a package, you would run:
 
     ```bash
     npm pkg get contributors.email
     ```
 
-    You may also use numeric indices in square braces to specifically select
-    an item in an array field. To just get the email address of the first
-    contributor in the list, you can run:
+    You may also use numeric indices in square braces to specifically select an item in an array field.
+    To just get the email address of the first contributor in the list, you can run:
 
     ```bash
     npm pkg get contributors[0].email
     ```
 
+    For complex fields you can also name a property in square brackets to specifically select a child field.
+    This is especially helpful with the exports object:
+
+    ```bash
+    npm pkg get "exports[.].require"
+    ```
+
 * `npm pkg set <field>=<value>`
 
-    Sets a `value` in your `package.json` based on the `field` value. When
-    saving to your `package.json` file the same set of rules used during
-    `npm install` and other cli commands that touches the `package.json` file
-    are used, making sure to respect the existing indentation and possibly
-    applying some validation prior to saving values to the file.
+    Sets a `value` in your `package.json` based on the `field` value.
+    When saving to your `package.json` file the same set of rules used during `npm install` and other cli commands that touches the `package.json` file are used, making sure to respect the existing indentation and possibly applying some validation prior to saving values to the file.
 
-    The same syntax used to retrieve values from your package can also be used
-    to define new properties or overriding existing ones, below are some
-    examples of how the dot separated syntax can be used to edit your
-    `package.json` file.
+    The same syntax used to retrieve values from your package can also be used to define new properties or overriding existing ones, below are some examples of how the dot separated syntax can be used to edit your `package.json` file.
 
-    Defining a new bin named `mynewcommand` in your `package.json` that points
-    to a file `cli.js`:
+    Defining a new bin named `mynewcommand` in your `package.json` that points to a file `cli.js`:
 
     ```bash
     npm pkg set bin.mynewcommand=cli.js
@@ -91,23 +87,19 @@ Returned values are always in **json** format.
     npm pkg set description='Awesome package' engines.node='>=10'
     ```
 
-    It's also possible to add to array values, for example to add a new
-    contributor entry:
+    It's also possible to add to array values, for example to add a new contributor entry:
 
     ```bash
     npm pkg set contributors[0].name='Foo' contributors[0].email='foo@bar.ca'
     ```
 
-    You may also append items to the end of an array using the special
-    empty bracket notation:
+    You may also append items to the end of an array using the special empty bracket notation:
 
     ```bash
     npm pkg set contributors[].name='Foo' contributors[].name='Bar'
     ```
 
-    It's also possible to parse values as json prior to saving them to your
-    `package.json` file, for example in order to set a `"private": true`
-    property:
+    It's also possible to parse values as json prior to saving them to your `package.json` file, for example in order to set a `"private": true` property:
 
     ```bash
     npm pkg set private=true --json
@@ -123,30 +115,29 @@ Returned values are always in **json** format.
 
     Deletes a `key` from your `package.json`
 
-    The same syntax used to set values from your package can also be used
-    to remove existing ones. For example, in order to remove a script named
-    build:
+    The same syntax used to set values from your package can also be used to remove existing ones.
+    For example, in order to remove a script named build:
 
     ```bash
     npm pkg delete scripts.build
     ```
 
+* `npm pkg fix`
+
+    Auto corrects common errors in your `package.json`.
+    npm already does this during `publish`, which leads to subtle (mostly harmless) differences between the contents of your `package.json` file and the manifest that npm uses during installation.
+
 ### Workspaces support
 
-You can set/get/delete items across your configured workspaces by using the
-`workspace` or `workspaces` config options.
+You can set/get/delete items across your configured workspaces by using the [`workspace`](/using-npm/config#workspace) or [`workspaces`](/using-npm/config#workspaces) config options.
 
-For example, setting a `funding` value across all configured workspaces
-of a project:
+For example, setting a `funding` value across all configured workspaces of a project:
 
 ```bash
 npm pkg set funding=https://example.com --ws
 ```
 
-When using `npm pkg get` to retrieve info from your configured workspaces, the
-returned result will be in a json format in which top level keys are the
-names of each workspace, the values of these keys will be the result values
-returned from each of the configured workspaces, e.g:
+When using `npm pkg get` to retrieve info from your configured workspaces, the returned result will be in a json format in which top level keys are the names of each workspace, the values of these keys will be the result values returned from each of the configured workspaces, e.g:
 
 ```
 npm pkg get name version --ws
@@ -164,9 +155,6 @@ npm pkg get name version --ws
 
 ### Configuration
 
-<!-- AUTOGENERATED CONFIG DESCRIPTIONS START -->
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
 #### `force`
 
 * Default: false
@@ -188,12 +176,12 @@ mistakes, unnecessary performance degradation, and malicious input.
 * Allow conflicting peerDependencies to be installed in the root project.
 * Implicitly set `--yes` during `npm init`.
 * Allow clobbering existing values in `npm pkg`
+* Allow unpublishing of entire packages (not just a single version).
 
 If you don't have a clear idea of what you want to do, it is strongly
 recommended that you do not use this option!
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `json`
 
@@ -207,8 +195,7 @@ Whether or not to output JSON data, rather than the normal output.
 
 Not supported by all npm commands.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `workspace`
 
@@ -232,9 +219,6 @@ brand new workspace within the project.
 
 This value is not exported to the environment for child processes.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
-
 #### `workspaces`
 
 * Default: null
@@ -252,15 +236,9 @@ other things (test, exec, publish, etc.) will operate on the root project,
 _unless_ one or more workspaces are specified in the `workspace` config.
 
 This value is not exported to the environment for child processes.
-
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
-
-<!-- AUTOGENERATED CONFIG DESCRIPTIONS END -->
 ## See Also
 
 * [npm install](/commands/npm-install)
 * [npm init](/commands/npm-init)
 * [npm config](/commands/npm-config)
-* [npm set-script](/commands/npm-set-script)
 * [workspaces](/using-npm/workspaces)

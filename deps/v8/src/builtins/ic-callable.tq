@@ -19,15 +19,9 @@ macro InSameNativeContext(lhs: Context, rhs: Context): bool {
   return LoadNativeContext(lhs) == LoadNativeContext(rhs);
 }
 
-macro MaybeObjectToStrong(maybeObject: MaybeObject):
-    HeapObject labels IfCleared {
-  assert(IsWeakOrCleared(maybeObject));
-  const weakObject = %RawDownCast<Weak<HeapObject>>(maybeObject);
-  return WeakToStrong(weakObject) otherwise IfCleared;
-}
-
-macro TryInitializeAsMonomorphic(implicit context: Context)(
-    maybeTarget: JSAny, feedbackVector: FeedbackVector,
+macro TryInitializeAsMonomorphic(
+    implicit context: Context)(maybeTarget: JSAny,
+    feedbackVector: FeedbackVector,
     slotId: uintptr): void labels TransitionToMegamorphic {
   const targetHeapObject =
       Cast<HeapObject>(maybeTarget) otherwise TransitionToMegamorphic;
@@ -48,31 +42,37 @@ macro TryInitializeAsMonomorphic(implicit context: Context)(
   ReportFeedbackUpdate(feedbackVector, slotId, 'Call:Initialize');
 }
 
-macro TransitionToMegamorphic(implicit context: Context)(
-    feedbackVector: FeedbackVector, slotId: uintptr): void {
+macro TransitionToMegamorphic(
+    implicit context: Context)(feedbackVector: FeedbackVector,
+    slotId: uintptr): void {
   StoreFeedbackVectorSlot(feedbackVector, slotId, kMegamorphicSymbol);
   ReportFeedbackUpdate(feedbackVector, slotId, 'Call:TransitionMegamorphic');
 }
 
-macro TaggedEqualPrototypeApplyFunction(implicit context: Context)(
-    target: JSAny): bool {
+macro TaggedEqualPrototypeApplyFunction(
+    implicit context: Context)(target: JSAny): bool {
   return TaggedEqual(target, GetPrototypeApplyFunction());
 }
 
-macro FeedbackValueIsReceiver(implicit context: Context)(
-    feedbackVector: FeedbackVector, slotId: uintptr): bool {
-  const callCount: intptr = SmiUntag(Cast<Smi>(LoadFeedbackVectorSlot(
-      feedbackVector, slotId, kTaggedSize)) otherwise return false);
+macro FeedbackValueIsReceiver(
+    implicit context: Context)(feedbackVector: FeedbackVector,
+    slotId: uintptr): bool {
+  const callCountSmi =
+      Cast<Smi>(LoadFeedbackVectorSlot(feedbackVector, slotId, kTaggedSize))
+      otherwise return false;
+  const callCount: intptr = SmiUntag(callCountSmi);
   return (callCount & IntPtrConstant(kCallFeedbackContentFieldMask)) !=
       IntPtrConstant(0);
 }
 
-macro SetCallFeedbackContent(implicit context: Context)(
-    feedbackVector: FeedbackVector, slotId: uintptr,
+macro SetCallFeedbackContent(
+    implicit context: Context)(feedbackVector: FeedbackVector, slotId: uintptr,
     callFeedbackContent: constexpr CallFeedbackContent): void {
   // Load the call count field from the feecback vector.
-  const callCount: intptr = SmiUntag(Cast<Smi>(LoadFeedbackVectorSlot(
-      feedbackVector, slotId, kTaggedSize)) otherwise return );
+  const callCountSmi =
+      Cast<Smi>(LoadFeedbackVectorSlot(feedbackVector, slotId, kTaggedSize))
+      otherwise return;
+  const callCount: intptr = SmiUntag(callCountSmi);
   // The second lowest bits of the call count are used to state whether the
   // feedback collected is a target or a receiver. Change that bit based on the
   // callFeedbackContent input.
@@ -91,10 +91,10 @@ macro SetCallFeedbackContent(implicit context: Context)(
 macro CollectCallFeedback(
     maybeTarget: JSAny, maybeReceiver: Lazy<JSAny>, context: Context,
     maybeFeedbackVector: Undefined|FeedbackVector, slotId: uintptr): void {
-  // TODO(v8:9891): Remove this assert once all callers are ported to Torque.
-  // This assert ensures correctness of maybeFeedbackVector's type which can
+  // TODO(v8:9891): Remove this dcheck once all callers are ported to Torque.
+  // This dcheck ensures correctness of maybeFeedbackVector's type which can
   // be easily broken for calls from CSA.
-  assert(
+  dcheck(
       IsUndefined(maybeFeedbackVector) ||
       Is<FeedbackVector>(maybeFeedbackVector));
   const feedbackVector =
@@ -158,7 +158,7 @@ macro CollectCallFeedback(
       SetCallFeedbackContent(
           feedbackVector, slotId, CallFeedbackContent::kReceiver);
     } else {
-      assert(!FeedbackValueIsReceiver(feedbackVector, slotId));
+      dcheck(!FeedbackValueIsReceiver(feedbackVector, slotId));
     }
     TryInitializeAsMonomorphic(recordedFunction, feedbackVector, slotId)
         otherwise TransitionToMegamorphic;
@@ -170,10 +170,10 @@ macro CollectCallFeedback(
 macro CollectInstanceOfFeedback(
     maybeTarget: JSAny, context: Context,
     maybeFeedbackVector: Undefined|FeedbackVector, slotId: uintptr): void {
-  // TODO(v8:9891): Remove this assert once all callers are ported to Torque.
-  // This assert ensures correctness of maybeFeedbackVector's type which can
+  // TODO(v8:9891): Remove this dcheck once all callers are ported to Torque.
+  // This dcheck ensures correctness of maybeFeedbackVector's type which can
   // be easily broken for calls from CSA.
-  assert(
+  dcheck(
       IsUndefined(maybeFeedbackVector) ||
       Is<FeedbackVector>(maybeFeedbackVector));
   const feedbackVector =
@@ -200,13 +200,13 @@ macro CollectInstanceOfFeedback(
   }
 }
 
-macro BothTaggedEqualArrayFunction(implicit context: Context)(
-    first: JSAny, second: JSAny): bool {
+macro BothTaggedEqualArrayFunction(
+    implicit context: Context)(first: JSAny, second: JSAny): bool {
   return TaggedEqual(first, second) && TaggedEqual(second, GetArrayFunction());
 }
 
-extern macro CreateAllocationSiteInFeedbackVector(
-    FeedbackVector, uintptr): AllocationSite;
+extern macro CreateAllocationSiteInFeedbackVector(FeedbackVector, uintptr):
+    AllocationSite;
 
 macro CastFeedbackVector(
     maybeFeedbackVector: Undefined|FeedbackVector,
@@ -217,32 +217,35 @@ macro CastFeedbackVector(
   } else if constexpr (
       updateFeedbackMode == UpdateFeedbackMode::kOptionalFeedback) {
     return Cast<FeedbackVector>(maybeFeedbackVector) otherwise goto Fallback;
+  } else if constexpr (updateFeedbackMode == UpdateFeedbackMode::kNoFeedback) {
+    goto Fallback;
   } else {
     unreachable;
   }
 }
 
-macro CollectConstructFeedback(implicit context: Context)(
-    target: JSAny, newTarget: JSAny,
-    maybeFeedbackVector: Undefined|FeedbackVector, slotId: uintptr,
+macro CollectConstructFeedback(
+    implicit context: Context)(target: JSAny, newTarget: JSAny,
+    maybeFeedbackVector: Undefined|FeedbackVector, slotId: TaggedIndex,
     updateFeedbackMode: constexpr UpdateFeedbackMode):
     never labels ConstructGeneric,
     ConstructArray(AllocationSite) {
-  // TODO(v8:9891): Remove this assert once all callers are ported to Torque.
-  // This assert ensures correctness of maybeFeedbackVector's type which can
+  // TODO(v8:9891): Remove this dcheck once all callers are ported to Torque.
+  // This dcheck ensures correctness of maybeFeedbackVector's type which can
   // be easily broken for calls from CSA.
-  assert(
+  dcheck(
       IsUndefined(maybeFeedbackVector) ||
       Is<FeedbackVector>(maybeFeedbackVector));
 
   const feedbackVector = CastFeedbackVector(
       maybeFeedbackVector, updateFeedbackMode) otherwise goto ConstructGeneric;
-
-  IncrementCallCount(feedbackVector, slotId);
+  // TODO(42200059): Propagate TaggedIndex usage.
+  const slotIdUintptr = Unsigned(TaggedIndexToIntPtr(slotId));
+  IncrementCallCount(feedbackVector, slotIdUintptr);
 
   try {
     const feedback: MaybeObject =
-        LoadFeedbackVectorSlot(feedbackVector, slotId);
+        LoadFeedbackVectorSlot(feedbackVector, slotIdUintptr);
     if (IsMonomorphic(feedback, newTarget)) goto ConstructGeneric;
     if (IsMegamorphic(feedback)) goto ConstructGeneric;
     if (IsUninitialized(feedback)) goto TryInitializeAsMonomorphic;
@@ -267,16 +270,16 @@ macro CollectConstructFeedback(implicit context: Context)(
       // In this case we can skip unwrapping and context validation since we
       // know the target is the current context's array function.
       const allocationSite =
-          CreateAllocationSiteInFeedbackVector(feedbackVector, slotId);
+          CreateAllocationSiteInFeedbackVector(feedbackVector, slotIdUintptr);
       ReportFeedbackUpdate(
-          feedbackVector, slotId, 'Construct:CreateAllocationSite');
+          feedbackVector, slotIdUintptr, 'Construct:CreateAllocationSite');
       goto ConstructArray(allocationSite);
     }
 
-    TryInitializeAsMonomorphic(newTarget, feedbackVector, slotId)
+    TryInitializeAsMonomorphic(newTarget, feedbackVector, slotIdUintptr)
         otherwise TransitionToMegamorphic;
   } label TransitionToMegamorphic {
-    TransitionToMegamorphic(feedbackVector, slotId);
+    TransitionToMegamorphic(feedbackVector, slotIdUintptr);
   }
   goto ConstructGeneric;
 }

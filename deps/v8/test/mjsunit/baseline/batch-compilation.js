@@ -3,9 +3,10 @@
 // found in the LICENSE file.
 
 // Flags: --sparkplug --no-always-sparkplug --sparkplug-filter="test*"
-// Flags: --allow-natives-syntax --expose-gc --no-always-opt
-// Flags: --baseline-batch-compilation --baseline-batch-compilation-threshold=500
-// Flags: --scale-factor-for-feedback-allocation=2
+// Flags: --allow-natives-syntax --expose-gc
+// Flags: --baseline-batch-compilation --baseline-batch-compilation-threshold=200
+// Flags: --invocation-count-for-feedback-allocation=4
+// Flags: --no-concurrent-sparkplug
 
 // Flags to drive Fuzzers into the right direction
 // TODO(v8:11853): Remove these flags once fuzzers handle flag implications

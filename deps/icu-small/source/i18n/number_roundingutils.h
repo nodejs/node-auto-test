@@ -11,8 +11,7 @@
 #include "string_segment.h"
 
 U_NAMESPACE_BEGIN
-namespace number {
-namespace impl {
+namespace number::impl {
 namespace roundingutils {
 
 enum Section {
@@ -174,15 +173,6 @@ inline bool roundsAtMidpoint(int roundingMode) {
     }
 }
 
-/**
- * Computes the number of fraction digits in a double. Used for computing maxFrac for an increment.
- * Calls into the DoubleToStringConverter library to do so.
- *
- * @param singleDigit An output parameter; set to a number if that is the
- *        only digit in the double, or -1 if there is more than one digit.
- */
-digits_t doubleFractionLength(double input, int8_t* singleDigit);
-
 } // namespace roundingutils
 
 
@@ -247,8 +237,7 @@ class RoundingImpl {
  */
 void parseIncrementOption(const StringSegment &segment, Precision &outPrecision, UErrorCode &status);
 
-} // namespace impl
-} // namespace number
+} // namespace number::impl
 U_NAMESPACE_END
 
 #endif //__NUMBER_ROUNDINGUTILS_H__

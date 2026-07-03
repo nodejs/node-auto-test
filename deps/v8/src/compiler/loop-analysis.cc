@@ -5,16 +5,13 @@
 #include "src/compiler/loop-analysis.h"
 
 #include "src/codegen/tick-counter.h"
+#include "src/compiler/all-nodes.h"
 #include "src/compiler/common-operator.h"
-#include "src/compiler/graph.h"
 #include "src/compiler/node-marker.h"
 #include "src/compiler/node-properties.h"
 #include "src/compiler/node.h"
+#include "src/compiler/turbofan-graph.h"
 #include "src/zone/zone.h"
-
-#if V8_ENABLE_WEBASSEMBLY
-#include "src/wasm/wasm-code-manager.h"
-#endif
 
 namespace v8 {
 namespace internal {
@@ -62,7 +59,7 @@ struct TempLoopInfo {
 // (including loop phis).
 class LoopFinderImpl {
  public:
-  LoopFinderImpl(Graph* graph, LoopTree* loop_tree, TickCounter* tick_counter,
+  LoopFinderImpl(TFGraph* graph, LoopTree* loop_tree, TickCounter* tick_counter,
                  Zone* zone)
       : zone_(zone),
         end_(graph->end()),
@@ -296,7 +293,7 @@ class LoopFinderImpl {
   void ResizeBackwardMarks() {
     int new_width = width_ + 1;
     int max = num_nodes();
-    uint32_t* new_backward = zone_->NewArray<uint32_t>(new_width * max);
+    uint32_t* new_backward = zone_->AllocateArray<uint32_t>(new_width * max);
     memset(new_backward, 0, new_width * max * sizeof(uint32_t));
     if (width_ > 0) {  // copy old matrix data.
       for (int i = 0; i < max; i++) {
@@ -311,7 +308,7 @@ class LoopFinderImpl {
 
   void ResizeForwardMarks() {
     int max = num_nodes();
-    forward_ = zone_->NewArray<uint32_t>(width_ * max);
+    forward_ = zone_->AllocateArray<uint32_t>(width_ * max);
     memset(forward_, 0, width_ * max * sizeof(uint32_t));
   }
 
@@ -536,13 +533,13 @@ class LoopFinderImpl {
   }
 };
 
-LoopTree* LoopFinder::BuildLoopTree(Graph* graph, TickCounter* tick_counter,
+LoopTree* LoopFinder::BuildLoopTree(TFGraph* graph, TickCounter* tick_counter,
                                     Zone* zone) {
   LoopTree* loop_tree =
       graph->zone()->New<LoopTree>(graph->NodeCount(), graph->zone());
   LoopFinderImpl finder(graph, loop_tree, tick_counter, zone);
   finder.Run();
-  if (FLAG_trace_turbo_loop) {
+  if (v8_flags.trace_turbo_loop) {
     finder.Print();
   }
   return loop_tree;
@@ -550,64 +547,121 @@ LoopTree* LoopFinder::BuildLoopTree(Graph* graph, TickCounter* tick_counter,
 
 #if V8_ENABLE_WEBASSEMBLY
 // static
-ZoneUnorderedSet<Node*>* LoopFinder::FindSmallUnnestedLoopFromHeader(
-    Node* loop_header, Zone* zone, size_t max_size) {
+ZoneUnorderedSet<Node*>* LoopFinder::FindSmallInnermostLoopFromHeader(
+    Node* loop_header, AllNodes& all_nodes, Zone* zone, size_t max_size,
+    Purpose purpose) {
   auto* visited = zone->New<ZoneUnorderedSet<Node*>>(zone);
   std::vector<Node*> queue;
 
-  DCHECK(loop_header->opcode() == IrOpcode::kLoop);
+  DCHECK_EQ(loop_header->opcode(), IrOpcode::kLoop);
 
   queue.push_back(loop_header);
+  visited->insert(loop_header);
 
+#define ENQUEUE_USES(use_name, condition)             \
+  for (Node * use_name : node->uses()) {              \
+    if (condition && visited->count(use_name) == 0) { \
+      visited->insert(use_name);                      \
+      queue.push_back(use_name);                      \
+    }                                                 \
+  }
+  bool has_instruction_worth_peeling = false;
   while (!queue.empty()) {
     Node* node = queue.back();
     queue.pop_back();
-    // Terminate is not part of the loop, and neither are its uses.
-    if (node->opcode() == IrOpcode::kTerminate) {
-      DCHECK_EQ(node->InputAt(1), loop_header);
+    if (node->opcode() == IrOpcode::kEnd) {
+      // We reached the end of the graph. The end node is not part of the loop.
+      visited->erase(node);
       continue;
     }
-    visited->insert(node);
     if (visited->size() > max_size) return nullptr;
     switch (node->opcode()) {
+      case IrOpcode::kLoop:
+        // Found nested loop.
+        if (node != loop_header) return nullptr;
+        ENQUEUE_USES(use, true);
+        break;
       case IrOpcode::kLoopExit:
-        DCHECK_EQ(node->InputAt(1), loop_header);
+        // Found nested loop.
+        if (node->InputAt(1) != loop_header) return nullptr;
         // LoopExitValue/Effect uses are inside the loop. The rest are not.
-        for (Node* use : node->uses()) {
-          if (use->opcode() == IrOpcode::kLoopExitEffect ||
-              use->opcode() == IrOpcode::kLoopExitValue) {
-            if (visited->count(use) == 0) queue.push_back(use);
-          }
-        }
+        ENQUEUE_USES(use, (use->opcode() == IrOpcode::kLoopExitEffect ||
+                           use->opcode() == IrOpcode::kLoopExitValue))
         break;
       case IrOpcode::kLoopExitEffect:
       case IrOpcode::kLoopExitValue:
-        DCHECK_EQ(NodeProperties::GetControlInput(node)->InputAt(1),
-                  loop_header);
+        if (NodeProperties::GetControlInput(node)->InputAt(1) != loop_header) {
+          // Found nested loop.
+          return nullptr;
+        }
         // All uses are outside the loop, do nothing.
         break;
+      // If unrolling, call nodes are considered to have unbounded size,
+      // i.e. >max_size, with the exception of certain wasm builtins.
       case IrOpcode::kTailCall:
       case IrOpcode::kJSWasmCall:
       case IrOpcode::kJSCall:
-        // Call nodes are considered to have unbounded size, i.e. >max_size.
-        // An exception is the call to the stack guard builtin at the beginning
-        // of many loops.
-        return nullptr;
+        if (purpose == Purpose::kLoopUnrolling) return nullptr;
+        ENQUEUE_USES(use, true)
+        break;
       case IrOpcode::kCall: {
+        if (purpose == Purpose::kLoopPeeling) {
+          ENQUEUE_USES(use, true);
+          break;
+        }
         Node* callee = node->InputAt(0);
-        if (callee->opcode() == IrOpcode::kRelocatableInt32Constant ||
-            callee->opcode() == IrOpcode::kRelocatableInt64Constant) {
-          auto info = OpParameter<RelocatablePtrConstantInfo>(callee->op());
-          if (info.value() != v8::internal::wasm::WasmCode::kWasmStackGuard) {
-            return nullptr;
-          }
+        if (callee->opcode() != IrOpcode::kRelocatableInt32Constant &&
+            callee->opcode() != IrOpcode::kRelocatableInt64Constant) {
+          return nullptr;
         }
-        V8_FALLTHROUGH;
+        Builtin builtin = static_cast<Builtin>(
+            OpParameter<RelocatablePtrConstantInfo>(callee->op()).value());
+        constexpr Builtin unrollable_builtins[] = {
+            // Exists in every stack check.
+            Builtin::kWasmStackGuard,
+            // Fast table operations.
+            Builtin::kWasmTableGet, Builtin::kWasmTableSet,
+            Builtin::kWasmTableGetFuncRef, Builtin::kWasmTableSetFuncRef,
+            Builtin::kWasmTableGrow,
+            // Atomics.
+            Builtin::kWasmI32AtomicWait, Builtin::kWasmI64AtomicWait,
+            // Exceptions.
+            Builtin::kWasmAllocateFixedArray, Builtin::kWasmThrow,
+            Builtin::kWasmRethrow, Builtin::kWasmRethrowExplicitContext,
+            // Fast wasm-gc operations.
+            Builtin::kWasmRefFunc,
+            // While a built-in call, this is the slow path, so it should not
+            // prevent loop unrolling for stringview_wtf16.get_codeunit.
+            Builtin::kWasmStringViewWtf16GetCodeUnit};
+        if (std::count(std::begin(unrollable_builtins),
+                       std::end(unrollable_builtins), builtin) == 0) {
+          return nullptr;
+        }
+        ENQUEUE_USES(use, true)
+        break;
       }
-      default:
-        for (Node* use : node->uses()) {
-          if (visited->count(use) == 0) queue.push_back(use);
+      case IrOpcode::kWasmStructGet: {
+        // When a chained load occurs in the loop, assume that peeling might
+        // help.
+        Node* object = node->InputAt(0);
+        if (object->opcode() == IrOpcode::kWasmStructGet &&
+            visited->find(object) != visited->end()) {
+          has_instruction_worth_peeling = true;
         }
+        ENQUEUE_USES(use, true);
+        break;
+      }
+      case IrOpcode::kWasmArrayGet:
+        // Rationale for array.get: loops that contain an array.get also
+        // contain a bounds check, which needs to load the array's length,
+        // which benefits from load elimination after peeling.
+      case IrOpcode::kStringPrepareForGetCodeunit:
+        // Rationale for PrepareForGetCodeunit: this internal operation is
+        // specifically designed for being hoisted out of loops.
+        has_instruction_worth_peeling = true;
+        [[fallthrough]];
+      default:
+        ENQUEUE_USES(use, true)
         break;
     }
   }
@@ -621,6 +675,8 @@ ZoneUnorderedSet<Node*>* LoopFinder::FindSmallUnnestedLoopFromHeader(
   for (Node* node : *visited) {
     // The loop header is allowed to point outside the loop.
     if (node == loop_header) continue;
+
+    if (!all_nodes.IsLive(node)) continue;
 
     for (Edge edge : node->input_edges()) {
       Node* input = edge.to();
@@ -636,6 +692,12 @@ ZoneUnorderedSet<Node*>* LoopFinder::FindSmallUnnestedLoopFromHeader(
     }
   }
 
+  // Only peel functions containing instructions for which loop peeling is known
+  // to be useful. TODO(14034): Add more instructions to get more benefits out
+  // of loop peeling.
+  if (purpose == Purpose::kLoopPeeling && !has_instruction_worth_peeling) {
+    return nullptr;
+  }
   return visited;
 }
 #endif  // V8_ENABLE_WEBASSEMBLY
@@ -661,8 +723,7 @@ bool LoopFinder::HasMarkedExits(LoopTree* loop_tree,
             unmarked_exit = (use->opcode() != IrOpcode::kTerminate);
         }
         if (unmarked_exit) {
-          if (FLAG_trace_turbo_loop) {
-            Node* loop_node = loop_tree->GetLoopControl(loop);
+          if (v8_flags.trace_turbo_loop) {
             PrintF(
                 "Cannot peel loop %i. Loop exit without explicit mark: Node %i "
                 "(%s) is inside loop, but its use %i (%s) is outside.\n",

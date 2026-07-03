@@ -27,13 +27,12 @@ tmpdir.refresh();
 
 const assert = require('assert');
 const { spawn } = require('child_process');
-const { pathToFileURL, URL } = require('url');
 
 // Spawns 'pwd' with given options, then test
 // - whether the child pid is undefined or number,
 // - whether the exit code equals expectCode,
 // - optionally whether the trimmed stdout result matches expectData
-function testCwd(options, expectPidType, expectCode = 0, expectData) {
+function testCwd(options, expectPidType, expectCode = 0, expectData, shouldCallExit = true) {
   const child = spawn(...common.pwdCommand, options);
 
   assert.strictEqual(typeof child.pid, expectPidType);
@@ -48,12 +47,19 @@ function testCwd(options, expectPidType, expectCode = 0, expectData) {
 
   // Can't assert callback, as stayed in to API:
   // _The 'exit' event may or may not fire after an error has occurred._
-  child.on('exit', function(code, signal) {
+  child.on('exit', shouldCallExit ? common.mustCall((code) => {
     assert.strictEqual(code, expectCode);
-  });
+  }) : common.mustNotCall());
 
   child.on('close', common.mustCall(function() {
-    expectData && assert.strictEqual(data.trim(), expectData);
+    if (expectData) {
+      // In Windows, compare without considering case
+      if (common.isWindows) {
+        assert.strictEqual(data.trim().toLowerCase(), expectData.toLowerCase());
+      } else {
+        assert.strictEqual(data.trim(), expectData);
+      }
+    }
   }));
 
   return child;
@@ -62,7 +68,7 @@ function testCwd(options, expectPidType, expectCode = 0, expectData) {
 
 // Assume does-not-exist doesn't exist, expect exitCode=-1 and errno=ENOENT
 {
-  testCwd({ cwd: 'does-not-exist' }, 'undefined', -1)
+  testCwd({ cwd: 'does-not-exist' }, 'undefined', -1, undefined, false)
     .on('error', common.mustCall(function(e) {
       assert.strictEqual(e.code, 'ENOENT');
     }));
@@ -88,7 +94,7 @@ function testCwd(options, expectPidType, expectCode = 0, expectData) {
 testCwd({ cwd: tmpdir.path }, 'number', 0, tmpdir.path);
 const shouldExistDir = common.isWindows ? process.env.windir : '/dev';
 testCwd({ cwd: shouldExistDir }, 'number', 0, shouldExistDir);
-testCwd({ cwd: pathToFileURL(tmpdir.path) }, 'number', 0, tmpdir.path);
+testCwd({ cwd: tmpdir.fileURL() }, 'number', 0, tmpdir.path);
 
 // Spawn() shouldn't try to chdir() to invalid arg, so this should just work
 testCwd({ cwd: '' }, 'number');

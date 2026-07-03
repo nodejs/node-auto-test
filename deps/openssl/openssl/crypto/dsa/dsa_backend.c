@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2021 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2020-2023 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -16,7 +16,7 @@
 #include <openssl/core_names.h>
 #include <openssl/err.h>
 #ifndef FIPS_MODULE
-# include <openssl/x509.h>
+#include <openssl/x509.h>
 #endif
 #include "crypto/dsa.h"
 #include "dsa_local.h"
@@ -27,18 +27,19 @@
  * implementations alike.
  */
 
-int ossl_dsa_key_fromdata(DSA *dsa, const OSSL_PARAM params[])
+int ossl_dsa_key_fromdata(DSA *dsa, const OSSL_PARAM params[],
+    int include_private)
 {
-    const OSSL_PARAM *param_priv_key, *param_pub_key;
+    const OSSL_PARAM *param_priv_key = NULL, *param_pub_key;
     BIGNUM *priv_key = NULL, *pub_key = NULL;
 
     if (dsa == NULL)
         return 0;
 
-    param_priv_key =
-        OSSL_PARAM_locate_const(params, OSSL_PKEY_PARAM_PRIV_KEY);
-    param_pub_key =
-        OSSL_PARAM_locate_const(params, OSSL_PKEY_PARAM_PUB_KEY);
+    if (include_private) {
+        param_priv_key = OSSL_PARAM_locate_const(params, OSSL_PKEY_PARAM_PRIV_KEY);
+    }
+    param_pub_key = OSSL_PARAM_locate_const(params, OSSL_PKEY_PARAM_PUB_KEY);
 
     /* It's ok if neither half is present */
     if (param_priv_key == NULL && param_pub_key == NULL)
@@ -54,7 +55,7 @@ int ossl_dsa_key_fromdata(DSA *dsa, const OSSL_PARAM params[])
 
     return 1;
 
- err:
+err:
     BN_clear_free(priv_key);
     BN_free(pub_key);
     return 0;
@@ -105,20 +106,20 @@ DSA *ossl_dsa_dup(const DSA *dsa, int selection)
 
 #ifndef FIPS_MODULE
     if (!CRYPTO_dup_ex_data(CRYPTO_EX_INDEX_DSA,
-                            &dupkey->ex_data, &dsa->ex_data))
+            &dupkey->ex_data, &dsa->ex_data))
         goto err;
 #endif
 
     return dupkey;
 
- err:
+err:
     DSA_free(dupkey);
     return NULL;
 }
 
 #ifndef FIPS_MODULE
 DSA *ossl_dsa_key_from_pkcs8(const PKCS8_PRIV_KEY_INFO *p8inf,
-                             OSSL_LIB_CTX *libctx, const char *propq)
+    OSSL_LIB_CTX *libctx, const char *propq)
 {
     const unsigned char *p, *pm;
     int pklen, pmlen;
@@ -155,11 +156,11 @@ DSA *ossl_dsa_key_from_pkcs8(const PKCS8_PRIV_KEY_INFO *p8inf,
     }
     /* Calculate public key */
     if ((dsa_pubkey = BN_new()) == NULL) {
-        ERR_raise(ERR_LIB_DSA, ERR_R_MALLOC_FAILURE);
+        ERR_raise(ERR_LIB_DSA, ERR_R_BN_LIB);
         goto dsaerr;
     }
     if ((ctx = BN_CTX_new()) == NULL) {
-        ERR_raise(ERR_LIB_DSA, ERR_R_MALLOC_FAILURE);
+        ERR_raise(ERR_LIB_DSA, ERR_R_BN_LIB);
         goto dsaerr;
     }
 
@@ -170,18 +171,21 @@ DSA *ossl_dsa_key_from_pkcs8(const PKCS8_PRIV_KEY_INFO *p8inf,
         ERR_raise(ERR_LIB_DSA, DSA_R_BN_ERROR);
         goto dsaerr;
     }
-    DSA_set0_key(dsa, dsa_pubkey, dsa_privkey);
+    if (!DSA_set0_key(dsa, dsa_pubkey, dsa_privkey)) {
+        ERR_raise(ERR_LIB_DSA, ERR_R_INTERNAL_ERROR);
+        goto dsaerr;
+    }
 
     goto done;
 
- decerr:
+decerr:
     ERR_raise(ERR_LIB_DSA, DSA_R_DECODE_ERROR);
- dsaerr:
+dsaerr:
     BN_free(dsa_privkey);
     BN_free(dsa_pubkey);
     DSA_free(dsa);
     dsa = NULL;
- done:
+done:
     BN_CTX_free(ctx);
     ASN1_STRING_clear_free(privkey);
     return dsa;

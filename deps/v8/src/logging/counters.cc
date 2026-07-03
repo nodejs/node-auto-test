@@ -9,11 +9,11 @@
 #include "src/base/platform/time.h"
 #include "src/builtins/builtins-definitions.h"
 #include "src/execution/isolate.h"
+#include "src/execution/thread-id.h"
 #include "src/logging/log-inl.h"
 #include "src/logging/log.h"
 
-namespace v8 {
-namespace internal {
+namespace v8::internal {
 
 StatsTable::StatsTable(Counters* counters)
     : lookup_function_(nullptr),
@@ -24,47 +24,26 @@ void StatsTable::SetCounterFunction(CounterLookupCallback f) {
   lookup_function_ = f;
 }
 
-int* StatsCounterBase::FindLocationInStatsTable() const {
-  return counters_->FindLocation(name_);
+namespace {
+std::atomic<int> unused_counter_dump{0};
 }
 
-StatsCounterThreadSafe::StatsCounterThreadSafe(Counters* counters,
-                                               const char* name)
-    : StatsCounterBase(counters, name) {}
+bool StatsCounter::Enabled() { return GetPtr() != &unused_counter_dump; }
 
-void StatsCounterThreadSafe::Set(int Value) {
-  if (ptr_) {
-    base::MutexGuard Guard(&mutex_);
-    SetLoc(ptr_, Value);
-  }
-}
-
-void StatsCounterThreadSafe::Increment() {
-  if (ptr_) {
-    base::MutexGuard Guard(&mutex_);
-    IncrementLoc(ptr_);
-  }
-}
-
-void StatsCounterThreadSafe::Increment(int value) {
-  if (ptr_) {
-    base::MutexGuard Guard(&mutex_);
-    IncrementLoc(ptr_, value);
-  }
-}
-
-void StatsCounterThreadSafe::Decrement() {
-  if (ptr_) {
-    base::MutexGuard Guard(&mutex_);
-    DecrementLoc(ptr_);
-  }
-}
-
-void StatsCounterThreadSafe::Decrement(int value) {
-  if (ptr_) {
-    base::MutexGuard Guard(&mutex_);
-    DecrementLoc(ptr_, value);
-  }
+std::atomic<int>* StatsCounter::SetupPtrFromStatsTable() {
+  // {Init} must have been called.
+  DCHECK_NOT_NULL(counters_);
+  DCHECK_NOT_NULL(name_);
+  int* location = counters_->FindLocation(name_);
+  std::atomic<int>* ptr =
+      location ? base::AsAtomicPtr(location) : &unused_counter_dump;
+#ifdef DEBUG
+  std::atomic<int>* old_ptr = ptr_.exchange(ptr, std::memory_order_release);
+  DCHECK_IMPLIES(old_ptr, old_ptr == ptr);
+#else
+  ptr_.store(ptr, std::memory_order_release);
+#endif
+  return ptr;
 }
 
 void Histogram::AddSample(int sample) {
@@ -103,226 +82,222 @@ void TimedHistogram::RecordAbandon(base::ElapsedTimer* timer,
     AddSample(static_cast<int>(sample));
   }
   if (isolate != nullptr) {
-    Logger::CallEventLogger(isolate, name(), v8::LogEventStatus::kEnd, true);
+    V8FileLogger::CallEventLogger(isolate, name(), v8::LogEventStatus::kEnd,
+                                  true);
   }
 }
 
 #ifdef DEBUG
 bool TimedHistogram::ToggleRunningState(bool expect_to_run) const {
-  static thread_local base::LazyInstance<
-      std::unordered_map<const TimedHistogram*, bool>>::type active_timer =
-      LAZY_INSTANCE_INITIALIZER;
-  bool is_running = (*active_timer.Pointer())[this];
+#if __clang__
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wexit-time-destructors"
+#endif
+  static thread_local std::unordered_map<const TimedHistogram*, bool>
+      active_timer;
+#if __clang__
+#pragma clang diagnostic pop
+#endif
+  bool is_running = active_timer[this];
   DCHECK_NE(is_running, expect_to_run);
-  (*active_timer.Pointer())[this] = !is_running;
+  active_timer[this] = !is_running;
   return true;
 }
 #endif
 
-Counters::Counters(Isolate* isolate)
-    :
-#define SC(name, caption) name##_(this, "c:" #caption),
-      STATS_COUNTER_TS_LIST(SC)
-#undef SC
-#ifdef V8_RUNTIME_CALL_STATS
-          runtime_call_stats_(RuntimeCallStats::kMainIsolateThread),
-      worker_thread_runtime_call_stats_(),
-#endif
-      isolate_(isolate),
-      stats_table_(this) {
-  static const struct {
-    Histogram Counters::*member;
-    const char* caption;
-    int min;
-    int max;
-    int num_buckets;
-  } kHistograms[] = {
-#define HR(name, caption, min, max, num_buckets) \
-  {&Counters::name##_, #caption, min, max, num_buckets},
-      HISTOGRAM_RANGE_LIST(HR)
-#undef HR
-  };
-  for (const auto& histogram : kHistograms) {
-    this->*histogram.member =
-        Histogram(histogram.caption, histogram.min, histogram.max,
-                  histogram.num_buckets, this);
-  }
+namespace {
+static constexpr int DefaultTimedHistogramNumBuckets = 50;
+}
 
-  const int DefaultTimedHistogramNumBuckets = 50;
+void CountersInitializer::Visit(Histogram* histogram, const char* caption,
+                                int min, int max, int num_buckets) {
+  histogram->Initialize(caption, min, max, num_buckets, counters());
+}
 
-  static const struct {
-    NestedTimedHistogram Counters::*member;
-    const char* caption;
-    int max;
-    TimedHistogramResolution res;
-  } kNestedTimedHistograms[] = {
-#define HT(name, caption, max, res) \
-  {&Counters::name##_, #caption, max, TimedHistogramResolution::res},
-      NESTED_TIMED_HISTOGRAM_LIST(HT) NESTED_TIMED_HISTOGRAM_LIST_SLOW(HT)
-#undef HT
-  };
-  for (const auto& timer : kNestedTimedHistograms) {
-    this->*timer.member =
-        NestedTimedHistogram(timer.caption, 0, timer.max, timer.res,
-                             DefaultTimedHistogramNumBuckets, this);
-  }
+void CountersInitializer::Visit(PercentageHistogram* histogram,
+                                const char* caption) {
+  histogram->Initialize(caption, 0, 101, 100, counters());
+}
 
-  static const struct {
-    TimedHistogram Counters::*member;
-    const char* caption;
-    int max;
-    TimedHistogramResolution res;
-  } kTimedHistograms[] = {
-#define HT(name, caption, max, res) \
-  {&Counters::name##_, #caption, max, TimedHistogramResolution::res},
-      TIMED_HISTOGRAM_LIST(HT)
-#undef HT
-  };
-  for (const auto& timer : kTimedHistograms) {
-    this->*timer.member = TimedHistogram(timer.caption, 0, timer.max, timer.res,
-                                         DefaultTimedHistogramNumBuckets, this);
-  }
-
-  static const struct {
-    AggregatableHistogramTimer Counters::*member;
-    const char* caption;
-  } kAggregatableHistogramTimers[] = {
-#define AHT(name, caption) {&Counters::name##_, #caption},
-      AGGREGATABLE_HISTOGRAM_TIMER_LIST(AHT)
-#undef AHT
-  };
-  for (const auto& aht : kAggregatableHistogramTimers) {
-    this->*aht.member = AggregatableHistogramTimer(
-        aht.caption, 0, 10000000, DefaultTimedHistogramNumBuckets, this);
-  }
-
-  static const struct {
-    Histogram Counters::*member;
-    const char* caption;
-  } kHistogramPercentages[] = {
-#define HP(name, caption) {&Counters::name##_, #caption},
-      HISTOGRAM_PERCENTAGE_LIST(HP)
-#undef HP
-  };
-  for (const auto& percentage : kHistogramPercentages) {
-    this->*percentage.member = Histogram(percentage.caption, 0, 101, 100, this);
-  }
-
+void CountersInitializer::Visit(LegacyMemoryHistogram* histogram,
+                                const char* caption) {
   // Exponential histogram assigns bucket limits to points
   // p[1], p[2], ... p[n] such that p[i+1] / p[i] = constant.
   // The constant factor is equal to the n-th root of (high / low),
   // where the n is the number of buckets, the low is the lower limit,
   // the high is the upper limit.
   // For n = 50, low = 1000, high = 500000: the factor = 1.13.
-  static const struct {
-    Histogram Counters::*member;
-    const char* caption;
-  } kLegacyMemoryHistograms[] = {
-#define HM(name, caption) {&Counters::name##_, #caption},
-      HISTOGRAM_LEGACY_MEMORY_LIST(HM)
-#undef HM
-  };
-  for (const auto& histogram : kLegacyMemoryHistograms) {
-    this->*histogram.member =
-        Histogram(histogram.caption, 1000, 500000, 50, this);
-  }
+  histogram->Initialize(caption, 1000, 500000, 50, counters());
+}
 
-  // clang-format off
-  static const struct {
-    StatsCounter Counters::*member;
-    const char* caption;
-  } kStatsCounters[] = {
-#define SC(name, caption) {&Counters::name##_, "c:" #caption},
-  STATS_COUNTER_LIST_1(SC)
-  STATS_COUNTER_LIST_2(SC)
-  STATS_COUNTER_NATIVE_CODE_LIST(SC)
-#undef SC
-#define SC(name)                                             \
-  {&Counters::count_of_##name##_, "c:" "V8.CountOf_" #name}, \
-  {&Counters::size_of_##name##_, "c:" "V8.SizeOf_" #name},
-      INSTANCE_TYPE_LIST(SC)
-#undef SC
-#define SC(name)                            \
-  {&Counters::count_of_CODE_TYPE_##name##_, \
-    "c:" "V8.CountOf_CODE_TYPE-" #name},     \
-  {&Counters::size_of_CODE_TYPE_##name##_,  \
-    "c:" "V8.SizeOf_CODE_TYPE-" #name},
-      CODE_KIND_LIST(SC)
-#undef SC
-#define SC(name)                              \
-  {&Counters::count_of_FIXED_ARRAY_##name##_, \
-    "c:" "V8.CountOf_FIXED_ARRAY-" #name},     \
-  {&Counters::size_of_FIXED_ARRAY_##name##_,  \
-    "c:" "V8.SizeOf_FIXED_ARRAY-" #name},
-      FIXED_ARRAY_SUB_INSTANCE_TYPE_LIST(SC)
-#undef SC
-  };
-  // clang-format on
-  for (const auto& counter : kStatsCounters) {
-    this->*counter.member = StatsCounter(this, counter.caption);
-  }
+void CountersInitializer::Visit(TimedHistogram* histogram, const char* caption,
+                                int max, TimedHistogramResolution res) {
+  histogram->Initialize(caption, 0, max, res, DefaultTimedHistogramNumBuckets,
+                        counters());
+}
+
+void CountersInitializer::Visit(NestedTimedHistogram* histogram,
+                                const char* caption, int max,
+                                TimedHistogramResolution res) {
+  histogram->Initialize(caption, 0, max, res, DefaultTimedHistogramNumBuckets,
+                        counters());
+}
+
+void CountersInitializer::Visit(AggregatableHistogramTimer* histogram,
+                                const char* caption) {
+  histogram->Initialize(caption, 0, 10000000, DefaultTimedHistogramNumBuckets,
+                        counters());
+}
+
+void CountersInitializer::Visit(StatsCounter* counter, const char* caption) {
+  counter->Initialize(caption, counters());
+}
+
+Counters::Counters(Isolate* isolate)
+    :
+#ifdef V8_RUNTIME_CALL_STATS
+      runtime_call_stats_(RuntimeCallStats::kMainIsolateThread),
+      worker_thread_runtime_call_stats_(),
+#endif
+      isolate_(isolate),
+      stats_table_(this) {
+  CountersInitializer init(this);
+  init.Start();
+}
+
+void StatsCounterResetter::VisitStatsCounter(StatsCounter* counter,
+                                             const char* caption) {
+  counter->Reset();
 }
 
 void Counters::ResetCounterFunction(CounterLookupCallback f) {
   stats_table_.SetCounterFunction(f);
+  StatsCounterResetter resetter(this);
+  resetter.Start();
+}
 
-#define SC(name, caption) name##_.Reset();
-  STATS_COUNTER_LIST_1(SC)
-  STATS_COUNTER_LIST_2(SC)
-  STATS_COUNTER_TS_LIST(SC)
-  STATS_COUNTER_NATIVE_CODE_LIST(SC)
-#undef SC
-
-#define SC(name)              \
-  count_of_##name##_.Reset(); \
-  size_of_##name##_.Reset();
-  INSTANCE_TYPE_LIST(SC)
-#undef SC
-
-#define SC(name)                        \
-  count_of_CODE_TYPE_##name##_.Reset(); \
-  size_of_CODE_TYPE_##name##_.Reset();
-  CODE_KIND_LIST(SC)
-#undef SC
-
-#define SC(name)                          \
-  count_of_FIXED_ARRAY_##name##_.Reset(); \
-  size_of_FIXED_ARRAY_##name##_.Reset();
-  FIXED_ARRAY_SUB_INSTANCE_TYPE_LIST(SC)
-#undef SC
+void HistogramResetter::VisitHistogram(Histogram* histogram,
+                                       const char* caption) {
+  histogram->Reset();
 }
 
 void Counters::ResetCreateHistogramFunction(CreateHistogramCallback f) {
   stats_table_.SetCreateHistogramFunction(f);
+  HistogramResetter resetter(this);
+  resetter.Start();
+}
 
-#define HR(name, caption, min, max, num_buckets) name##_.Reset();
+void CountersVisitor::Start() {
+  VisitStatsCounters();
+  VisitHistograms();
+}
+
+void CountersVisitor::VisitHistograms() {
+#define HR(name, caption, min, max, num_buckets) \
+  Visit(&counters()->name##_, #caption, min, max, num_buckets);
   HISTOGRAM_RANGE_LIST(HR)
 #undef HR
 
-#define HT(name, caption, max, res) name##_.Reset();
+#if V8_ENABLE_DRUMBRAKE
+#define HR(name, caption, min, max, num_buckets) \
+  Visit(&counters()->name##_, #caption, min, max, num_buckets);
+  HISTOGRAM_RANGE_LIST_SLOW(HR)
+#undef HR
+#endif  // V8_ENABLE_DRUMBRAKE
+
+#define HR(name, caption) Visit(&counters()->name##_, #caption);
+  HISTOGRAM_PERCENTAGE_LIST(HR)
+#undef HR
+
+#define HR(name, caption) Visit(&counters()->name##_, #caption);
+  HISTOGRAM_LEGACY_MEMORY_LIST(HR)
+#undef HR
+
+#define HT(name, caption, max, res) \
+  Visit(&counters()->name##_, #caption, max, TimedHistogramResolution::res);
   NESTED_TIMED_HISTOGRAM_LIST(HT)
 #undef HT
 
-#define HT(name, caption, max, res) name##_.Reset(FLAG_slow_histograms);
+#define HT(name, caption, max, res) \
+  Visit(&counters()->name##_, #caption, max, TimedHistogramResolution::res);
   NESTED_TIMED_HISTOGRAM_LIST_SLOW(HT)
 #undef HT
 
-#define HT(name, caption, max, res) name##_.Reset();
+#define HT(name, caption, max, res) \
+  Visit(&counters()->name##_, #caption, max, TimedHistogramResolution::res);
   TIMED_HISTOGRAM_LIST(HT)
 #undef HT
 
-#define AHT(name, caption) name##_.Reset();
+#define AHT(name, caption) Visit(&counters()->name##_, #caption);
   AGGREGATABLE_HISTOGRAM_TIMER_LIST(AHT)
 #undef AHT
-
-#define HP(name, caption) name##_.Reset();
-  HISTOGRAM_PERCENTAGE_LIST(HP)
-#undef HP
-
-#define HM(name, caption) name##_.Reset();
-  HISTOGRAM_LEGACY_MEMORY_LIST(HM)
-#undef HM
 }
 
-}  // namespace internal
-}  // namespace v8
+void CountersVisitor::VisitStatsCounters() {
+#define SC(name, caption) Visit(&counters()->name##_, "c:" #caption);
+  STATS_COUNTER_LIST(SC)
+  STATS_COUNTER_NATIVE_CODE_LIST(SC)
+#undef SC
+}
+
+void CountersVisitor::Visit(Histogram* histogram, const char* caption, int min,
+                            int max, int num_buckets) {
+  VisitHistogram(histogram, caption);
+}
+void CountersVisitor::Visit(TimedHistogram* histogram, const char* caption,
+                            int max, TimedHistogramResolution res) {
+  VisitHistogram(histogram, caption);
+}
+void CountersVisitor::Visit(NestedTimedHistogram* histogram,
+                            const char* caption, int max,
+                            TimedHistogramResolution res) {
+  VisitHistogram(histogram, caption);
+}
+
+void CountersVisitor::Visit(AggregatableHistogramTimer* histogram,
+                            const char* caption) {
+  VisitHistogram(histogram, caption);
+}
+
+void CountersVisitor::Visit(PercentageHistogram* histogram,
+                            const char* caption) {
+  VisitHistogram(histogram, caption);
+}
+
+void CountersVisitor::Visit(LegacyMemoryHistogram* histogram,
+                            const char* caption) {
+  VisitHistogram(histogram, caption);
+}
+
+void CountersVisitor::Visit(StatsCounter* counter, const char* caption) {
+  VisitStatsCounter(counter, caption);
+}
+
+void DelayedCounterUpdates::PublishImpl(Isolate* isolate) {
+  std::vector<AnyUpdate> updates;
+  {
+    base::MutexGuard mutex_guard{&mutex_};
+    updates.swap(outstanding_updates_);
+    has_updates_.store(false, std::memory_order_relaxed);
+  }
+  for (const auto& update : updates) {
+    if (const HistogramUpdate* histogram_update =
+            std::get_if<HistogramUpdate>(&update)) {
+      Histogram* histogram = (isolate->counters()->*histogram_update->fn)();
+      histogram->AddSample(histogram_update->sample);
+    } else if (const TimedHistogramUpdate* timed_histogram_update =
+                   std::get_if<TimedHistogramUpdate>(&update)) {
+      TimedHistogram* histogram =
+          (isolate->counters()->*timed_histogram_update->fn)();
+      histogram->AddTimedSample(timed_histogram_update->sample);
+    } else {
+      StatsCounterUpdate stats_counter_update =
+          std::get<StatsCounterUpdate>(update);
+      StatsCounter* stats_counter =
+          (isolate->counters()->*stats_counter_update.fn)();
+      stats_counter->Increment(stats_counter_update.increment);
+    }
+  }
+}
+
+}  // namespace v8::internal

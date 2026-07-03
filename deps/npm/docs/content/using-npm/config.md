@@ -1,73 +1,72 @@
 ---
-title: config
+title: Config
 section: 7
-description: More than you probably want to know about npm configuration
+description: About npm configuration
 ---
 
 ### Description
+
+This article details npm configuration in general.
+To learn about the `config` command, see [`npm config`](/commands/npm-config).
 
 npm gets its configuration values from the following sources, sorted by priority:
 
 #### Command Line Flags
 
-Putting `--foo bar` on the command line sets the `foo` configuration
-parameter to `"bar"`.  A `--` argument tells the cli parser to stop
-reading flags.  Using `--flag` without specifying any value will set
-the value to `true`.
+Putting `--foo bar` on the command line sets the `foo` configuration parameter to `"bar"`.
+A `--` argument tells the cli parser to stop reading flags.
+Using `--flag` without specifying any value will set the value to `true`.
 
-Example: `--flag1 --flag2` will set both configuration parameters
-to `true`, while `--flag1 --flag2 bar` will set `flag1` to `true`,
-and `flag2` to `bar`.  Finally, `--flag1 --flag2 -- bar` will set
-both configuration parameters to `true`, and the `bar` is taken
-as a command argument.
+Example: `--flag1 --flag2` will set both configuration parameters to `true`, while `--flag1 --flag2 bar` will set `flag1` to `true`, and `flag2` to `bar`.
+Finally, `--flag1 --flag2 -- bar` will set both configuration parameters to `true`, and the `bar` is taken as a command argument.
+
+**Common examples:**
+
+* `npm install --prefix /path/to/dir` - Runs npm commands in a different directory without changing the current working directory
+* `npm install --global` - Installs packages globally (shorthand: `-g`)
+* `npm install --save-dev` - Saves to devDependencies (shorthand: `-D`)
+
+Any configuration option documented in the [Config Settings](#config-settings) section below can be set via command line flags using `--option-name value` syntax.
 
 #### Environment Variables
 
-Any environment variables that start with `npm_config_` will be
-interpreted as a configuration parameter.  For example, putting
-`npm_config_foo=bar` in your environment will set the `foo`
-configuration parameter to `bar`.  Any environment configurations that
-are not given a value will be given the value of `true`.  Config
-values are case-insensitive, so `NPM_CONFIG_FOO=bar` will work the
-same. However, please note that inside [`scripts`](/using-npm/scripts)
-npm will set its own environment variables and Node will prefer
-those lowercase versions over any uppercase ones that you might set.
+Any environment variables that start with `npm_config_` will be interpreted as a configuration parameter.
+For example, putting `npm_config_foo=bar` in your environment will set the `foo` configuration parameter to `bar`.
+Any environment configurations that are not given a value will be given the value of `true`.
+Config values are case-insensitive, so `NPM_CONFIG_FOO=bar` will work the same.
+However, please note that inside [`scripts`](/using-npm/scripts) npm will set its own environment variables and Node will prefer those lowercase versions over any uppercase ones that you might set.
 For details see [this issue](https://github.com/npm/npm/issues/14528).
 
-Notice that you need to use underscores instead of dashes, so `--allow-same-version`
-would become `npm_config_allow_same_version=true`.
+Notice that you need to use underscores instead of dashes, so `--allow-same-version` would become `npm_config_allow_same_version=true`.
+
+**Important:** When defining custom configuration keys in `.npmrc` files, use hyphens instead of underscores (e.g., `custom-key=value`). This ensures they can be overridden by environment variables, since npm automatically converts underscores to hyphens when reading environment variables. Keys with underscores in `.npmrc` files cannot be overridden via environment variables.
 
 #### npmrc Files
 
 The four relevant files are:
 
 * per-project configuration file (`/path/to/my/project/.npmrc`)
-* per-user configuration file (defaults to `$HOME/.npmrc`; configurable via CLI
-  option `--userconfig` or environment variable `$NPM_CONFIG_USERCONFIG`)
-* global configuration file (defaults to `$PREFIX/etc/npmrc`; configurable via
-  CLI option `--globalconfig` or environment variable `$NPM_CONFIG_GLOBALCONFIG`)
+* per-user configuration file (defaults to `$HOME/.npmrc`; configurable via CLI option `--userconfig` or environment variable `$NPM_CONFIG_USERCONFIG`)
+* global configuration file (defaults to `$PREFIX/etc/npmrc`; configurable via CLI option `--globalconfig` or environment variable `$NPM_CONFIG_GLOBALCONFIG`)
 * npm's built-in configuration file (`/path/to/npm/npmrc`)
 
 See [npmrc](/configuring-npm/npmrc) for more details.
 
 #### Default Configs
 
-Run `npm config ls -l` to see a set of configuration parameters that are
-internal to npm, and are defaults if nothing else is specified.
+Run `npm config ls -l` to see a set of configuration parameters that are internal to npm, and are defaults if nothing else is specified.
 
 ### Shorthands and Other CLI Niceties
 
 The following shorthands are parsed on the command-line:
 
-<!-- AUTOGENERATED CONFIG SHORTHANDS START -->
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
 * `-a`: `--all`
 * `--enjoy-by`: `--before`
 * `-c`: `--call`
 * `--desc`: `--description`
 * `-f`: `--force`
 * `-g`: `--global`
+* `--iwr`: `--include-workspace-root`
 * `-L`: `--location`
 * `-d`: `--loglevel info`
 * `-s`: `--loglevel silent`
@@ -102,13 +101,8 @@ The following shorthands are parsed on the command-line:
 * `--ws`: `--workspaces`
 * `-y`: `--yes`
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
-<!-- AUTOGENERATED CONFIG SHORTHANDS END -->
-
-If the specified configuration param resolves unambiguously to a known
-configuration parameter, then it is expanded to that configuration
-parameter.  For example:
+If the specified configuration param resolves unambiguously to a known configuration parameter, then it is expanded to that configuration parameter.
+For example:
 
 ```bash
 npm ls --par
@@ -116,10 +110,8 @@ npm ls --par
 npm ls --parseable
 ```
 
-If multiple single-character shorthands are strung together, and the
-resulting combination is unambiguously not some other configuration
-param, then it is expanded to its various component pieces.  For
-example:
+If multiple single-character shorthands are strung together, and the resulting combination is unambiguously not some other configuration param, then it is expanded to its various component pieces.
+For example:
 
 ```bash
 npm ls -gpld
@@ -129,53 +121,125 @@ npm ls --global --parseable --long --loglevel info
 
 ### Config Settings
 
-<!-- AUTOGENERATED CONFIG DESCRIPTIONS START -->
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
 #### `_auth`
 
 * Default: null
 * Type: null or String
 
 A basic-auth string to use when authenticating against the npm registry.
+This will ONLY be used to authenticate against the npm registry. For other
+registries you will need to scope it like "//other-registry.tld/:_auth"
 
 Warning: This should generally not be set via a command-line option. It is
 safer to use a registry-provided authentication bearer token stored in the
 ~/.npmrc file by running `npm login`.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `access`
 
-* Default: 'restricted' for scoped packages, 'public' for unscoped packages
-* Type: null, "restricted", or "public"
+* Default: 'public' for new packages, existing packages it will not change the
+  current level
+* Type: null, "restricted", "public", or "private"
 
-When publishing scoped packages, the access level defaults to `restricted`.
-If you want your scoped package to be publicly viewable (and installable)
-set `--access=public`. The only valid values for `access` are `public` and
-`restricted`. Unscoped packages _always_ have an access level of `public`.
+If you do not want your scoped package to be publicly viewable (and
+installable) set `--access=restricted`.
 
-Note: Using the `--access` flag on the `npm publish` command will only set
-the package access level on the initial publish of the package. Any
-subsequent `npm publish` commands using the `--access` flag will not have an
-effect to the access level. To make changes to the access level after the
-initial publish use `npm access`.
+Unscoped packages cannot be set to `restricted`.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+Note: This defaults to not changing the current access level for existing
+packages. Specifying a value of `restricted` or `public` during publish will
+change the access for an existing package the same way that `npm access set
+status` would.
+
+The value `private` is an alias for `restricted`.
+
+
 
 #### `all`
 
 * Default: false
 * Type: Boolean
 
-When running `npm outdated` and `npm ls`, setting `--all` will show all
-outdated or installed packages, rather than only those directly depended
-upon by the current project.
+Show or act on all packages, not just the ones your project directly depends
+on. For `npm outdated` and `npm ls` this lists every outdated or installed
+package. For `npm approve-scripts` and `npm deny-scripts` it selects every
+package with pending install scripts.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
+
+#### `allow-directory`
+
+* Default: "all"
+* Type: "all", "none", or "root"
+
+Limits the ability for npm to install dependencies from directories. That
+is, dependencies that point to a directory instead of a version or semver
+range. Please note that this could leave your tree incomplete and some
+packages may not function as intended or designed. Changing this setting
+will not remove dependencies that are already installed.
+
+`all` allows any directories to be installed. `none` prevents any
+directories from being installed. `root` only allows directories defined in
+your project's package.json to be installed. Also allows directory
+dependencies to be used for other commands like `npm view`
+
+
+
+#### `allow-file`
+
+* Default: "all"
+* Type: "all", "none", or "root"
+
+Limits the ability for npm to install dependencies from tarball files. That
+is, dependencies that point to a local tarball file instead of a version or
+semver range. Please note that this could leave your tree incomplete and
+some packages may not function as intended or designed. Changing this
+setting will not remove dependencies that are already installed.
+
+`all` allows any tarball file to be installed. `none` prevents any tarball
+file from being installed. `root` only allows tarball files defined in your
+project's package.json to be installed. Also allows tarball file
+dependencies to be used for other commands like `npm view`
+
+
+
+#### `allow-git`
+
+* Default: "all"
+* Type: "all", "none", or "root"
+
+Limits the ability for npm to fetch dependencies from git references. That
+is, dependencies that point to a git repo instead of a version or semver
+range. Please note that this could leave your tree incomplete and some
+packages may not function as intended or designed. Changing this setting
+will not remove dependencies that are already installed.
+
+`all` allows any git dependencies to be fetched and installed. `none`
+prevents any git dependencies from being fetched and installed. `root` only
+allows git dependencies defined in your project's package.json to be fetched
+and installed. Also allows git dependencies to be fetched for other commands
+like `npm view`
+
+
+
+#### `allow-remote`
+
+* Default: "all"
+* Type: "all", "none", or "root"
+
+Limits the ability for npm to fetch dependencies from urls. That is,
+dependencies that point to a tarball url instead of a version or semver
+range. Please note that this could leave your tree incomplete and some
+packages may not function as intended or designed. Changing this setting
+will not remove dependencies that are already installed.
+
+`all` allows any url to be installed. `none` prevents any url from being
+installed. `root` only allows urls defined in your project's package.json to
+be installed. Also allows url dependencies to be used for other commands
+like `npm view`
+
+
 
 #### `allow-same-version`
 
@@ -185,8 +249,52 @@ upon by the current project.
 Prevents throwing an error when `npm version` is used to set the new version
 to the same value as the current version.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
+
+#### `allow-scripts`
+
+* Default: ""
+* Type: String (can be set multiple times)
+
+Comma-separated list of packages whose install-time lifecycle scripts
+(`preinstall`, `install`, `postinstall`, and `prepare` for non-registry
+dependencies) are allowed to run.
+
+This setting is intended for one-off and global contexts: `npm exec`, `npx`,
+and `npm install -g`, where no project `package.json` is involved. For
+team-wide policy in a project, use the `allowScripts` field in
+`package.json` (which also supports explicit denials), or configure it in
+`.npmrc`. Passing `--allow-scripts` on the command line during a
+project-scoped `npm install`, `ci`, `update`, or `rebuild` is an error.
+
+Each name is matched against a dependency's resolved identity, not against
+the package's self-reported name. `--ignore-scripts` and
+`--dangerously-allow-all-scripts` both override this setting.
+
+
+
+#### `allow-scripts-pending`
+
+* Default: false
+* Type: Boolean
+
+List packages with install scripts that are not yet covered by the
+`allowScripts` policy, without modifying `package.json`. Only meaningful for
+`npm approve-scripts`.
+
+
+
+#### `allow-scripts-pin`
+
+* Default: true
+* Type: Boolean
+
+Write pinned (`pkg@version`) entries when approving install scripts. Set to
+`false` to write name-only entries that allow any version. Has no effect on
+`npm deny-scripts`, which always writes name-only entries regardless of this
+setting.
+
+
 
 #### `audit`
 
@@ -198,8 +306,7 @@ default registry and all registries configured for scopes. See the
 documentation for [`npm audit`](/commands/npm-audit) for details on what is
 submitted.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `audit-level`
 
@@ -209,8 +316,17 @@ submitted.
 The minimum level of vulnerability for `npm audit` to exit with a non-zero
 exit code.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
+
+#### `auth-type`
+
+* Default: "web"
+* Type: "legacy" or "web"
+
+What authentication strategy to use with `login`. Note that if an `otp`
+config is given, this value will always be set to `legacy`.
+
+
 
 #### `before`
 
@@ -218,17 +334,25 @@ exit code.
 * Type: null or Date
 
 If passed to `npm install`, will rebuild the npm tree such that only
-versions that were available **on or before** the `--before` time get
-installed. If there's no versions available for the current set of direct
-dependencies, the command will error.
+versions that were available **on or before** the given date are installed.
+If there are no versions available for the current set of dependencies, the
+command will error.
 
 If the requested version is a `dist-tag` and the given tag does not pass the
 `--before` filter, the most recent version less than or equal to that tag
 will be used. For example, `foo@latest` might install `foo@1.2` even though
 `latest` is `2.0`.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+If `before` and `min-release-age` are both set in the same source, `before`
+wins (an explicit absolute date overrides a relative window). Across
+sources, the standard precedence applies (cli > env > project > user >
+global), so a higher-priority source can always relax or override a
+lower-priority one.
+
+Packages whose names match `min-release-age-exclude` are exempt from this
+filter.
+
+
 
 #### `bin-links`
 
@@ -242,12 +366,11 @@ Set to false to have it not do this. This can be used to work around the
 fact that some file systems don't support symlinks, even on ostensibly Unix
 systems.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `browser`
 
-* Default: OS X: `"open"`, Windows: `"start"`, Others: `"xdg-open"`
+* Default: macOS: `"open"`, Windows: `"start"`, Others: `"xdg-open"`
 * Type: null, Boolean, or String
 
 The browser that is called by npm commands to open websites.
@@ -257,8 +380,18 @@ terminal.
 
 Set to `true` to use default system URL opener.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
+
+#### `bypass-2fa`
+
+* Default: false
+* Type: Boolean
+
+When creating a Granular Access Token with `npm token create`, setting this
+to true will allow the token to bypass two-factor authentication. This is
+useful for automation and CI/CD workflows.
+
+
 
 #### `ca`
 
@@ -286,19 +419,16 @@ ca[]="..."
 
 See also the `strict-ssl` config.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `cache`
 
 * Default: Windows: `%LocalAppData%\npm-cache`, Posix: `~/.npm`
 * Type: Path
 
-The location of npm's cache directory. See [`npm
-cache`](/commands/npm-cache)
+The location of npm's cache directory.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `cafile`
 
@@ -309,8 +439,7 @@ A path to a file containing one or multiple Certificate Authority signing
 certificates. Similar to the `ca` setting, but allows for multiple CA's, as
 well as for the CA information to be stored in a file on disk.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `call`
 
@@ -325,40 +454,6 @@ npm exec --package yo --package generator-node --call "yo node"
 ```
 
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
-
-#### `cert`
-
-* Default: null
-* Type: null or String
-
-A client certificate to pass when accessing the registry. Values should be
-in PEM format (Windows calls it "Base-64 encoded X.509 (.CER)") with
-newlines replaced by the string "\n". For example:
-
-```ini
-cert="-----BEGIN CERTIFICATE-----\nXXXX\nXXXX\n-----END CERTIFICATE-----"
-```
-
-It is _not_ the path to a certificate file (and there is no "certfile"
-option).
-
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
-
-#### `ci-name`
-
-* Default: The name of the current CI system, or `null` when not on a known CI
-  platform.
-* Type: null or String
-
-The name of a continuous integration system. If not set explicitly, npm will
-detect the current CI environment using the
-[`@npmcli/ci-detect`](http://npm.im/@npmcli/ci-detect) module.
-
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
 
 #### `cidr`
 
@@ -368,8 +463,7 @@ detect the current CI environment using the
 This is a list of CIDR address to be used when configuring limited access
 tokens with the `npm token create` command.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `color`
 
@@ -379,8 +473,7 @@ tokens with the `npm token create` command.
 If false, never shows colors. If `"always"` then always shows colors. If
 true, then only prints color codes for tty file descriptors.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `commit-hooks`
 
@@ -389,12 +482,33 @@ true, then only prints color codes for tty file descriptors.
 
 Run git commit hooks when using the `npm version` command.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
+
+#### `cpu`
+
+* Default: null
+* Type: null or String
+
+Override CPU architecture of native modules to install. Acceptable values
+are same as `cpu` field of package.json, which comes from `process.arch`.
+
+
+
+#### `dangerously-allow-all-scripts`
+
+* Default: false
+* Type: Boolean
+
+If `true`, bypass the `allowScripts` policy entirely and run every
+dependency install script regardless of whether it was approved or denied.
+Intended as a migration escape hatch only; its use is strongly discouraged.
+`--ignore-scripts` still takes precedence over this setting.
+
+
 
 #### `depth`
 
-* Default: `Infinity` if `--all` is set, otherwise `1`
+* Default: `Infinity` if `--all` is set; otherwise, `0`
 * Type: null or Number
 
 The depth to go when recursing packages for `npm ls`.
@@ -402,8 +516,7 @@ The depth to go when recursing packages for `npm ls`.
 If not set, `npm ls` will show only the immediate dependencies of the root
 project. If `--all` is set, then npm will show all dependencies by default.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `description`
 
@@ -412,8 +525,7 @@ project. If `--all` is set, then npm will show all dependencies by default.
 
 Show the description in `npm search`
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `diff`
 
@@ -422,8 +534,7 @@ Show the description in `npm search`
 
 Define arguments to compare in `npm diff`.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `diff-dst-prefix`
 
@@ -432,8 +543,7 @@ Define arguments to compare in `npm diff`.
 
 Destination prefix to be used in `npm diff` output.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `diff-ignore-all-space`
 
@@ -442,8 +552,7 @@ Destination prefix to be used in `npm diff` output.
 
 Ignore whitespace when comparing lines in `npm diff`.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `diff-name-only`
 
@@ -452,8 +561,7 @@ Ignore whitespace when comparing lines in `npm diff`.
 
 Prints only filenames when using `npm diff`.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `diff-no-prefix`
 
@@ -465,8 +573,7 @@ Do not show any source or destination prefix in `npm diff` output.
 Note: this causes `npm diff` to ignore the `--diff-src-prefix` and
 `--diff-dst-prefix` configs.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `diff-src-prefix`
 
@@ -475,8 +582,7 @@ Note: this causes `npm diff` to ignore the `--diff-src-prefix` and
 
 Source prefix to be used in `npm diff` output.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `diff-text`
 
@@ -485,8 +591,7 @@ Source prefix to be used in `npm diff` output.
 
 Treat all files as text in `npm diff`.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `diff-unified`
 
@@ -495,8 +600,7 @@ Treat all files as text in `npm diff`.
 
 The number of lines of context to print in `npm diff`.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `dry-run`
 
@@ -511,19 +615,17 @@ commands that modify your local installation, eg, `install`, `update`,
 Note: This is NOT honored by other network related commands, eg `dist-tags`,
 `owner`, etc.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `editor`
 
-* Default: The EDITOR or VISUAL environment variables, or 'notepad.exe' on
-  Windows, or 'vim' on Unix systems
+* Default: The EDITOR or VISUAL environment variables, or
+  '%SYSTEMROOT%\notepad.exe' on Windows, or 'vi' on Unix systems
 * Type: String
 
 The command to run for `npm edit` and `npm config edit`.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `engine-strict`
 
@@ -536,8 +638,37 @@ Node.js version.
 
 This can be overridden by setting the `--force` flag.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
+
+#### `expect-result-count`
+
+* Default: null
+* Type: null or Number
+
+Tells to expect a specific number of results from the command.
+
+This config cannot be used with: `expect-results`
+
+#### `expect-results`
+
+* Default: null
+* Type: null or Boolean
+
+Tells npm whether or not to expect results from the command. Can be either
+true (expect some results) or false (expect no results).
+
+This config cannot be used with: `expect-result-count`
+
+#### `expires`
+
+* Default: null
+* Type: null or Number
+
+When creating a Granular Access Token with `npm token create`, this sets the
+expiration in days. If not specified, the server will determine the default
+expiration.
+
+
 
 #### `fetch-retries`
 
@@ -550,8 +681,7 @@ from the registry.
 npm will retry idempotent read requests to the registry in the case of
 network failures or 5xx HTTP errors.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `fetch-retry-factor`
 
@@ -560,8 +690,7 @@ network failures or 5xx HTTP errors.
 
 The "factor" config for the `retry` module to use when fetching packages.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `fetch-retry-maxtimeout`
 
@@ -571,8 +700,7 @@ The "factor" config for the `retry` module to use when fetching packages.
 The "maxTimeout" config for the `retry` module to use when fetching
 packages.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `fetch-retry-mintimeout`
 
@@ -582,8 +710,7 @@ packages.
 The "minTimeout" config for the `retry` module to use when fetching
 packages.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `fetch-timeout`
 
@@ -592,8 +719,7 @@ packages.
 
 The maximum amount of time to wait for HTTP requests to complete.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `force`
 
@@ -616,16 +742,17 @@ mistakes, unnecessary performance degradation, and malicious input.
 * Allow conflicting peerDependencies to be installed in the root project.
 * Implicitly set `--yes` during `npm init`.
 * Allow clobbering existing values in `npm pkg`
+* Allow unpublishing of entire packages (not just a single version).
 
 If you don't have a clear idea of what you want to do, it is strongly
 recommended that you do not use this option!
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `foreground-scripts`
 
-* Default: false
+* Default: `false` unless when using `npm pack` or `npm publish` where it
+  defaults to `true`
 * Type: Boolean
 
 Run all build scripts (ie, `preinstall`, `install`, and `postinstall`)
@@ -635,8 +762,7 @@ input, output, and error with the main npm process.
 Note that this will generally make installs run slower, and be much noisier,
 but can be useful for debugging.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `format-package-lock`
 
@@ -646,8 +772,7 @@ but can be useful for debugging.
 Format `package-lock.json` or `npm-shrinkwrap.json` as a human readable
 file.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `fund`
 
@@ -658,8 +783,7 @@ When "true" displays the message at the end of each `npm install`
 acknowledging the number of dependencies looking for funding. See [`npm
 fund`](/commands/npm-fund) for details.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `git`
 
@@ -669,18 +793,17 @@ fund`](/commands/npm-fund) for details.
 The command to use for git commands. If git is installed on the computer,
 but is not in the `PATH`, then set this to the full path to the git binary.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `git-tag-version`
 
 * Default: true
 * Type: Boolean
 
-Tag the commit when using the `npm version` command.
+Tag the commit when using the `npm version` command. Setting this to false
+results in no commit being made at all.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `global`
 
@@ -696,23 +819,7 @@ folder instead of the current working directory. See
 * bin files are linked to `{prefix}/bin`
 * man pages are linked to `{prefix}/share/man`
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
 
-#### `global-style`
-
-* Default: false
-* Type: Boolean
-
-Causes npm to install the package into your local `node_modules` folder with
-the same layout it uses with the global `node_modules` folder. Only your
-direct dependencies will show in `node_modules` and everything they depend
-on will be flattened in their `node_modules` folders. This obviously will
-eliminate some deduping. If used with `legacy-bundling`, `legacy-bundling`
-will be preferred.
-
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
 
 #### `globalconfig`
 
@@ -722,8 +829,7 @@ will be preferred.
 
 The config file to read for global config options.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `heading`
 
@@ -732,8 +838,7 @@ The config file to read for global config options.
 
 The string that starts all the debugging log output.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `https-proxy`
 
@@ -745,23 +850,21 @@ A proxy to use for outgoing https requests. If the `HTTPS_PROXY` or
 proxy settings will be honored by the underlying `make-fetch-happen`
 library.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `if-present`
 
 * Default: false
 * Type: Boolean
 
-If true, npm will not exit with an error code when `run-script` is invoked
-for a script that isn't defined in the `scripts` section of `package.json`.
-This option can be used when it's desirable to optionally run a script when
-it's present and fail if the script fails. This is useful, for example, when
+If true, npm will not exit with an error code when `run` is invoked for a
+script that isn't defined in the `scripts` section of `package.json`. This
+option can be used when it's desirable to optionally run a script when it's
+present and fail if the script fails. This is useful, for example, when
 running scripts that may only apply for some builds in an otherwise generic
 CI setup.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+This value is not exported to the environment for child processes.
 
 #### `ignore-scripts`
 
@@ -771,12 +874,11 @@ CI setup.
 If true, npm does not run scripts specified in package.json files.
 
 Note that commands explicitly intended to run a particular script, such as
-`npm start`, `npm stop`, `npm restart`, `npm test`, and `npm run-script`
-will still run their intended script if `ignore-scripts` is set, but they
-will *not* run any pre- or post-scripts.
+`npm start`, `npm stop`, `npm restart`, `npm test`, and `npm run` will still
+run their intended script if `ignore-scripts` is set, but they will *not*
+run any pre- or post-scripts.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `include`
 
@@ -790,8 +892,19 @@ This is the inverse of `--omit=<type>`.
 Dependency types specified in `--include` will not be omitted, regardless of
 the order in which omit/include are specified on the command-line.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
+
+#### `include-attestations`
+
+* Default: false
+* Type: Boolean
+
+When used with `npm audit signatures --json`, includes the full sigstore
+attestation bundles in the JSON output for each verified package. The
+bundles contain DSSE envelopes, verification material, and transparency log
+entries.
+
+
 
 #### `include-staged`
 
@@ -803,8 +916,7 @@ Allow installing "staged" published packages, as defined by [npm RFC PR
 
 This is experimental, and not implemented by the npm public registry.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `include-workspace-root`
 
@@ -817,8 +929,7 @@ When false, specifying individual workspaces via the `workspace` config, or
 all workspaces via the `workspaces` flag, will cause npm to operate only on
 the specified workspaces, and not on the root project.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+This value is not exported to the environment for child processes.
 
 #### `init-author-email`
 
@@ -827,8 +938,7 @@ the specified workspaces, and not on the root project.
 
 The value `npm init` should use by default for the package author's email.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `init-author-name`
 
@@ -837,8 +947,7 @@ The value `npm init` should use by default for the package author's email.
 
 The value `npm init` should use by default for the package author's name.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `init-author-url`
 
@@ -848,8 +957,7 @@ The value `npm init` should use by default for the package author's name.
 The value `npm init` should use by default for the package author's
 homepage.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `init-license`
 
@@ -858,8 +966,7 @@ homepage.
 
 The value `npm init` should use by default for the package license.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `init-module`
 
@@ -871,8 +978,26 @@ documentation for the
 [init-package-json](https://github.com/npm/init-package-json) module for
 more information, or [npm init](/commands/npm-init).
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
+
+#### `init-private`
+
+* Default: false
+* Type: Boolean
+
+The value `npm init` should use by default for the package's private flag.
+
+
+
+#### `init-type`
+
+* Default: "commonjs"
+* Type: String
+
+The value that `npm init` should use by default for the package.json type
+field.
+
+
 
 #### `init-version`
 
@@ -882,8 +1007,32 @@ more information, or [npm init](/commands/npm-init).
 The value that `npm init` should use by default for the package version
 number, if not already set in package.json.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
+
+#### `install-links`
+
+* Default: false
+* Type: Boolean
+
+When set file: protocol dependencies will be packed and installed as regular
+dependencies instead of creating a symlink. This option has no effect on
+workspaces.
+
+
+
+#### `install-strategy`
+
+* Default: "hoisted"
+* Type: "hoisted", "nested", "shallow", or "linked"
+
+Sets the strategy for installing packages in node_modules. hoisted
+(default): Install non-duplicated in top-level, and duplicated as necessary
+within directory structure. nested: (formerly --legacy-bundling) install in
+place, no hoisting. shallow (formerly --global-style) only install direct
+deps at top-level. linked: (experimental) install in node_modules/.store,
+link in place, unhoisted.
+
+
 
 #### `json`
 
@@ -897,38 +1046,7 @@ Whether or not to output JSON data, rather than the normal output.
 
 Not supported by all npm commands.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
 
-#### `key`
-
-* Default: null
-* Type: null or String
-
-A client key to pass when accessing the registry. Values should be in PEM
-format with newlines replaced by the string "\n". For example:
-
-```ini
-key="-----BEGIN PRIVATE KEY-----\nXXXX\nXXXX\n-----END PRIVATE KEY-----"
-```
-
-It is _not_ the path to a key file (and there is no "keyfile" option).
-
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
-
-#### `legacy-bundling`
-
-* Default: false
-* Type: Boolean
-
-Causes npm to install the package such that versions of npm prior to 1.4,
-such as the one included with node 0.8, can install the package. This
-eliminates all automatic deduping. If used with `global-style` this option
-will be preferred.
-
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
 
 #### `legacy-peer-deps`
 
@@ -948,8 +1066,17 @@ This differs from `--omit=peer`, in that `--omit=peer` will avoid unpacking
 Use of `legacy-peer-deps` is not recommended, as it will not enforce the
 `peerDependencies` contract that meta-dependencies may rely on.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
+
+#### `libc`
+
+* Default: null
+* Type: null or String
+
+Override libc of native modules to install. Acceptable values are same as
+`libc` field of package.json
+
+
 
 #### `link`
 
@@ -958,8 +1085,7 @@ Use of `legacy-peer-deps` is not recommended, as it will not enforce the
 
 Used with `npm ls`, limiting output to only those packages that are linked.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `local-address`
 
@@ -969,8 +1095,7 @@ Used with `npm ls`, limiting output to only those packages that are linked.
 The IP address of the local interface to use when making connections to the
 npm registry. Must be IPv4 in versions of Node prior to 0.12.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `location`
 
@@ -980,13 +1105,21 @@ npm registry. Must be IPv4 in versions of Node prior to 0.12.
 
 When passed to `npm config` this refers to which config file to use.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+When set to "global" mode, packages are installed into the `prefix` folder
+instead of the current working directory. See
+[folders](/configuring-npm/folders) for more on the differences in behavior.
+
+* packages are installed into the `{prefix}/lib/node_modules` folder, instead
+  of the current working directory.
+* bin files are linked to `{prefix}/bin`
+* man pages are linked to `{prefix}/share/man`
+
+
 
 #### `lockfile-version`
 
-* Default: Version 2 if no lockfile or current lockfile version less than or
-  equal to 2, otherwise maintain current lockfile version
+* Default: Version 3 if no lockfile, auto-converting v1 lockfiles to v3;
+  otherwise, maintain current lockfile version.
 * Type: null, 1, 2, 3, "1", "2", or "3"
 
 Set the lockfile format version to be used in package-lock.json and
@@ -997,33 +1130,41 @@ is used during the install, resulting in slower and possibly less
 deterministic installs. Prevents lockfile churn when interoperating with
 older npm versions.
 
-2: The default lockfile version used by npm version 7. Includes both the
-version 1 lockfile data and version 3 lockfile data, for maximum determinism
-and interoperability, at the expense of more bytes on disk.
+2: The default lockfile version used by npm version 7 and 8. Includes both
+the version 1 lockfile data and version 3 lockfile data, for maximum
+determinism and interoperability, at the expense of more bytes on disk.
 
 3: Only the new lockfile information introduced in npm version 7. Smaller on
 disk than lockfile version 2, but not interoperable with older npm versions.
 Ideal if all users are on npm version 7 and higher.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `loglevel`
 
 * Default: "notice"
-* Type: "silent", "error", "warn", "notice", "http", "timing", "info",
-  "verbose", or "silly"
+* Type: "silent", "error", "warn", "notice", "http", "info", "verbose", or
+  "silly"
 
-What level of logs to report. On failure, *all* logs are written to
-`npm-debug.log` in the current working directory.
+What level of logs to report. All logs are written to a debug log, with the
+path to that file printed if the execution of a command fails.
 
 Any logs of a higher level than the setting are shown. The default is
 "notice".
 
 See also the `foreground-scripts` config.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
+
+#### `logs-dir`
+
+* Default: A directory named `_logs` inside the cache
+* Type: null or Path
+
+The location of npm's log directory. See [`npm logging`](/using-npm/logging)
+for more information.
+
+
 
 #### `logs-max`
 
@@ -1032,8 +1173,9 @@ See also the `foreground-scripts` config.
 
 The maximum number of log files to store.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+If set to 0, no log files will be written for the current run.
+
+
 
 #### `long`
 
@@ -1042,8 +1184,7 @@ The maximum number of log files to store.
 
 Show extended information in `ls`, `search`, and `help-search`.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `maxsockets`
 
@@ -1053,8 +1194,7 @@ Show extended information in `ls`, `search`, and `help-search`.
 The maximum number of connections to use per origin (protocol/host/port
 combination).
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `message`
 
@@ -1065,8 +1205,80 @@ Commit message which is used by `npm version` when creating version commit.
 
 Any "%s" in the message will be replaced with the version number.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
+
+#### `min-release-age`
+
+* Default: null
+* Type: null or Number
+
+If set, npm will build the npm tree such that only versions that were
+available more than the given number of days ago will be installed. If there
+are no versions available for the current set of dependencies, the command
+will error.
+
+This flag is a complement to `before`, which accepts an exact date instead
+of a relative number of days. The two may coexist (e.g. `min-release-age` in
+your `.npmrc` is preserved when npm internally spawns a sub-process with
+`--before` while preparing a `git:` or `github:` dependency); when both
+apply, `before` wins within a single source and across sources the standard
+precedence rules apply.
+
+Packages whose names match `min-release-age-exclude` are exempt from this
+filter.
+
+This value is not exported to the environment for child processes.
+
+#### `min-release-age-exclude`
+
+* Default:
+* Type: String (can be set multiple times)
+
+A list of package names or `minimatch` glob patterns that are exempt from
+the `min-release-age` (and `before`) filter. A matching package can always
+resolve to its newest version, even when a release-age window is set.
+
+For example, to apply a release-age window to third-party dependencies while
+letting internally maintained packages update immediately:
+
+```
+min-release-age=7
+min-release-age-exclude[]=@myorg/*
+min-release-age-exclude[]=my-internal-pkg
+```
+
+Only the named package is exempt; its own dependencies still follow the
+release-age policy unless they also match a pattern. Patterns match against
+the package name, so `@myorg/*` matches `@myorg/shared-utils`.
+
+Excluding a package does not change which registry it is fetched from. You
+should own your private scope on the public registry so that nobody else can
+publish a package with the same name.
+
+This value is not exported to the environment for child processes.
+
+#### `name`
+
+* Default: null
+* Type: null or String
+
+When creating a Granular Access Token with `npm token create`, this sets the
+name/description for the token.
+
+
+
+#### `node-gyp`
+
+* Default: The path to the node-gyp bin that ships with npm
+* Type: Path
+
+This is the location of the "node-gyp" bin. By default it uses one that
+ships with npm itself.
+
+You can use this config to specify your own "node-gyp" to run when it is
+required to build a package.
+
+
 
 #### `node-options`
 
@@ -1077,18 +1289,7 @@ Options to pass through to Node.js via the `NODE_OPTIONS` environment
 variable. This does not impact how npm itself is executed but it does impact
 how lifecycle scripts are called.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
 
-#### `node-version`
-
-* Default: Node.js `process.version` value
-* Type: SemVer string
-
-The node version to use when checking a package's `engines` setting.
-
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
 
 #### `noproxy`
 
@@ -1099,18 +1300,7 @@ Domain extensions that should bypass any proxies.
 
 Also accepts a comma-delimited string.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
 
-#### `npm-version`
-
-* Default: Output of `npm --version`
-* Type: SemVer string
-
-The npm version to use when checking a package's `engines` setting.
-
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
 
 #### `offline`
 
@@ -1120,13 +1310,12 @@ The npm version to use when checking a package's `engines` setting.
 Force offline mode: no network requests will be done during install. To
 allow the CLI to fill in missing cache data, see `--prefer-offline`.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `omit`
 
 * Default: 'dev' if the `NODE_ENV` environment variable is set to
-  'production', otherwise empty.
+  'production'; otherwise, empty.
 * Type: "dev", "optional", or "peer" (can be set multiple times)
 
 Dependency types to omit from the installation tree on disk.
@@ -1141,8 +1330,50 @@ it will be included.
 If the resulting omit list includes `'dev'`, then the `NODE_ENV` environment
 variable will be set to `'production'` for all lifecycle scripts.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
+
+#### `omit-lockfile-registry-resolved`
+
+* Default: false
+* Type: Boolean
+
+This option causes npm to create lock files without a `resolved` key for
+registry dependencies. Subsequent installs will need to resolve tarball
+endpoints with the configured registry, likely resulting in a longer install
+time.
+
+
+
+#### `orgs`
+
+* Default: null
+* Type: null or String (can be set multiple times)
+
+When creating a Granular Access Token with `npm token create`, this limits
+the token access to specific organizations.
+
+
+
+#### `orgs-permission`
+
+* Default: null
+* Type: null, "read-only", "read-write", or "no-access"
+
+When creating a Granular Access Token with `npm token create`, sets the
+permission level for organizations. Options are "read-only", "read-write",
+or "no-access".
+
+
+
+#### `os`
+
+* Default: null
+* Type: null or String
+
+Override OS of native modules to install. Acceptable values are same as `os`
+field of package.json, which comes from `process.platform`.
+
+
 
 #### `otp`
 
@@ -1155,8 +1386,7 @@ when publishing or changing package permissions with `npm access`.
 If not set, and a registry response fails with a challenge for a one-time
 password, npm will prompt on the command line for one.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `pack-destination`
 
@@ -1165,18 +1395,16 @@ password, npm will prompt on the command line for one.
 
 Directory in which `npm pack` will save tarballs.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `package`
 
 * Default:
 * Type: String (can be set multiple times)
 
-The package to install for [`npm exec`](/commands/npm-exec)
+The package or packages to install for [`npm exec`](/commands/npm-exec)
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `package-lock`
 
@@ -1186,12 +1414,7 @@ The package to install for [`npm exec`](/commands/npm-exec)
 If set to false, then ignore `package-lock.json` files when installing. This
 will also prevent _writing_ `package-lock.json` if `save` is true.
 
-When package package-locks are disabled, automatic pruning of extraneous
-modules will also be disabled. To remove extraneous modules with
-package-locks disabled use `npm prune`.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
 
 #### `package-lock-only`
 
@@ -1207,8 +1430,38 @@ instead of checking `node_modules` and downloading dependencies.
 For `list` this means the output will be based on the tree described by the
 `package-lock.json`, rather than the contents of `node_modules`.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
+
+#### `packages`
+
+* Default:
+* Type: null or String (can be set multiple times)
+
+When creating a Granular Access Token with `npm token create`, this limits
+the token access to specific packages.
+
+
+
+#### `packages-all`
+
+* Default: false
+* Type: Boolean
+
+When creating a Granular Access Token with `npm token create`, grants the
+token access to all packages instead of limiting to specific packages.
+
+
+
+#### `packages-and-scopes-permission`
+
+* Default: null
+* Type: null, "read-only", "read-write", or "no-access"
+
+When creating a Granular Access Token with `npm token create`, sets the
+permission level for packages and scopes. Options are "read-only",
+"read-write", or "no-access".
+
+
 
 #### `parseable`
 
@@ -1218,8 +1471,27 @@ For `list` this means the output will be based on the tree described by the
 Output parseable results from commands that write to standard output. For
 `npm search`, this will be tab-separated table format.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
+
+#### `password`
+
+* Default: null
+* Type: null or String
+
+Password for authentication. Can be provided via command line when creating
+tokens, though it's generally safer to be prompted for it.
+
+
+
+#### `prefer-dedupe`
+
+* Default: false
+* Type: Boolean
+
+Prefer to deduplicate packages if possible, rather than choosing a newer
+version of a dependency.
+
+
 
 #### `prefer-offline`
 
@@ -1230,8 +1502,7 @@ If true, staleness checks for cached data will be bypassed, but missing data
 will be requested from the server. To force full offline mode, use
 `--offline`.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `prefer-online`
 
@@ -1241,21 +1512,19 @@ will be requested from the server. To force full offline mode, use
 If true, staleness checks for cached data will be forced, making the CLI
 look for updates immediately even for fresh package data.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `prefix`
 
 * Default: In global mode, the folder where the node executable is installed.
-  In local mode, the nearest parent folder containing either a package.json
-  file or a node_modules folder.
+  Otherwise, the nearest parent folder containing either a package.json file
+  or a node_modules folder.
 * Type: Path
 
 The location to install global items. If set on the command line, then it
 forces non-global commands to run in the specified folder.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `preid`
 
@@ -1265,21 +1534,39 @@ forces non-global commands to run in the specified folder.
 The "prerelease identifier" to use as a prefix for the "prerelease" part of
 a semver. Like the `rc` in `1.2.0-rc.8`.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `progress`
 
-* Default: `true` unless running in a known CI system
+* Default: `true` when not in CI and both stderr and stdout are TTYs and not
+  in a dumb terminal
 * Type: Boolean
 
 When set to `true`, npm will display a progress bar during time intensive
-operations, if `process.stderr` is a TTY.
+operations, if `process.stderr` and `process.stdout` are a TTY.
 
 Set to `false` to suppress the progress bar.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
+
+#### `provenance`
+
+* Default: false
+* Type: Boolean
+
+When publishing from a supported cloud CI/CD system, the package will be
+publicly linked to where it was built and published from.
+
+This config cannot be used with: `provenance-file`
+
+#### `provenance-file`
+
+* Default: null
+* Type: Path
+
+When publishing, the provenance bundle at the given path will be used.
+
+This config cannot be used with: `provenance`
 
 #### `proxy`
 
@@ -1290,8 +1577,7 @@ A proxy to use for outgoing http requests. If the `HTTP_PROXY` or
 `http_proxy` environment variables are set, proxy settings will be honored
 by the underlying `request` library.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `read-only`
 
@@ -1301,8 +1587,7 @@ by the underlying `request` library.
 This is used to mark a token as unable to publish when configuring limited
 access tokens with the `npm token create` command.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `rebuild-bundle`
 
@@ -1311,8 +1596,7 @@ access tokens with the `npm token create` command.
 
 Rebuild bundled dependencies after installation.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `registry`
 
@@ -1321,21 +1605,38 @@ Rebuild bundled dependencies after installation.
 
 The base URL of the npm registry.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
+
+#### `replace-registry-host`
+
+* Default: "npmjs"
+* Type: "npmjs", "never", "always", or String
+
+Defines behavior for replacing the registry host in a lockfile with the
+configured registry.
+
+The default behavior is to replace package dist URLs from the default
+registry (https://registry.npmjs.org) to the configured registry. If set to
+"never", then use the registry value. If set to "always", then replace the
+registry host with the configured host every time.
+
+You may also specify a bare hostname (e.g., "registry.npmjs.org").
+
+
 
 #### `save`
 
-* Default: true
+* Default: `true` unless when using `npm update` where it defaults to `false`
 * Type: Boolean
 
-Save installed packages to a package.json file as dependencies.
+Save installed packages to a `package.json` file as dependencies.
 
 When used with the `npm rm` command, removes the dependency from
-package.json.
+`package.json`.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+Will also prevent writing to `package-lock.json` if set to `false`.
+
+
 
 #### `save-bundle`
 
@@ -1346,10 +1647,9 @@ If a package would be saved at install time by the use of `--save`,
 `--save-dev`, or `--save-optional`, then also put it in the
 `bundleDependencies` list.
 
-Ignore if `--save-peer` is set, since peerDependencies cannot be bundled.
+Ignored if `--save-peer` is set, since peerDependencies cannot be bundled.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `save-dev`
 
@@ -1358,8 +1658,7 @@ Ignore if `--save-peer` is set, since peerDependencies cannot be bundled.
 
 Save installed packages to a package.json file as `devDependencies`.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+This config cannot be used with: `save-optional`, `save-peer`, `save-prod`
 
 #### `save-exact`
 
@@ -1369,8 +1668,7 @@ Save installed packages to a package.json file as `devDependencies`.
 Dependencies saved to package.json will be configured with an exact version
 rather than using npm's default semver range operator.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `save-optional`
 
@@ -1379,18 +1677,16 @@ rather than using npm's default semver range operator.
 
 Save installed packages to a package.json file as `optionalDependencies`.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+This config cannot be used with: `save-dev`, `save-peer`, `save-prod`
 
 #### `save-peer`
 
 * Default: false
 * Type: Boolean
 
-Save installed packages. to a package.json file as `peerDependencies`
+Save installed packages to a package.json file as `peerDependencies`
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+This config cannot be used with: `save-dev`, `save-optional`, `save-prod`
 
 #### `save-prefix`
 
@@ -1405,8 +1701,7 @@ to `^1.2.3` which allows minor upgrades for that package, but after `npm
 config set save-prefix='~'` it would be set to `~1.2.3` which only allows
 patch upgrades.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `save-prod`
 
@@ -1420,8 +1715,27 @@ you want to move it to be a non-optional production dependency.
 This is the default behavior if `--save` is true, and neither `--save-dev`
 or `--save-optional` are true.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+This config cannot be used with: `save-dev`, `save-optional`, `save-peer`
+
+#### `sbom-format`
+
+* Default: null
+* Type: "cyclonedx" or "spdx"
+
+SBOM format to use when generating SBOMs.
+
+
+
+#### `sbom-type`
+
+* Default: "library"
+* Type: "library", "application", or "framework"
+
+The type of package described by the generated SBOM. For SPDX, this is the
+value for the `primaryPackagePurpose` field. For CycloneDX, this is the
+value for the `type` field.
+
+
 
 #### `scope`
 
@@ -1453,8 +1767,17 @@ npm init --scope=@foo --yes
 ```
 
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
+#### `scopes`
+
+* Default: null
+* Type: null or String (can be set multiple times)
+
+When creating a Granular Access Token with `npm token create`, this limits
+the token access to specific scopes. Provide a scope name (with or without @
+prefix).
+
+
 
 #### `script-shell`
 
@@ -1462,10 +1785,9 @@ npm init --scope=@foo --yes
 * Type: null or String
 
 The shell to use for scripts run with the `npm exec`, `npm run` and `npm
-init <pkg>` commands.
+init <package-spec>` commands.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `searchexclude`
 
@@ -1474,8 +1796,7 @@ init <pkg>` commands.
 
 Space-separated options that limit the results from search.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `searchlimit`
 
@@ -1485,8 +1806,7 @@ Space-separated options that limit the results from search.
 Number of items to limit search results to. Will not apply at all to legacy
 searches.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `searchopts`
 
@@ -1495,8 +1815,7 @@ searches.
 
 Space-separated options that are always passed to search.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `searchstaleness`
 
@@ -1506,8 +1825,7 @@ Space-separated options that are always passed to search.
 The age of the cache, in seconds, before another registry request is made if
 using legacy search endpoint.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `shell`
 
@@ -1517,8 +1835,7 @@ using legacy search endpoint.
 
 The shell to run for the `npm explore` command.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `sign-git-commit`
 
@@ -1531,8 +1848,7 @@ version using `-S` to add a signature.
 Note that git requires you to have set up GPG keys in your git configs for
 this to work properly.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `sign-git-tag`
 
@@ -1545,8 +1861,23 @@ If set to true, then the `npm version` command will tag the version using
 Note that git requires you to have set up GPG keys in your git configs for
 this to work properly.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
+
+#### `strict-allow-scripts`
+
+* Default: false
+* Type: Boolean
+
+If `true`, turn the install-script policy from a warning into a hard error:
+any dependency with install scripts not covered by `allowScripts` will fail
+the install instead of running with a notice.
+
+Dependencies explicitly denied with `false` in `allowScripts` are always
+silently skipped; this setting only affects unreviewed entries.
+`--ignore-scripts` and `--dangerously-allow-all-scripts` both override this
+setting.
+
+
 
 #### `strict-peer-deps`
 
@@ -1563,12 +1894,11 @@ be resolved using the nearest non-peer dependency specification, even if
 doing so will result in some packages receiving a peer dependency outside
 the range set in their package's `peerDependencies` object.
 
-When such and override is performed, a warning is printed, explaining the
+When such an override is performed, a warning is printed, explaining the
 conflict and the packages involved. If `--strict-peer-deps` is set, then
 this warning is treated as a failure.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `strict-ssl`
 
@@ -1580,8 +1910,7 @@ via https.
 
 See also the `ca` config.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `tag`
 
@@ -1591,14 +1920,16 @@ See also the `ca` config.
 If you ask npm to install a package and don't tell it a specific version,
 then it will install the specified tag.
 
-Also the tag that is added to the package@version specified by the `npm tag`
-command, if no explicit tag is given.
+It is the tag added to the package@version specified in the `npm dist-tag
+add` command, if no explicit tag is given.
 
 When used by the `npm diff` command, this is the tag used to fetch the
 tarball that will be compared with the local files by default.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+If used in the `npm publish` command, this is the tag that will be added to
+the package submitted to the registry.
+
+
 
 #### `tag-version-prefix`
 
@@ -1606,30 +1937,39 @@ tarball that will be compared with the local files by default.
 * Type: String
 
 If set, alters the prefix used when tagging a new version when performing a
-version increment using `npm-version`. To remove the prefix altogether, set
+version increment using `npm version`. To remove the prefix altogether, set
 it to the empty string: `""`.
 
 Because other tools may rely on the convention that npm version tags look
 like `v1.0.0`, _only use this property if it is absolutely necessary_. In
 particular, use care when overriding this setting for public packages.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `timing`
 
 * Default: false
 * Type: Boolean
 
-If true, writes an `npm-debug` log to `_logs` and timing information to
-`_timing.json`, both in your cache, even if the command completes
-successfully. `_timing.json` is a newline delimited list of JSON objects.
+If true, writes timing information to a process specific json file in the
+cache or `logs-dir`. The file name ends with `-timing.json`.
 
 You can quickly view it with this [json](https://npm.im/json) command line:
-`npm exec -- json -g < ~/.npm/_timing.json`.
+`cat ~/.npm/_logs/*-timing.json | npm exec -- json -g`.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+Timing information will also be reported in the terminal. To suppress this
+while still writing the timing file, use `--silent`.
+
+
+
+#### `token-description`
+
+* Default: null
+* Type: null or String
+
+Description text for the token when using `npm token create`.
+
+
 
 #### `umask`
 
@@ -1651,8 +1991,7 @@ Thus, the effective default umask value on most POSIX systems is 0o22,
 meaning that folders and executables are created with a mode of 0o755 and
 other files are created with a mode of 0o644.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `unicode`
 
@@ -1663,8 +2002,7 @@ other files are created with a mode of 0o644.
 When set to true, npm uses unicode characters in the tree output. When
 false, it uses ascii characters instead of unicode glyphs.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `update-notifier`
 
@@ -1674,8 +2012,7 @@ false, it uses ascii characters instead of unicode glyphs.
 Set to false to suppress the update notification when using an older version
 of npm than the latest.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `usage`
 
@@ -1684,8 +2021,7 @@ of npm than the latest.
 
 Show short usage output about the command specified.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `user-agent`
 
@@ -1705,8 +2041,7 @@ their actual counterparts:
 * `{ci}` - The value of the `ci-name` config, if set, prefixed with `ci/`, or
   an empty string if `ci-name` is empty.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `userconfig`
 
@@ -1719,8 +2054,7 @@ This may be overridden by the `npm_config_userconfig` environment variable
 or the `--userconfig` command line option, but may _not_ be overridden by
 settings in the `globalconfig` file.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `version`
 
@@ -1731,8 +2065,7 @@ If true, output the npm version and exit successfully.
 
 Only relevant when specified explicitly on the command line.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `versions`
 
@@ -1745,8 +2078,7 @@ exists, and exit successfully.
 
 Only relevant when specified explicitly on the command line.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `viewer`
 
@@ -1757,8 +2089,7 @@ The program to use to view help content.
 
 Set to `"browser"` to view html help content in the default web browser.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `which`
 
@@ -1767,8 +2098,7 @@ Set to `"browser"` to view html help content in the default web browser.
 
 If there are multiple funding sources, which 1-indexed source URL to open.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `workspace`
 
@@ -1792,9 +2122,6 @@ brand new workspace within the project.
 
 This value is not exported to the environment for child processes.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
-
 #### `workspaces`
 
 * Default: null
@@ -1813,8 +2140,15 @@ _unless_ one or more workspaces are specified in the `workspace` config.
 
 This value is not exported to the environment for child processes.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+#### `workspaces-update`
+
+* Default: true
+* Type: Boolean
+
+If set to true, the npm cli will run an update after operations that may
+possibly change the workspaces installed to the `node_modules` folder.
+
+
 
 #### `yes`
 
@@ -1824,8 +2158,7 @@ This value is not exported to the environment for child processes.
 Automatically answer "yes" to any prompts that npm might print on the
 command line.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `also`
 
@@ -1835,20 +2168,7 @@ command line.
 
 When set to `dev` or `development`, this is an alias for `--include=dev`.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
 
-#### `auth-type`
-
-* Default: "legacy"
-* Type: "legacy", "sso", "saml", or "oauth"
-* DEPRECATED: This method of SSO/SAML/OAuth is deprecated and will be removed
-  in a future version of npm in favor of web-based login.
-
-What authentication strategy to use with `adduser`/`login`.
-
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
 
 #### `cache-max`
 
@@ -1858,8 +2178,7 @@ What authentication strategy to use with `adduser`/`login`.
 
 `--cache-max=0` is an alias for `--prefer-online`
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `cache-min`
 
@@ -1869,8 +2188,30 @@ What authentication strategy to use with `adduser`/`login`.
 
 `--cache-min=9999 (or bigger)` is an alias for `--prefer-offline`.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
+
+#### `cert`
+
+* Default: null
+* Type: null or String
+* DEPRECATED: `key` and `cert` are no longer used for most registry
+  operations. Use registry scoped `keyfile` and `certfile` instead. Example:
+  //other-registry.tld/:keyfile=/path/to/key.pem
+  //other-registry.tld/:certfile=/path/to/cert.crt
+
+A client certificate to pass when accessing the registry. Values should be
+in PEM format (Windows calls it "Base-64 encoded X.509 (.CER)") with
+newlines replaced by the string "\n". For example:
+
+```ini
+cert="-----BEGIN CERTIFICATE-----\nXXXX\nXXXX\n-----END CERTIFICATE-----"
+```
+
+It is _not_ the path to a certificate file, though you can set a
+registry-scoped "certfile" path like
+"//other-registry.tld/:certfile=/path/to/cert.pem".
+
+
 
 #### `dev`
 
@@ -1880,8 +2221,19 @@ What authentication strategy to use with `adduser`/`login`.
 
 Alias for `--include=dev`.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
+
+#### `global-style`
+
+* Default: false
+* Type: Boolean
+* DEPRECATED: This option has been deprecated in favor of
+  `--install-strategy=shallow`
+
+Only install direct dependencies in the top level `node_modules`, but hoist
+on deeper dependencies. Sets `--install-strategy=shallow`.
+
+
 
 #### `init.author.email`
 
@@ -1891,8 +2243,7 @@ Alias for `--include=dev`.
 
 Alias for `--init-author-email`
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `init.author.name`
 
@@ -1902,8 +2253,7 @@ Alias for `--init-author-email`
 
 Alias for `--init-author-name`
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `init.author.url`
 
@@ -1913,8 +2263,7 @@ Alias for `--init-author-name`
 
 Alias for `--init-author-url`
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `init.license`
 
@@ -1924,8 +2273,7 @@ Alias for `--init-author-url`
 
 Alias for `--init-license`
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `init.module`
 
@@ -1935,8 +2283,7 @@ Alias for `--init-license`
 
 Alias for `--init-module`
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `init.version`
 
@@ -1946,8 +2293,42 @@ Alias for `--init-module`
 
 Alias for `--init-version`
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
+
+#### `key`
+
+* Default: null
+* Type: null or String
+* DEPRECATED: `key` and `cert` are no longer used for most registry
+  operations. Use registry scoped `keyfile` and `certfile` instead. Example:
+  //other-registry.tld/:keyfile=/path/to/key.pem
+  //other-registry.tld/:certfile=/path/to/cert.crt
+
+A client key to pass when accessing the registry. Values should be in PEM
+format with newlines replaced by the string "\n". For example:
+
+```ini
+key="-----BEGIN PRIVATE KEY-----\nXXXX\nXXXX\n-----END PRIVATE KEY-----"
+```
+
+It is _not_ the path to a key file, though you can set a registry-scoped
+"keyfile" path like "//other-registry.tld/:keyfile=/path/to/key.pem".
+
+
+
+#### `legacy-bundling`
+
+* Default: false
+* Type: Boolean
+* DEPRECATED: This option has been deprecated in favor of
+  `--install-strategy=nested`
+
+Instead of hoisting package installs in `node_modules`, install packages in
+the same manner that they are depended on. This may cause very deep
+directory structures and duplicate package installs as there is no
+de-duplicating. Sets `--install-strategy=nested`.
+
+
 
 #### `only`
 
@@ -1957,8 +2338,7 @@ Alias for `--init-version`
 
 When set to `prod` or `production`, this is an alias for `--omit=dev`.
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `optional`
 
@@ -1971,8 +2351,7 @@ Default value does install optional deps unless otherwise omitted.
 
 Alias for --include=optional or --omit=optional
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `production`
 
@@ -1982,8 +2361,7 @@ Alias for --include=optional or --omit=optional
 
 Alias for `--omit=dev`
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
+
 
 #### `shrinkwrap`
 
@@ -1993,49 +2371,7 @@ Alias for `--omit=dev`
 
 Alias for --package-lock
 
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
 
-#### `sso-poll-frequency`
-
-* Default: 500
-* Type: Number
-* DEPRECATED: The --auth-type method of SSO/SAML/OAuth will be removed in a
-  future version of npm in favor of web-based login.
-
-When used with SSO-enabled `auth-type`s, configures how regularly the
-registry should be polled while the user is completing authentication.
-
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
-
-#### `sso-type`
-
-* Default: "oauth"
-* Type: null, "oauth", or "saml"
-* DEPRECATED: The --auth-type method of SSO/SAML/OAuth will be removed in a
-  future version of npm in favor of web-based login.
-
-If `--auth-type=sso`, the type of SSO type to use.
-
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
-
-#### `tmp`
-
-* Default: The value returned by the Node.js `os.tmpdir()` method
-  <https://nodejs.org/api/os.html#os_os_tmpdir>
-* Type: Path
-* DEPRECATED: This setting is no longer used. npm stores temporary files in a
-  special location in the cache, and they are managed by
-  [`cacache`](http://npm.im/cacache).
-
-Historically, the location where temporary files were stored. No longer
-relevant.
-
-<!-- automatically generated, do not edit manually -->
-<!-- see lib/utils/config/definitions.js -->
-<!-- AUTOGENERATED CONFIG DESCRIPTIONS END -->
 
 ### See also
 

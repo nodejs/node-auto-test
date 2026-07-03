@@ -1,3 +1,9 @@
+// Flags: --no-node-snapshot --no-maglev
+// With node snapshot the OOM can occur during the deserialization of the
+// context, so disable it since we want the OOM to occur during the creation of
+// the message port.
+// With Maglev, the OOM can occur during compilation instead, so disable it for
+// the same reason.
 'use strict';
 const common = require('../common');
 const assert = require('assert');
@@ -10,7 +16,7 @@ if (!process.env.HAS_STARTED_WORKER) {
     resourceLimits: {
       maxYoungGenerationSizeMb: 0,
       maxOldGenerationSizeMb: 0
-    }
+    },
   };
 
   const worker = new Worker(__filename, opts);

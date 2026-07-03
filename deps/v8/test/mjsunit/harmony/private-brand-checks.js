@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --harmony-private-brand-checks --allow-natives-syntax
+// Flags: --allow-natives-syntax
 
 // Objects for which all our brand checks return false.
 const commonFalseCases = [{}, function() {}, []];
@@ -564,4 +564,9 @@ const commonThrowCases = [100, 'foo', undefined, null];
   assertTrue(d.exfilEval(new A()));
   assertFalse(d.exfilEval(c));
   assertFalse(d.exfilEval(d));
+})();
+
+(function TestBinaryOperatorPrecedenceParseError() {
+  assertThrows(() => eval(`class C { #x; test() { 0 << #x in {} } }`),
+               SyntaxError);
 })();

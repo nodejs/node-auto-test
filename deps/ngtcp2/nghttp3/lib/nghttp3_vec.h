@@ -28,8 +28,16 @@
 
 #ifdef HAVE_CONFIG_H
 #  include <config.h>
-#endif /* HAVE_CONFIG_H */
+#endif /* defined(HAVE_CONFIG_H) */
 
 #include <nghttp3/nghttp3.h>
 
-#endif /* NGHTTP3_VEC_H */
+/*
+ * nghttp3_vec_len_uvarint is similar to nghttp3_vec_len, but it
+ * stores the return value from nghttp3_vec_len(|vec|, |n|) into
+ * |dest| if it does not exceed NGHTTP3_MAX_VARINT, and returns 0.
+ * Otherwise returns -1.
+ */
+int nghttp3_vec_len_uvarint(uint64_t *dest, const nghttp3_vec *vec, size_t n);
+
+#endif /* !defined(NGHTTP3_VEC_H) */

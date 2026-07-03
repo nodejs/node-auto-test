@@ -19,9 +19,7 @@ using v8::FunctionCallbackInfo;
 using v8::Isolate;
 using v8::Just;
 using v8::kPromiseHandlerAddedAfterReject;
-using v8::kPromiseRejectAfterResolved;
 using v8::kPromiseRejectWithNoHandler;
-using v8::kPromiseResolveAfterResolved;
 using v8::Local;
 using v8::Maybe;
 using v8::Number;
@@ -43,39 +41,21 @@ static Maybe<double> GetAssignedPromiseAsyncId(Environment* env,
       : v8::Just(AsyncWrap::kInvalidAsyncId);
 }
 
-static Maybe<double> GetAssignedPromiseWrapAsyncId(Environment* env,
-                                                   Local<Promise> promise,
-                                                   Local<Value> id_symbol) {
-  // This check is imperfect. If the internal field is set, it should
-  // be an object. If it's not, we just ignore it. Ideally v8 would
-  // have had GetInternalField returning a MaybeLocal but this works
-  // for now.
-  Local<Value> promiseWrap = promise->GetInternalField(0);
-  if (promiseWrap->IsObject()) {
-        Local<Value> maybe_async_id;
-    if (!promiseWrap.As<Object>()->Get(env->context(), id_symbol)
-        .ToLocal(&maybe_async_id)) {
-      return v8::Just(AsyncWrap::kInvalidAsyncId);
-    }
-    return maybe_async_id->IsNumber()
-        ? maybe_async_id->NumberValue(env->context())
-        : v8::Just(AsyncWrap::kInvalidAsyncId);
-  } else {
-      return v8::Just(AsyncWrap::kInvalidAsyncId);
-  }
-}
-
 void PromiseRejectCallback(PromiseRejectMessage message) {
   static std::atomic<uint64_t> unhandledRejections{0};
   static std::atomic<uint64_t> rejectionsHandledAfter{0};
 
   Local<Promise> promise = message.GetPromise();
-  Isolate* isolate = promise->GetIsolate();
+  Isolate* isolate = Isolate::GetCurrent();
   PromiseRejectEvent event = message.GetEvent();
 
   Environment* env = Environment::GetCurrent(isolate);
 
-  if (env == nullptr || !env->can_call_into_js()) return;
+  if (env == nullptr || !env->can_call_into_js() ||
+      (event != kPromiseRejectWithNoHandler &&
+       event != kPromiseHandlerAddedAfterReject)) {
+    return;
+  }
 
   Local<Function> callback = env->promise_reject_callback();
   // The promise is rejected before JS land calls SetPromiseRejectCallback
@@ -96,13 +76,11 @@ void PromiseRejectCallback(PromiseRejectMessage message) {
     value = Undefined(isolate);
     rejectionsHandledAfter++;
     TRACE_COUNTER2(TRACING_CATEGORY_NODE2(promises, rejections),
-                  "rejections",
-                  "unhandled", unhandledRejections,
-                  "handledAfter", rejectionsHandledAfter);
-  } else if (event == kPromiseResolveAfterResolved) {
-    value = message.GetValue();
-  } else if (event == kPromiseRejectAfterResolved) {
-    value = message.GetValue();
+                   "rejections",
+                   "unhandled",
+                   unhandledRejections,
+                   "handledAfter",
+                   rejectionsHandledAfter);
   } else {
     return;
   }
@@ -122,21 +100,11 @@ void PromiseRejectCallback(PromiseRejectMessage message) {
   if (!GetAssignedPromiseAsyncId(env, promise, env->trigger_async_id_symbol())
           .To(&trigger_async_id)) return;
 
-  if (async_id == AsyncWrap::kInvalidAsyncId &&
-      trigger_async_id == AsyncWrap::kInvalidAsyncId) {
-    // That means that promise might be a PromiseWrap, so we'll
-    // check there as well.
-    if (!GetAssignedPromiseWrapAsyncId(env, promise, env->async_id_symbol())
-              .To(&async_id)) return;
-    if (!GetAssignedPromiseWrapAsyncId(
-          env, promise, env->trigger_async_id_symbol())
-              .To(&trigger_async_id)) return;
-  }
-
+  Local<Object> promise_as_obj = promise;
   if (async_id != AsyncWrap::kInvalidAsyncId &&
       trigger_async_id != AsyncWrap::kInvalidAsyncId) {
     env->async_hooks()->push_async_context(
-        async_id, trigger_async_id, promise);
+        async_id, trigger_async_id, &promise_as_obj);
   }
 
   USE(callback->Call(
@@ -161,8 +129,7 @@ void PromiseRejectCallback(PromiseRejectMessage message) {
 namespace task_queue {
 
 static void EnqueueMicrotask(const FunctionCallbackInfo<Value>& args) {
-  Environment* env = Environment::GetCurrent(args);
-  Isolate* isolate = env->isolate();
+  Isolate* isolate = args.GetIsolate();
 
   CHECK(args[0]->IsFunction());
 
@@ -196,9 +163,9 @@ static void Initialize(Local<Object> target,
   Environment* env = Environment::GetCurrent(context);
   Isolate* isolate = env->isolate();
 
-  env->SetMethod(target, "enqueueMicrotask", EnqueueMicrotask);
-  env->SetMethod(target, "setTickCallback", SetTickCallback);
-  env->SetMethod(target, "runMicrotasks", RunMicrotasks);
+  SetMethod(context, target, "enqueueMicrotask", EnqueueMicrotask);
+  SetMethod(context, target, "setTickCallback", SetTickCallback);
+  SetMethod(context, target, "runMicrotasks", RunMicrotasks);
   target->Set(env->context(),
               FIXED_ONE_BYTE_STRING(isolate, "tickInfo"),
               env->tick_info()->fields().GetJSArray()).Check();
@@ -206,15 +173,12 @@ static void Initialize(Local<Object> target,
   Local<Object> events = Object::New(isolate);
   NODE_DEFINE_CONSTANT(events, kPromiseRejectWithNoHandler);
   NODE_DEFINE_CONSTANT(events, kPromiseHandlerAddedAfterReject);
-  NODE_DEFINE_CONSTANT(events, kPromiseResolveAfterResolved);
-  NODE_DEFINE_CONSTANT(events, kPromiseRejectAfterResolved);
 
   target->Set(env->context(),
               FIXED_ONE_BYTE_STRING(isolate, "promiseRejectEvents"),
               events).Check();
-  env->SetMethod(target,
-                 "setPromiseRejectCallback",
-                 SetPromiseRejectCallback);
+  SetMethod(
+      context, target, "setPromiseRejectCallback", SetPromiseRejectCallback);
 }
 
 void RegisterExternalReferences(ExternalReferenceRegistry* registry) {
@@ -227,6 +191,6 @@ void RegisterExternalReferences(ExternalReferenceRegistry* registry) {
 }  // namespace task_queue
 }  // namespace node
 
-NODE_MODULE_CONTEXT_AWARE_INTERNAL(task_queue, node::task_queue::Initialize)
-NODE_MODULE_EXTERNAL_REFERENCE(task_queue,
-                               node::task_queue::RegisterExternalReferences)
+NODE_BINDING_CONTEXT_AWARE_INTERNAL(task_queue, node::task_queue::Initialize)
+NODE_BINDING_EXTERNAL_REFERENCE(task_queue,
+                                node::task_queue::RegisterExternalReferences)

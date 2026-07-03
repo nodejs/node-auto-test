@@ -34,12 +34,14 @@
 
 #include "src/codegen/assembler.h"
 
+#include "absl/container/flat_hash_map.h"
+#include "src/base/macros.h"
 #ifdef V8_CODE_COMMENTS
 #include <iomanip>
 #endif
+
 #include "src/base/vector.h"
 #include "src/codegen/assembler-inl.h"
-#include "src/codegen/string-constants.h"
 #include "src/deoptimizer/deoptimizer.h"
 #include "src/diagnostics/disassembler.h"
 #include "src/execution/isolate.h"
@@ -68,29 +70,22 @@ AssemblerOptions AssemblerOptions::Default(Isolate* isolate) {
 
   // So here we enable simulator specific code if not generating the snapshot or
   // if we are but we are targetting the simulator *only*.
-  options.enable_simulator_code = !serializer || FLAG_target_is_simulator;
+  options.enable_simulator_code = !serializer || v8_flags.target_is_simulator;
 #endif
-  options.inline_offheap_trampolines &= !generating_embedded_builtin;
-#if V8_TARGET_ARCH_X64 || V8_TARGET_ARCH_ARM64
-  const base::AddressRegion& code_range = isolate->heap()->code_region();
-  DCHECK_IMPLIES(code_range.begin() != kNullAddress, !code_range.is_empty());
-  options.code_range_start = code_range.begin();
+
+#if V8_TARGET_ARCH_X64 || V8_TARGET_ARCH_ARM64 || V8_TARGET_ARCH_LOONG64 || \
+    V8_TARGET_ARCH_RISCV64
+  options.code_range_base = isolate->heap()->code_range_base();
 #endif
-  options.short_builtin_calls =
+  bool short_builtin_calls =
       isolate->is_short_builtin_calls_enabled() &&
       !generating_embedded_builtin &&
-      (options.code_range_start != kNullAddress) &&
-      // Serialization of RUNTIME_ENTRY reloc infos is not supported yet.
+      (options.code_range_base != kNullAddress) &&
+      // Serialization of NEAR_BUILTIN_ENTRY reloc infos is not supported yet.
       !serializer;
-  return options;
-}
-
-AssemblerOptions AssemblerOptions::DefaultForOffHeapTrampoline(
-    Isolate* isolate) {
-  AssemblerOptions options = AssemblerOptions::Default(isolate);
-  // Off-heap trampolines may not contain any metadata since their metadata
-  // offsets refer to the off-heap metadata area.
-  options.emit_code_comments = false;
+  if (short_builtin_calls) {
+    options.builtin_call_jump_mode = BuiltinCallJumpMode::kPCRelative;
+  }
   return options;
 }
 
@@ -102,11 +97,11 @@ class DefaultAssemblerBuffer : public AssemblerBuffer {
       : buffer_(base::OwnedVector<uint8_t>::NewForOverwrite(
             std::max(AssemblerBase::kMinimalBufferSize, size))) {
 #ifdef DEBUG
-    ZapCode(reinterpret_cast<Address>(buffer_.start()), buffer_.size());
+    ZapCode(reinterpret_cast<Address>(buffer_.begin()), buffer_.size());
 #endif
   }
 
-  byte* start() const override { return buffer_.start(); }
+  uint8_t* start() const override { return buffer_.begin(); }
 
   int size() const override { return static_cast<int>(buffer_.size()); }
 
@@ -121,10 +116,10 @@ class DefaultAssemblerBuffer : public AssemblerBuffer {
 
 class ExternalAssemblerBufferImpl : public AssemblerBuffer {
  public:
-  ExternalAssemblerBufferImpl(byte* start, int size)
+  ExternalAssemblerBufferImpl(uint8_t* start, int size)
       : start_(start), size_(size) {}
 
-  byte* start() const override { return start_; }
+  uint8_t* start() const override { return start_; }
 
   int size() const override { return size_; }
 
@@ -136,55 +131,13 @@ class ExternalAssemblerBufferImpl : public AssemblerBuffer {
   void operator delete(void* ptr) noexcept;
 
  private:
-  byte* const start_;
+  uint8_t* const start_;
   const int size_;
 };
 
-class OnHeapAssemblerBuffer : public AssemblerBuffer {
- public:
-  OnHeapAssemblerBuffer(Isolate* isolate, Handle<Code> code, int size,
-                        int gc_count)
-      : isolate_(isolate), code_(code), size_(size), gc_count_(gc_count) {}
-
-  byte* start() const override {
-    return reinterpret_cast<byte*>(code_->raw_instruction_start());
-  }
-
-  int size() const override { return size_; }
-
-  std::unique_ptr<AssemblerBuffer> Grow(int new_size) override {
-    DCHECK_LT(size(), new_size);
-    Heap* heap = isolate_->heap();
-    if (Code::SizeFor(new_size) <
-        heap->MaxRegularHeapObjectSize(AllocationType::kCode)) {
-      MaybeHandle<Code> code =
-          isolate_->factory()->NewEmptyCode(CodeKind::BASELINE, new_size);
-      if (!code.is_null()) {
-        return std::make_unique<OnHeapAssemblerBuffer>(
-            isolate_, code.ToHandleChecked(), new_size, heap->gc_count());
-      }
-    }
-    // We fall back to the slow path using the default assembler buffer and
-    // compile the code off the GC heap.
-    return std::make_unique<DefaultAssemblerBuffer>(new_size);
-  }
-
-  bool IsOnHeap() const override { return true; }
-
-  int OnHeapGCCount() const override { return gc_count_; }
-
-  MaybeHandle<Code> code() const override { return code_; }
-
- private:
-  Isolate* isolate_;
-  Handle<Code> code_;
-  const int size_;
-  const int gc_count_;
-};
-
-static thread_local std::aligned_storage_t<sizeof(ExternalAssemblerBufferImpl),
-                                           alignof(ExternalAssemblerBufferImpl)>
-    tls_singleton_storage;
+alignas(
+    ExternalAssemblerBufferImpl) static thread_local char tls_singleton_storage
+    [sizeof(ExternalAssemblerBufferImpl)];
 
 static thread_local bool tls_singleton_taken{false};
 
@@ -192,13 +145,13 @@ void* ExternalAssemblerBufferImpl::operator new(std::size_t count) {
   DCHECK_EQ(count, sizeof(ExternalAssemblerBufferImpl));
   if (V8_LIKELY(!tls_singleton_taken)) {
     tls_singleton_taken = true;
-    return &tls_singleton_storage;
+    return tls_singleton_storage;
   }
   return ::operator new(count);
 }
 
 void ExternalAssemblerBufferImpl::operator delete(void* ptr) noexcept {
-  if (V8_LIKELY(ptr == &tls_singleton_storage)) {
+  if (V8_LIKELY(ptr == tls_singleton_storage)) {
     DCHECK(tls_singleton_taken);
     tls_singleton_taken = false;
     return;
@@ -211,21 +164,11 @@ void ExternalAssemblerBufferImpl::operator delete(void* ptr) noexcept {
 std::unique_ptr<AssemblerBuffer> ExternalAssemblerBuffer(void* start,
                                                          int size) {
   return std::make_unique<ExternalAssemblerBufferImpl>(
-      reinterpret_cast<byte*>(start), size);
+      reinterpret_cast<uint8_t*>(start), size);
 }
 
 std::unique_ptr<AssemblerBuffer> NewAssemblerBuffer(int size) {
   return std::make_unique<DefaultAssemblerBuffer>(size);
-}
-
-std::unique_ptr<AssemblerBuffer> NewOnHeapAssemblerBuffer(Isolate* isolate,
-                                                          int estimated) {
-  int size = std::max(AssemblerBase::kMinimalBufferSize, estimated);
-  MaybeHandle<Code> code =
-      isolate->factory()->NewEmptyCode(CodeKind::BASELINE, size);
-  if (code.is_null()) return {};
-  return std::make_unique<OnHeapAssemblerBuffer>(
-      isolate, code.ToHandleChecked(), size, isolate->heap()->gc_count());
 }
 
 // -----------------------------------------------------------------------------
@@ -248,12 +191,6 @@ AssemblerBase::AssemblerBase(const AssemblerOptions& options,
   if (!buffer_) buffer_ = NewAssemblerBuffer(kDefaultBufferSize);
   buffer_start_ = buffer_->start();
   pc_ = buffer_start_;
-  if (IsOnHeap()) {
-    saved_handles_for_raw_object_ptr_.reserve(
-        kSavedHandleForRawObjectsInitialSize);
-    saved_offsets_for_runtime_entries_.reserve(
-        kSavedOffsetForRuntimeEntriesInitialSize);
-  }
 }
 
 AssemblerBase::~AssemblerBase() = default;
@@ -282,33 +219,35 @@ CpuFeatureScope::~CpuFeatureScope() {
 
 bool CpuFeatures::initialized_ = false;
 bool CpuFeatures::supports_wasm_simd_128_ = false;
-unsigned CpuFeatures::supported_ = 0;
+bool CpuFeatures::supports_cetss_ = false;
+CpuFeatureSet CpuFeatures::supported_ = {};
 unsigned CpuFeatures::icache_line_size_ = 0;
 unsigned CpuFeatures::dcache_line_size_ = 0;
+unsigned CpuFeatures::vlen_ = 0;
 
-HeapObjectRequest::HeapObjectRequest(double heap_number, int offset)
-    : kind_(kHeapNumber), offset_(offset) {
-  value_.heap_number = heap_number;
-  DCHECK(!IsSmiDouble(value_.heap_number));
-}
-
-HeapObjectRequest::HeapObjectRequest(const StringConstantBase* string,
-                                     int offset)
-    : kind_(kStringConstant), offset_(offset) {
-  value_.string = string;
-  DCHECK_NOT_NULL(value_.string);
+HeapNumberRequest::HeapNumberRequest(double heap_number, int offset)
+    : offset_(offset) {
+  value_ = heap_number;
+  DCHECK(!IsSmiDouble(value_));
 }
 
 // Platform specific but identical code for all the platforms.
 
 void Assembler::RecordDeoptReason(DeoptimizeReason reason, uint32_t node_id,
                                   SourcePosition position, int id) {
-  EnsureSpace ensure_space(this);
-  RecordRelocInfo(RelocInfo::DEOPT_SCRIPT_OFFSET, position.ScriptOffset());
-  RecordRelocInfo(RelocInfo::DEOPT_INLINING_ID, position.InliningId());
-  RecordRelocInfo(RelocInfo::DEOPT_REASON, static_cast<int>(reason));
-  RecordRelocInfo(RelocInfo::DEOPT_ID, id);
+  static_assert(RelocInfoWriter::kMaxSize * 2 <= kGap);
+  if (position.IsKnown()) {
+    EnsureSpace space(this);
+    RecordRelocInfo(RelocInfo::DEOPT_SCRIPT_OFFSET, position.ScriptOffset());
+    RecordRelocInfo(RelocInfo::DEOPT_INLINING_ID, position.InliningId());
+  }
+  {
+    EnsureSpace space(this);
+    RecordRelocInfo(RelocInfo::DEOPT_REASON, static_cast<int>(reason));
+    RecordRelocInfo(RelocInfo::DEOPT_ID, id);
+  }
 #ifdef DEBUG
+  EnsureSpace space(this);
   RecordRelocInfo(RelocInfo::DEOPT_NODE_ID, node_id);
 #endif  // DEBUG
 }
@@ -323,12 +262,46 @@ void Assembler::DataAlign(int m) {
   }
 }
 
-void AssemblerBase::RequestHeapObject(HeapObjectRequest request) {
+void AssemblerBase::RequestHeapNumber(HeapNumberRequest request) {
   request.set_offset(pc_offset());
-  heap_object_requests_.push_front(request);
+  heap_number_requests_.push_front(request);
 }
 
-int AssemblerBase::AddCodeTarget(Handle<Code> target) {
+void AssemblerBase::AllocateAndInstallRequestedHeapNumbers(
+    LocalIsolate* isolate) {
+  DCHECK_IMPLIES(isolate == nullptr, heap_number_requests_.empty());
+
+  // {previous_requests} is a cache of HeapNumbers that have already been
+  // requested. It is keyed on uint64_t rather than doubles to avoid undefined
+  // behavior when NaN is used as a key (where the uint64_t are just bitcasts
+  // from the doubles).
+  absl::flat_hash_map<uint64_t, Handle<HeapNumber>> previous_requests;
+
+  for (HeapNumberRequest& request : heap_number_requests_) {
+    Handle<HeapNumber> object;
+
+    if (v8_flags.deduplicate_heap_number_requests) {
+      uint64_t cache_key = base::bit_cast<uint64_t>(request.heap_number());
+      auto it = previous_requests.find(cache_key);
+      if (it != previous_requests.end()) {
+        object = it->second;
+      } else {
+        object = isolate->factory()->NewHeapNumber<AllocationType::kOld>(
+            request.heap_number());
+        previous_requests.insert({cache_key, object});
+      }
+    } else {
+      object = isolate->factory()->NewHeapNumber<AllocationType::kOld>(
+          request.heap_number());
+    }
+
+    Address pc = reinterpret_cast<Address>(buffer_start_) + request.offset();
+
+    PatchInHeapNumberRequest(pc, object);
+  }
+}
+
+int AssemblerBase::AddCodeTarget(IndirectHandle<Code> target) {
   int current = static_cast<int>(code_targets_.size());
   if (current > 0 && !target.is_null() &&
       code_targets_.back().address() == target.address()) {
@@ -340,13 +313,14 @@ int AssemblerBase::AddCodeTarget(Handle<Code> target) {
   }
 }
 
-Handle<Code> AssemblerBase::GetCodeTarget(intptr_t code_target_index) const {
+IndirectHandle<Code> AssemblerBase::GetCodeTarget(
+    intptr_t code_target_index) const {
   DCHECK_LT(static_cast<size_t>(code_target_index), code_targets_.size());
   return code_targets_[code_target_index];
 }
 
 AssemblerBase::EmbeddedObjectIndex AssemblerBase::AddEmbeddedObject(
-    Handle<HeapObject> object) {
+    IndirectHandle<HeapObject> object) {
   EmbeddedObjectIndex current = embedded_objects_.size();
   // Do not deduplicate invalid handles, they are to heap object requests.
   if (!object.is_null()) {
@@ -360,15 +334,19 @@ AssemblerBase::EmbeddedObjectIndex AssemblerBase::AddEmbeddedObject(
   return current;
 }
 
-Handle<HeapObject> AssemblerBase::GetEmbeddedObject(
+IndirectHandle<HeapObject> AssemblerBase::GetEmbeddedObject(
     EmbeddedObjectIndex index) const {
   DCHECK_LT(index, embedded_objects_.size());
   return embedded_objects_[index];
 }
 
+void AssemblerBase::RecordJSDispatchHandle(JSDispatchHandle handle,
+                                           uint16_t argument_count) {
+  js_dispatch_handles_.push_back({handle, argument_count});
+}
 
 int Assembler::WriteCodeComments() {
-  if (!FLAG_code_comments) return 0;
+  if (!v8_flags.code_comments) return 0;
   CHECK_IMPLIES(code_comments_writer_.entry_count() > 0,
                 options().emit_code_comments);
   if (code_comments_writer_.entry_count() == 0) return 0;
@@ -381,12 +359,13 @@ int Assembler::WriteCodeComments() {
 
 #ifdef V8_CODE_COMMENTS
 int Assembler::CodeComment::depth() const { return assembler_->comment_depth_; }
-void Assembler::CodeComment::Open(const std::string& comment) {
+void Assembler::CodeComment::Open(const std::string& comment,
+                                  SourceLocation loc) {
   std::stringstream sstream;
   sstream << std::setfill(' ') << std::setw(depth() * kIndentWidth + 2);
   sstream << "[ " << comment;
   assembler_->comment_depth_++;
-  assembler_->RecordComment(sstream.str());
+  assembler_->RecordComment(sstream.str(), loc);
 }
 
 void Assembler::CodeComment::Close() {
@@ -394,7 +373,8 @@ void Assembler::CodeComment::Close() {
   std::string comment = "]";
   comment.insert(0, depth() * kIndentWidth, ' ');
   DCHECK_LE(0, depth());
-  assembler_->RecordComment(comment);
+  // Don't record source information for the closed comment.
+  assembler_->RecordComment(comment, SourceLocation());
 }
 #endif
 

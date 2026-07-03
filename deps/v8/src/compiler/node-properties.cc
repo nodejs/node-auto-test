@@ -3,18 +3,17 @@
 // found in the LICENSE file.
 
 #include "src/compiler/node-properties.h"
+
+#include <optional>
+
 #include "src/compiler/common-operator.h"
-#include "src/compiler/graph.h"
 #include "src/compiler/js-heap-broker.h"
-#include "src/compiler/js-operator.h"
-#include "src/compiler/linkage.h"
 #include "src/compiler/map-inference.h"
 #include "src/compiler/node-matchers.h"
 #include "src/compiler/operator-properties.h"
 #include "src/compiler/simplified-operator.h"
+#include "src/compiler/turbofan-graph.h"
 #include "src/compiler/verifier.h"
-#include "src/handles/handles-inl.h"
-#include "src/objects/objects-inl.h"
 
 namespace v8 {
 namespace internal {
@@ -150,15 +149,14 @@ void NodeProperties::RemoveValueInputs(Node* node) {
   }
 }
 
-
-void NodeProperties::MergeControlToEnd(Graph* graph,
+void NodeProperties::MergeControlToEnd(TFGraph* graph,
                                        CommonOperatorBuilder* common,
                                        Node* node) {
   graph->end()->AppendInput(graph->zone(), node);
   graph->end()->set_op(common->End(graph->end()->InputCount()));
 }
 
-void NodeProperties::RemoveControlFromEnd(Graph* graph,
+void NodeProperties::RemoveControlFromEnd(TFGraph* graph,
                                           CommonOperatorBuilder* common,
                                           Node* node) {
   int index_to_remove = -1;
@@ -207,6 +205,10 @@ void NodeProperties::ChangeOp(Node* node, const Operator* new_op) {
   Verifier::VerifyNode(node);
 }
 
+// static
+void NodeProperties::ChangeOpUnchecked(Node* node, const Operator* new_op) {
+  node->set_op(new_op);
+}
 
 // static
 Node* NodeProperties::FindFrameStateBefore(Node* node,
@@ -307,13 +309,68 @@ void NodeProperties::CollectControlProjections(Node* node, Node** projections,
 }
 
 // static
+MachineRepresentation NodeProperties::GetProjectionType(
+    Node const* projection) {
+  size_t index = ProjectionIndexOf(projection->op());
+  Node* input = projection->InputAt(0);
+  switch (input->opcode()) {
+    case IrOpcode::kInt32AddWithOverflow:
+    case IrOpcode::kInt32SubWithOverflow:
+    case IrOpcode::kInt32MulWithOverflow:
+    case IrOpcode::kInt32AbsWithOverflow:
+      CHECK_LE(index, static_cast<size_t>(1));
+      return index == 0 ? MachineRepresentation::kWord32
+                        : MachineRepresentation::kBit;
+    case IrOpcode::kInt64AddWithOverflow:
+    case IrOpcode::kInt64SubWithOverflow:
+    case IrOpcode::kInt64MulWithOverflow:
+    case IrOpcode::kInt64AbsWithOverflow:
+      CHECK_LE(index, static_cast<size_t>(1));
+      return index == 0 ? MachineRepresentation::kWord64
+                        : MachineRepresentation::kBit;
+    case IrOpcode::kTryTruncateFloat64ToInt32:
+    case IrOpcode::kTryTruncateFloat64ToUint32:
+      CHECK_LE(index, static_cast<size_t>(1));
+      return index == 0 ? MachineRepresentation::kWord32
+                        : MachineRepresentation::kBit;
+    case IrOpcode::kTryTruncateFloat32ToInt64:
+    case IrOpcode::kTryTruncateFloat64ToInt64:
+    case IrOpcode::kTryTruncateFloat64ToUint64:
+    case IrOpcode::kTryTruncateFloat32ToUint64:
+      CHECK_LE(index, static_cast<size_t>(1));
+      return index == 0 ? MachineRepresentation::kWord64
+                        : MachineRepresentation::kBit;
+    case IrOpcode::kCall: {
+      auto call_descriptor = CallDescriptorOf(input->op());
+      return call_descriptor->GetReturnType(index).representation();
+    }
+    case IrOpcode::kInt32PairAdd:
+    case IrOpcode::kInt32PairSub:
+    case IrOpcode::kWord32AtomicPairLoad:
+    case IrOpcode::kWord32AtomicPairAdd:
+    case IrOpcode::kWord32AtomicPairSub:
+    case IrOpcode::kWord32AtomicPairAnd:
+    case IrOpcode::kWord32AtomicPairOr:
+    case IrOpcode::kWord32AtomicPairXor:
+    case IrOpcode::kWord32AtomicPairExchange:
+    case IrOpcode::kWord32AtomicPairCompareExchange:
+      CHECK_LE(index, static_cast<size_t>(1));
+      return MachineRepresentation::kWord32;
+    default:
+      return MachineRepresentation::kNone;
+  }
+}
+
+// static
 bool NodeProperties::IsSame(Node* a, Node* b) {
   for (;;) {
-    if (a->opcode() == IrOpcode::kCheckHeapObject) {
+    if (a->opcode() == IrOpcode::kCheckHeapObject ||
+        a->opcode() == IrOpcode::kTypeGuard) {
       a = GetValueInput(a, 0);
       continue;
     }
-    if (b->opcode() == IrOpcode::kCheckHeapObject) {
+    if (b->opcode() == IrOpcode::kCheckHeapObject ||
+        b->opcode() == IrOpcode::kTypeGuard) {
       b = GetValueInput(b, 0);
       continue;
     }
@@ -322,8 +379,8 @@ bool NodeProperties::IsSame(Node* a, Node* b) {
 }
 
 // static
-base::Optional<MapRef> NodeProperties::GetJSCreateMap(JSHeapBroker* broker,
-                                                      Node* receiver) {
+OptionalMapRef NodeProperties::GetJSCreateMap(JSHeapBroker* broker,
+                                              Node* receiver) {
   DCHECK(receiver->opcode() == IrOpcode::kJSCreate ||
          receiver->opcode() == IrOpcode::kJSCreateArray);
   HeapObjectMatcher mtarget(GetValueInput(receiver, 0));
@@ -332,48 +389,27 @@ base::Optional<MapRef> NodeProperties::GetJSCreateMap(JSHeapBroker* broker,
       mnewtarget.Ref(broker).IsJSFunction()) {
     ObjectRef target = mtarget.Ref(broker);
     JSFunctionRef newtarget = mnewtarget.Ref(broker).AsJSFunction();
-    if (newtarget.map().has_prototype_slot() &&
-        newtarget.has_initial_map(broker->dependencies())) {
-      MapRef initial_map = newtarget.initial_map(broker->dependencies());
-      if (initial_map.GetConstructor().equals(target)) {
-        DCHECK(target.AsJSFunction().map().is_constructor());
-        DCHECK(newtarget.map().is_constructor());
+    if (newtarget.map(broker).has_prototype_slot() &&
+        newtarget.has_initial_map(broker)) {
+      MapRef initial_map = newtarget.initial_map(broker);
+      OptionalObjectRef ctor = initial_map.GetConstructor(broker);
+      if (ctor.has_value() && ctor->equals(target)) {
+        DCHECK(target.AsJSFunction().map(broker).is_constructor());
+        DCHECK(newtarget.map(broker).is_constructor());
         return initial_map;
       }
     }
   }
-  return base::nullopt;
+  return std::nullopt;
 }
-
-namespace {
-
-// TODO(jgruber): Remove the intermediate ZoneHandleSet and then this function.
-ZoneRefUnorderedSet<MapRef> ToRefSet(JSHeapBroker* broker,
-                                     const ZoneHandleSet<Map>& handles) {
-  ZoneRefUnorderedSet<MapRef> refs =
-      ZoneRefUnorderedSet<MapRef>(broker->zone());
-  for (Handle<Map> handle : handles) {
-    refs.insert(MakeRefAssumeMemoryFence(broker, *handle));
-  }
-  return refs;
-}
-
-ZoneRefUnorderedSet<MapRef> RefSetOf(JSHeapBroker* broker, const MapRef& ref) {
-  ZoneRefUnorderedSet<MapRef> refs =
-      ZoneRefUnorderedSet<MapRef>(broker->zone());
-  refs.insert(ref);
-  return refs;
-}
-
-}  // namespace
 
 // static
 NodeProperties::InferMapsResult NodeProperties::InferMapsUnsafe(
     JSHeapBroker* broker, Node* receiver, Effect effect,
-    ZoneRefUnorderedSet<MapRef>* maps_out) {
+    ZoneRefSet<Map>* maps_out) {
   HeapObjectMatcher m(receiver);
   if (m.HasResolvedValue()) {
-    HeapObjectRef receiver = m.Ref(broker);
+    HeapObjectRef ref = m.Ref(broker);
     // We don't use ICs for the Array.prototype and the Object.prototype
     // because the runtime has to be able to intercept them properly, so
     // we better make sure that TurboFan doesn't outsmart the system here
@@ -381,23 +417,39 @@ NodeProperties::InferMapsResult NodeProperties::InferMapsUnsafe(
     //
     // TODO(bmeurer): This can be removed once the Array.prototype and
     // Object.prototype have NO_ELEMENTS elements kind.
-    if (!receiver.IsJSObject() ||
-        !broker->IsArrayOrObjectPrototype(receiver.AsJSObject())) {
-      if (receiver.map().is_stable()) {
+    if (!ref.IsJSObject() ||
+        !ref.AsJSObject().IsArrayOrObjectPrototype(broker)) {
+      if (ref.map(broker).is_stable()) {
         // The {receiver_map} is only reliable when we install a stability
         // code dependency.
-        *maps_out = RefSetOf(broker, receiver.map());
+        *maps_out = ZoneRefSet<Map>{ref.map(broker)};
         return kUnreliableMaps;
       }
     }
   }
   InferMapsResult result = kReliableMaps;
   while (true) {
+#ifdef DEBUG
+    InferMapsResult prev_result = result;
+    bool write_might_change_aliasing_maps = true;
+#define WRITE_CANNOT_CHANGE_ALIASING_MAPS() \
+  write_might_change_aliasing_maps = false
+#else
+// Swallow the semicolon.
+#define WRITE_CANNOT_CHANGE_ALIASING_MAPS() ((void)0)
+#endif
+
     switch (effect->opcode()) {
+      case IrOpcode::kTypeGuard: {
+        DCHECK_EQ(1, effect->op()->EffectInputCount());
+        effect = NodeProperties::GetEffectInput(effect);
+        continue;
+      }
+
       case IrOpcode::kMapGuard: {
         Node* const object = GetValueInput(effect, 0);
         if (IsSame(receiver, object)) {
-          *maps_out = ToRefSet(broker, MapGuardMapsOf(effect->op()));
+          *maps_out = MapGuardMapsOf(effect->op());
           return result;
         }
         break;
@@ -405,17 +457,38 @@ NodeProperties::InferMapsResult NodeProperties::InferMapsUnsafe(
       case IrOpcode::kCheckMaps: {
         Node* const object = GetValueInput(effect, 0);
         if (IsSame(receiver, object)) {
-          *maps_out =
-              ToRefSet(broker, CheckMapsParametersOf(effect->op()).maps());
+          *maps_out = CheckMapsParametersOf(effect->op()).maps();
           return result;
         }
+        // This is subtle: CheckMaps with TryMigrateInstance _can_ write maps,
+        // but it can only transition away from deprecated maps, which should
+        // never be inferable maps, since we eagerly try to find the migration
+        // target of deprecated maps when we see them. It could be that a
+        // previous CheckMaps or other map inference node contains deprecated
+        // maps as of this check, because there could have been a concurrent
+        // deprecation, and this means that we can't CHECK this invariant here;
+        // but, then compilation would fail during finalization thanks to a
+        // CheckNoDeprecatedMaps check.
+        WRITE_CANNOT_CHANGE_ALIASING_MAPS();
+        break;
+      }
+      case IrOpcode::kTransitionElementsKindOrCheckMap: {
+        Node* const object = GetValueInput(effect, 0);
+        if (IsSame(receiver, object)) {
+          *maps_out = ZoneRefSet<Map>{
+              ElementsTransitionWithMultipleSourcesOf(effect->op()).target()};
+          return result;
+        }
+        // `receiver` and `object` might alias, so
+        // TransitionElementsKindOrCheckMaps might change receiver's map.
+        result = kUnreliableMaps;
         break;
       }
       case IrOpcode::kJSCreate: {
         if (IsSame(receiver, effect)) {
-          base::Optional<MapRef> initial_map = GetJSCreateMap(broker, receiver);
+          OptionalMapRef initial_map = GetJSCreateMap(broker, receiver);
           if (initial_map.has_value()) {
-            *maps_out = RefSetOf(broker, initial_map.value());
+            *maps_out = ZoneRefSet<Map>{initial_map.value()};
             return result;
           }
           // We reached the allocation of the {receiver}.
@@ -426,12 +499,12 @@ NodeProperties::InferMapsResult NodeProperties::InferMapsUnsafe(
       }
       case IrOpcode::kJSCreatePromise: {
         if (IsSame(receiver, effect)) {
-          *maps_out = RefSetOf(
-              broker,
-              broker->target_native_context().promise_function().initial_map(
-                  broker->dependencies()));
+          *maps_out = ZoneRefSet<Map>{broker->target_native_context()
+                                          .promise_function(broker)
+                                          .initial_map(broker)};
           return result;
         }
+        WRITE_CANNOT_CHANGE_ALIASING_MAPS();
         break;
       }
       case IrOpcode::kStoreField: {
@@ -442,15 +515,17 @@ NodeProperties::InferMapsResult NodeProperties::InferMapsUnsafe(
             access.offset == HeapObject::kMapOffset) {
           if (IsSame(receiver, object)) {
             Node* const value = GetValueInput(effect, 1);
-            HeapObjectMatcher m(value);
-            if (m.HasResolvedValue()) {
-              *maps_out = RefSetOf(broker, m.Ref(broker).AsMap());
+            HeapObjectMatcher m2(value);
+            if (m2.HasResolvedValue()) {
+              *maps_out = ZoneRefSet<Map>{m2.Ref(broker).AsMap()};
               return result;
             }
           }
           // Without alias analysis we cannot tell whether this
           // StoreField[map] affects {receiver} or not.
           result = kUnreliableMaps;
+        } else {
+          WRITE_CANNOT_CHANGE_ALIASING_MAPS();
         }
         break;
       }
@@ -459,6 +534,7 @@ NodeProperties::InferMapsResult NodeProperties::InferMapsUnsafe(
       case IrOpcode::kStoreElement:
       case IrOpcode::kStoreTypedElement: {
         // These never change the map of objects.
+        WRITE_CANNOT_CHANGE_ALIASING_MAPS();
         break;
       }
       case IrOpcode::kFinishRegion: {
@@ -466,6 +542,8 @@ NodeProperties::InferMapsResult NodeProperties::InferMapsUnsafe(
         // to update the {receiver} that we are looking for, if the
         // {receiver} matches the current {effect}.
         if (IsSame(receiver, effect)) receiver = GetValueInput(effect, 0);
+        // This never change the map of objects.
+        WRITE_CANNOT_CHANGE_ALIASING_MAPS();
         break;
       }
       case IrOpcode::kEffectPhi: {
@@ -496,6 +574,16 @@ NodeProperties::InferMapsResult NodeProperties::InferMapsUnsafe(
         break;
       }
     }
+
+#undef WRITE_CANNOT_CHANGE_ALIASING_MAPS
+#ifdef DEBUG
+    if (effect->op()->HasProperty(Operator::kNoWrite) ||
+        !write_might_change_aliasing_maps) {
+      DCHECK_EQ(result, prev_result);
+    } else {
+      DCHECK_EQ(result, kUnreliableMaps);
+    }
+#endif
 
     // Stop walking the effect chain once we hit the definition of
     // the {receiver} along the {effect}s.
@@ -536,7 +624,7 @@ bool NodeProperties::CanBePrimitive(JSHeapBroker* broker, Node* receiver,
       return false;
     case IrOpcode::kHeapConstant: {
       HeapObjectRef value = HeapObjectMatcher(receiver).Ref(broker);
-      return value.map().IsPrimitiveMap();
+      return value.map(broker).IsPrimitiveMap();
     }
     default: {
       MapInference inference(broker, receiver, effect);
@@ -553,6 +641,7 @@ bool NodeProperties::CanBeNullOrUndefined(JSHeapBroker* broker, Node* receiver,
     switch (receiver->opcode()) {
       case IrOpcode::kCheckInternalizedString:
       case IrOpcode::kCheckNumber:
+      case IrOpcode::kCheckNumberFitsInt32:
       case IrOpcode::kCheckSmi:
       case IrOpcode::kCheckString:
       case IrOpcode::kCheckSymbol:
@@ -566,7 +655,7 @@ bool NodeProperties::CanBeNullOrUndefined(JSHeapBroker* broker, Node* receiver,
         return false;
       case IrOpcode::kHeapConstant: {
         HeapObjectRef value = HeapObjectMatcher(receiver).Ref(broker);
-        OddballType type = value.map().oddball_type();
+        OddballType type = value.map(broker).oddball_type(broker);
         return type == OddballType::kNull || type == OddballType::kUndefined;
       }
       default:
@@ -599,38 +688,6 @@ bool NodeProperties::AllValueInputsAreTyped(Node* node) {
     if (!IsTyped(GetValueInput(node, index))) return false;
   }
   return true;
-}
-
-// static
-bool NodeProperties::IsFreshObject(Node* node) {
-  if (node->opcode() == IrOpcode::kAllocate ||
-      node->opcode() == IrOpcode::kAllocateRaw)
-    return true;
-#if V8_ENABLE_WEBASSEMBLY
-  if (node->opcode() == IrOpcode::kCall) {
-    // TODO(manoskouk): Currently, some wasm builtins are called with in
-    // CallDescriptor::kCallWasmFunction mode. Make sure this is synced if the
-    // calling mechanism is refactored.
-    if (CallDescriptorOf(node->op())->kind() !=
-        CallDescriptor::kCallBuiltinPointer) {
-      return false;
-    }
-    NumberMatcher matcher(node->InputAt(0));
-    if (matcher.HasResolvedValue()) {
-      Builtin callee = static_cast<Builtin>(matcher.ResolvedValue());
-      // Note: Make sure to only add builtins which are guaranteed to return a
-      // fresh object. E.g. kWasmAllocateFixedArray may return the canonical
-      // empty array, and kWasmAllocateRtt may return a cached rtt.
-      return callee == Builtin::kWasmAllocateArray_Uninitialized ||
-             callee == Builtin::kWasmAllocateArray_InitNull ||
-             callee == Builtin::kWasmAllocateArray_InitZero ||
-             callee == Builtin::kWasmAllocateStructWithRtt ||
-             callee == Builtin::kWasmAllocateObjectWrapper ||
-             callee == Builtin::kWasmAllocatePair;
-    }
-  }
-#endif  // V8_ENABLE_WEBASSEMBLY
-  return false;
 }
 
 // static

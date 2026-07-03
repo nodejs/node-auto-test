@@ -5,188 +5,123 @@
 #ifndef V8_HEAP_PAGED_SPACES_INL_H_
 #define V8_HEAP_PAGED_SPACES_INL_H_
 
+#include "src/heap/paged-spaces.h"
+// Include the non-inl header before the rest of the headers.
+
 #include "src/common/globals.h"
 #include "src/heap/heap-inl.h"
 #include "src/heap/incremental-marking.h"
-#include "src/heap/paged-spaces.h"
 #include "src/objects/heap-object.h"
 #include "src/objects/objects-inl.h"
 
 namespace v8 {
 namespace internal {
 
-// -----------------------------------------------------------------------------
-// PagedSpaceObjectIterator
+HeapObjectRange::iterator::iterator() : cage_base_(kNullAddress) {}
 
-HeapObject PagedSpaceObjectIterator::Next() {
-  do {
-    HeapObject next_obj = FromCurrentPage();
-    if (!next_obj.is_null()) return next_obj;
-  } while (AdvanceToNextPage());
-  return HeapObject();
+HeapObjectRange::iterator::iterator(const NormalPage* page)
+    : cage_base_(page->heap()->isolate()),
+      cur_addr_(page->area_start()),
+      cur_end_(page->area_end()) {
+  AdvanceToNextObject();
 }
 
-HeapObject PagedSpaceObjectIterator::FromCurrentPage() {
+HeapObjectRange::iterator& HeapObjectRange::iterator::operator++() {
+  DCHECK_GT(cur_size_, 0);
+  cur_addr_ += cur_size_;
+  AdvanceToNextObject();
+  return *this;
+}
+
+HeapObjectRange::iterator HeapObjectRange::iterator::operator++(int) {
+  iterator retval = *this;
+  ++(*this);
+  return retval;
+}
+
+void HeapObjectRange::iterator::AdvanceToNextObject() {
+  DCHECK_NE(cur_addr_, kNullAddress);
   while (cur_addr_ != cur_end_) {
-    HeapObject obj = HeapObject::FromAddress(cur_addr_);
-    const int obj_size = obj.Size();
-    cur_addr_ += obj_size;
-    DCHECK_LE(cur_addr_, cur_end_);
-    if (!obj.IsFreeSpaceOrFiller()) {
-      if (obj.IsCode()) {
-        DCHECK_EQ(space_->identity(), CODE_SPACE);
-        DCHECK_CODEOBJECT_SIZE(obj_size, space_);
+    DCHECK_LT(cur_addr_, cur_end_);
+    Tagged<HeapObject> obj = HeapObject::FromAddress(cur_addr_);
+    cur_size_ = ALIGN_TO_ALLOCATION_ALIGNMENT(obj->Size(cage_base()));
+    DCHECK_LE(cur_addr_ + cur_size_, cur_end_);
+    if (IsFreeSpaceOrFiller(obj, cage_base())) {
+      cur_addr_ += cur_size_;
+    } else {
+#ifdef DEBUG
+      if (IsInstructionStream(obj, cage_base())) {
+        DCHECK_EQ(NormalPage::FromHeapObject(obj)->owner_identity(),
+                  CODE_SPACE);
+        DCHECK_VALID_REGULAR_CODEOBJECT_SIZE(cur_size_);
       } else {
-        DCHECK_OBJECT_SIZE(obj_size);
+        DCHECK_VALID_REGULAR_OBJECT_SIZE(cur_size_);
       }
-      return obj;
+#endif  // DEBUG
+      return;
     }
   }
-  return HeapObject();
+  cur_addr_ = kNullAddress;
 }
 
-bool PagedSpace::Contains(Address addr) const {
-  if (V8_ENABLE_THIRD_PARTY_HEAP_BOOL) {
-    return true;
-  }
-  return Page::FromAddress(addr)->owner() == this;
+HeapObjectRange::iterator HeapObjectRange::begin() { return iterator(page_); }
+
+HeapObjectRange::iterator HeapObjectRange::end() { return iterator(); }
+
+Tagged<HeapObject> PagedSpaceObjectIterator::Next() {
+  do {
+    if (cur_ != end_) {
+      return *cur_++;
+    }
+  } while (AdvanceToNextPage());
+  return Tagged<HeapObject>();
 }
 
-bool PagedSpace::Contains(Object o) const {
-  if (!o.IsHeapObject()) return false;
-  return Page::FromAddress(o.ptr())->owner() == this;
+bool PagedSpaceBase::Contains(Address addr) const {
+  return BasePage::FromAddress(heap()->isolate(), addr)->owner() == this;
 }
 
-void PagedSpace::UnlinkFreeListCategories(Page* page) {
-  DCHECK_EQ(this, page->owner());
-  page->ForAllFreeListCategories([this](FreeListCategory* category) {
-    free_list()->RemoveCategory(category);
-  });
+bool PagedSpaceBase::Contains(Tagged<Object> o) const {
+  if (!IsHeapObject(o)) return false;
+  return BasePage::FromAddress(heap()->isolate(), o.ptr())->owner() == this;
 }
 
-size_t PagedSpace::RelinkFreeListCategories(Page* page) {
-  DCHECK_EQ(this, page->owner());
-  size_t added = 0;
-  page->ForAllFreeListCategories([this, &added](FreeListCategory* category) {
-    added += category->available();
-    category->Relink(free_list());
-  });
-
-  DCHECK_IMPLIES(!page->IsFlagSet(Page::NEVER_ALLOCATE_ON_PAGE),
-                 page->AvailableInFreeList() ==
-                     page->AvailableInFreeListFromAllocatedBytes());
-  return added;
-}
-
-bool PagedSpace::TryFreeLast(Address object_address, int object_size) {
-  if (allocation_info_.top() != kNullAddress) {
-    return allocation_info_.DecrementTopIfAdjacent(object_address, object_size);
-  }
-  return false;
-}
-
-bool PagedSpace::EnsureLabMain(int size_in_bytes, AllocationOrigin origin) {
-  if (allocation_info_.top() + size_in_bytes <= allocation_info_.limit()) {
-    return true;
-  }
-  return RefillLabMain(size_in_bytes, origin);
-}
-
-AllocationResult PagedSpace::AllocateFastUnaligned(int size_in_bytes) {
-  if (!allocation_info_.CanIncrementTop(size_in_bytes)) {
-    return AllocationResult::Retry(identity());
-  }
-  return AllocationResult(
-      HeapObject::FromAddress(allocation_info_.IncrementTop(size_in_bytes)));
-}
-
-AllocationResult PagedSpace::AllocateFastAligned(
-    int size_in_bytes, int* aligned_size_in_bytes,
-    AllocationAlignment alignment) {
-  Address current_top = allocation_info_.top();
-  int filler_size = Heap::GetFillToAlign(current_top, alignment);
-  int aligned_size = filler_size + size_in_bytes;
-  if (!allocation_info_.CanIncrementTop(aligned_size)) {
-    return AllocationResult::Retry(identity());
-  }
-  HeapObject obj =
-      HeapObject::FromAddress(allocation_info_.IncrementTop(aligned_size));
-  if (aligned_size_in_bytes) *aligned_size_in_bytes = aligned_size;
-  if (filler_size > 0) {
-    obj = Heap::PrecedeWithFiller(ReadOnlyRoots(heap()), obj, filler_size);
-  }
-  return AllocationResult(obj);
-}
-
-AllocationResult PagedSpace::AllocateRawUnaligned(int size_in_bytes,
-                                                  AllocationOrigin origin) {
-  DCHECK(!FLAG_enable_third_party_heap);
-  if (!EnsureLabMain(size_in_bytes, origin)) {
-    return AllocationResult::Retry(identity());
-  }
-
-  AllocationResult result = AllocateFastUnaligned(size_in_bytes);
-  DCHECK(!result.IsRetry());
-  MSAN_ALLOCATED_UNINITIALIZED_MEMORY(result.ToObjectChecked().address(),
-                                      size_in_bytes);
-
-  if (FLAG_trace_allocations_origins) {
-    UpdateAllocationOrigins(origin);
-  }
-
-  InvokeAllocationObservers(result.ToAddress(), size_in_bytes, size_in_bytes,
-                            size_in_bytes);
-
-  return result;
-}
-
-AllocationResult PagedSpace::AllocateRawAligned(int size_in_bytes,
-                                                AllocationAlignment alignment,
-                                                AllocationOrigin origin) {
-  DCHECK(!FLAG_enable_third_party_heap);
-  DCHECK_EQ(identity(), OLD_SPACE);
-  int allocation_size = size_in_bytes;
-  // We don't know exactly how much filler we need to align until space is
-  // allocated, so assume the worst case.
-  int filler_size = Heap::GetMaximumFillToAlign(alignment);
-  allocation_size += filler_size;
-  if (!EnsureLabMain(allocation_size, origin)) {
-    return AllocationResult::Retry(identity());
-  }
-  int aligned_size_in_bytes;
-  AllocationResult result =
-      AllocateFastAligned(size_in_bytes, &aligned_size_in_bytes, alignment);
-  DCHECK(!result.IsRetry());
-  MSAN_ALLOCATED_UNINITIALIZED_MEMORY(result.ToObjectChecked().address(),
-                                      size_in_bytes);
-
-  if (FLAG_trace_allocations_origins) {
-    UpdateAllocationOrigins(origin);
-  }
-
-  InvokeAllocationObservers(result.ToAddress(), size_in_bytes,
-                            aligned_size_in_bytes, allocation_size);
-
-  return result;
-}
-
-AllocationResult PagedSpace::AllocateRaw(int size_in_bytes,
-                                         AllocationAlignment alignment,
-                                         AllocationOrigin origin) {
-  DCHECK(!FLAG_enable_third_party_heap);
-  AllocationResult result;
-
-  if (alignment != kWordAligned) {
-    result = AllocateFastAligned(size_in_bytes, nullptr, alignment);
+template <bool during_sweep>
+size_t PagedSpaceBase::FreeInternal(Address start, size_t size_in_bytes) {
+  if (size_in_bytes == 0) return 0;
+  size_t wasted;
+  if (executable_) {
+    WritableJitPage jit_page(start, size_in_bytes);
+    WritableFreeSpace free_space = jit_page.FreeRange(start, size_in_bytes);
+    heap()->CreateFillerObjectAtBackground(free_space);
+    wasted =
+        free_list_->Free(heap()->isolate(), free_space,
+                         during_sweep ? kDoNotLinkCategory : kLinkCategory);
   } else {
-    result = AllocateFastUnaligned(size_in_bytes);
+    WritableFreeSpace free_space =
+        WritableFreeSpace::ForNonExecutableMemory(start, size_in_bytes);
+    heap()->CreateFillerObjectAtBackground(free_space);
+    wasted =
+        free_list_->Free(heap()->isolate(), free_space,
+                         during_sweep ? kDoNotLinkCategory : kLinkCategory);
   }
 
-  if (!result.IsRetry()) {
-    return result;
-  } else {
-    return AllocateRawSlow(size_in_bytes, alignment, origin);
+  if constexpr (!during_sweep) {
+    NormalPage* page = NormalPage::FromAddress(start);
+    accounting_stats_.DecreaseAllocatedBytes(size_in_bytes, page);
+    free_list()->increase_wasted_bytes(wasted);
   }
+
+  DCHECK_GE(size_in_bytes, wasted);
+  return size_in_bytes - wasted;
+}
+
+size_t PagedSpaceBase::Free(Address start, size_t size_in_bytes) {
+  return FreeInternal</*during_sweep=*/false>(start, size_in_bytes);
+}
+
+size_t PagedSpaceBase::FreeDuringSweep(Address start, size_t size_in_bytes) {
+  return FreeInternal</*during_sweep=*/true>(start, size_in_bytes);
 }
 
 }  // namespace internal

@@ -6,11 +6,10 @@ const common = require('../common');
 const tmpdir = require('../common/tmpdir');
 const fs = require('fs');
 const assert = require('assert');
-const path = require('path');
 
 tmpdir.refresh();
 
-const file = path.join(tmpdir.path, '/read_stream_pos_test.txt');
+const file = tmpdir.resolve('read_stream_pos_test.txt');
 
 fs.writeFileSync(file, '');
 
@@ -28,7 +27,7 @@ let isLow = false;
 let cur = 0;
 let stream;
 
-const readInterval = setInterval(() => {
+const readInterval = setInterval(common.mustCallAtLeast(() => {
   if (stream) return;
 
   stream = fs.createReadStream(file, {
@@ -61,7 +60,7 @@ const readInterval = setInterval(() => {
     isLow = false;
     bufs = [];
   });
-}, 10);
+}), 10);
 
 // Time longer than 90 seconds to exit safely
 const endTimer = setTimeout(() => {

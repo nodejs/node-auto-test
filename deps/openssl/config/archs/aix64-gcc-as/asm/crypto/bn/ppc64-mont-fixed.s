@@ -15,6 +15,7 @@
 	std	26,-64(1)
 	std	27,-72(1)
 
+	li	0,0
 	ld	7,0(7)
 
 	ld	11,0(5)
@@ -110,7 +111,7 @@ Louter_6:
 	addze	10,10
 
 	addc	26,26,10
-	addze	27,27
+	addze	27,0
 .align	4
 Lenter_6:
 	mulld	11,20,7
@@ -237,6 +238,7 @@ Lend_6:
 	std	26,-64(1)
 	std	27,-72(1)
 
+	li	0,0
 	ld	7,0(7)
 
 	ld	11,0(5)
@@ -311,7 +313,7 @@ Louter_300_6:
 	addze	10,10
 
 	addc	26,26,10
-	addze	27,27
+	addze	27,0
 .align	4
 Lenter_300_6:
 	mulld	11,20,7

@@ -1,5 +1,5 @@
 #! /usr/bin/env perl
-# Copyright 2018-2021 The OpenSSL Project Authors. All Rights Reserved.
+# Copyright 2018-2023 The OpenSSL Project Authors. All Rights Reserved.
 #
 # Licensed under the Apache License 2.0 (the "License").  You may not use
 # this file except in compliance with the License.  You can obtain a copy
@@ -349,7 +349,7 @@ sub _putback {
         croak "Duplicate entries for ".$items[0]->name()." from ".
             $items[0]->source()." and ".$items[1]->source()."\n"
             if $items[0]->name() eq $items[1]->name()
-            && $items[0]->type() eq $items[2]->type()
+            && $items[0]->type() eq $items[1]->type()
             && $items[0]->platforms() eq $items[1]->platforms();
 
         # Check that all platforms exist in both items, and have opposite values
@@ -414,6 +414,8 @@ sub _parse_features {
         my $def = $';
 
         if ($def =~ m{^ZLIB$})                      { $features{$&} =  $op; }
+        if ($def =~ m{^BROTLI$})                    { $features{$&} =  $op; }
+        if ($def =~ m{^ZSTD$})                      { $features{$&} =  $op; }
         if ($def =~ m{^OPENSSL_USE_})               { $features{$'} =  $op; }
         if ($def =~ m{^OPENSSL_NO_})                { $features{$'} = !$op; }
     }
@@ -622,10 +624,6 @@ sub set_version {
     # '*' is for "we don't care"
     my $version = shift // '*';
     my $baseversion = shift // '*';
-
-    $version =~ s|-.*||g;
-    # Remove anything past the '+' (i.e. BUILD_METADATA from VERSION.dat)
-    $version =~ s|\+.*||g;
 
     if ($baseversion eq '*') {
         $baseversion = $version;

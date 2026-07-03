@@ -128,7 +128,7 @@ typedef UElementsAreEqual UValueComparator;
 /* see cmemory.h for UObjectDeleter and uprv_deleteUObject() */
 
 /**
- * This specifies whether or not, and how, the hastable resizes itself.
+ * This specifies whether or not, and how, the hashtable resizes itself.
  * See uhash_setResizePolicy().
  */
 enum UHashResizePolicy {
@@ -209,7 +209,7 @@ uhash_open(UHashFunction *keyHash,
  * NULL.
  * @param keyComp A pointer to the function that compares keys.  Must
  * not be NULL.
- * @param size The initial capacity of this hash table.
+ * @param size The initial capacity of this hashtable.
  * @param status A pointer to an UErrorCode to receive any errors.
  * @return A pointer to a UHashtable, or 0 if an error occurred.
  * @see uhash_open
@@ -244,7 +244,7 @@ uhash_init(UHashtable *hash,
  * NULL.
  * @param keyComp A pointer to the function that compares keys.  Must
  * not be NULL.
- * @param size The initial capacity of this hash table.
+ * @param size The initial capacity of this hashtable.
  * @param status A pointer to an UErrorCode to receive any errors.
  * @return A pointer to a UHashtable, or 0 if an error occurred.
  * @see uhash_openSize
@@ -322,7 +322,7 @@ U_CAPI UObjectDeleter *U_EXPORT2
 uhash_setValueDeleter(UHashtable *hash, UObjectDeleter *fn);
 
 /**
- * Specify whether or not, and how, the hastable resizes itself.
+ * Specify whether or not, and how, the hashtable resizes itself.
  * By default, tables grow but do not shrink (policy U_GROW).
  * See enum UHashResizePolicy.
  * @param hash The UHashtable to set
@@ -695,6 +695,15 @@ U_CAPI int32_t U_EXPORT2
 uhash_hashIChars(const UHashTok key);
 
 /**
+ * Generate a case-insensitive hash code for a std::string_view.
+ * Use together with uhash_compareIStringView.
+ * @param key A pointer to the std::string_view to hash.
+ * @return A hash code for the key.
+ */
+U_CAPI int32_t U_EXPORT2
+uhash_hashIStringView(const UHashTok key);
+
+/**
  * Comparator for null-terminated UChar* strings.  Use together with
  * uhash_hashUChars.
  * @param key1 The string for comparison
@@ -723,6 +732,16 @@ uhash_compareChars(const UHashTok key1, const UHashTok key2);
  */
 U_CAPI UBool U_EXPORT2
 uhash_compareIChars(const UHashTok key1, const UHashTok key2);
+
+/**
+ * Case-insensitive comparator for std::string_view.
+ * Use together with uhash_hashIStringView.
+ * @param key1 A pointer to the std::string_view for comparison
+ * @param key2 A pointer to the std::string_view for comparison
+ * @return true if key1 and key2 are equal, return false otherwise.
+ */
+U_CAPI UBool U_EXPORT2
+uhash_compareIStringView(const UHashTok key1, const UHashTok key2);
 
 /********************************************************************
  * UnicodeString Support Functions
@@ -780,7 +799,7 @@ uhash_deleteHashtable(void *obj);
 /* Use uprv_free() itself as a deleter for any key or value allocated using uprv_malloc. */
 
 /**
- * Checks if the given hash tables are equal or not.
+ * Checks if the given hashtables are equal or not.
  * @param hash1
  * @param hash2
  * @return true if the hashtables are equal and false if not.

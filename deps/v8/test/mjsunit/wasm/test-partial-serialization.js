@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 // Flags: --allow-natives-syntax --liftoff --no-wasm-tier-up --expose-gc
+// Flags: --no-wasm-dynamic-tiering --no-wasm-lazy-compilation
 // Compile functions 0 and 2 with Turbofan, the rest with Liftoff:
 // Flags: --wasm-tier-mask-for-testing=5
 
@@ -22,9 +23,9 @@ function create_builder() {
 
 function check(instance) {
   for (let i = 0; i < num_functions; ++i) {
-    const expect_liftoff = i != 0 && i != 2;
+    const expect_turbofan = i == 0 || i == 2;
     assertEquals(
-        expect_liftoff, %IsLiftoffFunction(instance.exports['f' + i]),
+        expect_turbofan, %IsTurboFanFunction(instance.exports['f' + i]),
         'function ' + i);
   }
 }
@@ -34,7 +35,7 @@ const wire_bytes = create_builder().toBuffer();
 function testTierTestingFlag() {
   print(arguments.callee.name);
   const module = new WebAssembly.Module(wire_bytes);
-  const buff = %SerializeWasmModule(module);
+  const buff = d8.wasm.serializeModule(module);
   const instance = new WebAssembly.Instance(module);
   check(instance);
   return buff;
@@ -49,7 +50,7 @@ gc();
 
 (function testSerializedModule() {
   print(arguments.callee.name);
-  const module = %DeserializeWasmModule(serialized_module, wire_bytes);
+  const module = d8.wasm.deserializeModule(serialized_module, wire_bytes);
 
   const instance = new WebAssembly.Instance(module);
   check(instance);

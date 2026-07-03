@@ -13,6 +13,8 @@
 # include "./archs/linux-armv4/no-asm/include/openssl/configuration.h"
 #elif defined(OPENSSL_LINUX) && defined(__aarch64__)
 # include "./archs/linux-aarch64/no-asm/include/openssl/configuration.h"
+#elif defined(OPENSSL_LINUX) && defined(__loongarch64)
+# include "./archs/linux64-loongarch64/no-asm/include/openssl/configuration.h"
 #elif defined(__APPLE__) && defined(__MACH__) && defined(__i386__)
 # include "./archs/darwin-i386-cc/no-asm/include/openssl/configuration.h"
 #elif defined(__APPLE__) && defined(__MACH__) && defined(__x86_64__)
@@ -35,14 +37,8 @@
 # include "./archs/solaris64-x86_64-gcc/no-asm/include/openssl/configuration.h"
 #elif defined(OPENSSL_LINUX) && defined(__PPC64__)  && defined(L_ENDIAN)
 # include "./archs/linux-ppc64le/no-asm/include/openssl/configuration.h"
-#elif defined(OPENSSL_LINUX) && defined(__PPC64__)
-# include "./archs/linux-ppc64/no-asm/include/openssl/configuration.h"
-#elif defined(OPENSSL_LINUX) && !defined(__PPC64__) && defined(__ppc__)
-# include "./archs/linux-ppc/no-asm/include/openssl/configuration.h"
 #elif defined(_AIX) && defined(_ARCH_PPC64)
 # include "./archs/aix64-gcc-as/no-asm/include/openssl/configuration.h"
-#elif defined(_AIX) && !defined(_ARCH_PPC64) && defined(_ARCH_PPC)
-# include "./archs/aix-gcc/no-asm/include/openssl/configuration.h"
 #elif defined(OPENSSL_LINUX) && defined(__s390x__)
 # include "./archs/linux64-s390x/no-asm/include/openssl/configuration.h"
 #elif defined(OPENSSL_LINUX) && defined(__s390__)

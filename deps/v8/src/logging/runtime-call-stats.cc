@@ -8,14 +8,14 @@
 
 #include <iomanip>
 
+#include "src/flags/flags.h"
 #include "src/tracing/tracing-category-observer.h"
 #include "src/utils/ostreams.h"
 
 namespace v8 {
 namespace internal {
 
-base::TimeTicks (*RuntimeCallTimer::Now)() =
-    &base::TimeTicks::HighResolutionNow;
+base::TimeTicks (*RuntimeCallTimer::Now)() = &base::TimeTicks::Now;
 
 base::TimeTicks RuntimeCallTimer::NowCPUTime() {
   base::ThreadTicks ticks = base::ThreadTicks::Now();
@@ -25,17 +25,17 @@ base::TimeTicks RuntimeCallTimer::NowCPUTime() {
 class RuntimeCallStatEntries {
  public:
   void Print(std::ostream& os) {
-    if (total_call_count == 0) return;
-    std::sort(entries.rbegin(), entries.rend());
+    if (total_call_count_ == 0) return;
+    std::sort(entries_.rbegin(), entries_.rend());
     os << std::setw(50) << "Runtime Function/C++ Builtin" << std::setw(12)
        << "Time" << std::setw(18) << "Count" << std::endl
        << std::string(88, '=') << std::endl;
-    for (Entry& entry : entries) {
-      entry.SetTotal(total_time, total_call_count);
+    for (Entry& entry : entries_) {
+      entry.SetTotal(total_time_, total_call_count_);
       entry.Print(os);
     }
     os << std::string(88, '-') << std::endl;
-    Entry("Total", total_time, total_call_count).Print(os);
+    Entry("Total", total_time_, total_call_count_).Print(os);
   }
 
   // By default, the compiler will usually inline this, which results in a large
@@ -43,10 +43,10 @@ class RuntimeCallStatEntries {
   // instructions, and this function is invoked repeatedly by macros.
   V8_NOINLINE void Add(RuntimeCallCounter* counter) {
     if (counter->count() == 0) return;
-    entries.push_back(
+    entries_.push_back(
         Entry(counter->name(), counter->time(), counter->count()));
-    total_time += counter->time();
-    total_call_count += counter->count();
+    total_time_ += counter->time();
+    total_call_count_ += counter->count();
   }
 
  private:
@@ -94,9 +94,9 @@ class RuntimeCallStatEntries {
     double count_percent_;
   };
 
-  uint64_t total_call_count = 0;
-  base::TimeDelta total_time;
-  std::vector<Entry> entries;
+  uint64_t total_call_count_ = 0;
+  base::TimeDelta total_time_;
+  std::vector<Entry> entries_;
 };
 
 void RuntimeCallCounter::Reset() {
@@ -138,10 +138,10 @@ RuntimeCallStats::RuntimeCallStats(ThreadType thread_type)
 #define CALL_RUNTIME_COUNTER(name) #name,
       FOR_EACH_MANUAL_COUNTER(CALL_RUNTIME_COUNTER)  //
 #undef CALL_RUNTIME_COUNTER
-#define CALL_RUNTIME_COUNTER(name, nargs, ressize) #name,
+#define CALL_RUNTIME_COUNTER(name, nargs, ressize, ...) #name,
       FOR_EACH_INTRINSIC(CALL_RUNTIME_COUNTER)  //
 #undef CALL_RUNTIME_COUNTER
-#define CALL_BUILTIN_COUNTER(name) #name,
+#define CALL_BUILTIN_COUNTER(name, Argc) #name,
       BUILTIN_LIST_C(CALL_BUILTIN_COUNTER)  //
 #undef CALL_BUILTIN_COUNTER
 #define CALL_BUILTIN_COUNTER(name) "API_" #name,
@@ -157,7 +157,7 @@ RuntimeCallStats::RuntimeCallStats(ThreadType thread_type)
   for (int i = 0; i < kNumberOfCounters; i++) {
     this->counters_[i] = RuntimeCallCounter(kNames[i]);
   }
-  if (FLAG_rcs_cpu_time) {
+  if (v8_flags.rcs_cpu_time) {
     CHECK(base::ThreadTicks::IsSupported());
     base::ThreadTicks::WaitUntilInitialized();
     RuntimeCallTimer::Now = &RuntimeCallTimer::NowCPUTime;
@@ -169,7 +169,7 @@ constexpr RuntimeCallCounterId FirstCounter(RuntimeCallCounterId first, ...) {
   return first;
 }
 
-#define THREAD_SPECIFIC_COUNTER(name) k##name,
+#define THREAD_SPECIFIC_COUNTER(name) RuntimeCallCounterId::k##name,
 constexpr RuntimeCallCounterId kFirstThreadVariantCounter =
     FirstCounter(FOR_EACH_THREAD_SPECIFIC_COUNTER(THREAD_SPECIFIC_COUNTER) 0);
 #undef THREAD_SPECIFIC_COUNTER
@@ -180,7 +180,8 @@ constexpr int kThreadVariantCounterCount =
 #undef THREAD_SPECIFIC_COUNTER
 
 constexpr auto kLastThreadVariantCounter = static_cast<RuntimeCallCounterId>(
-    kFirstThreadVariantCounter + kThreadVariantCounterCount - 1);
+    static_cast<int>(kFirstThreadVariantCounter) + kThreadVariantCounterCount -
+    1);
 }  // namespace
 
 bool RuntimeCallStats::HasThreadSpecificCounterVariants(
@@ -193,7 +194,9 @@ bool RuntimeCallStats::HasThreadSpecificCounterVariants(
 bool RuntimeCallStats::IsBackgroundThreadSpecificVariant(
     RuntimeCallCounterId id) {
   return HasThreadSpecificCounterVariants(id) &&
-         (id - kFirstThreadVariantCounter) % 2 == 1;
+         (static_cast<int>(id) - static_cast<int>(kFirstThreadVariantCounter)) %
+                 2 ==
+             1;
 }
 
 void RuntimeCallStats::Enter(RuntimeCallTimer* timer,
@@ -294,15 +297,11 @@ WorkerThreadRuntimeCallStats::~WorkerThreadRuntimeCallStats() {
 
 base::Thread::LocalStorageKey WorkerThreadRuntimeCallStats::GetKey() {
   base::MutexGuard lock(&mutex_);
-  DCHECK(TracingFlags::is_runtime_stats_enabled());
   if (!tls_key_) tls_key_ = base::Thread::CreateThreadLocalKey();
   return *tls_key_;
 }
 
 RuntimeCallStats* WorkerThreadRuntimeCallStats::NewTable() {
-  DCHECK(TracingFlags::is_runtime_stats_enabled());
-  // Never create a new worker table on the isolate's main thread.
-  DCHECK_NE(ThreadId::Current(), isolate_thread_id_);
   std::unique_ptr<RuntimeCallStats> new_table =
       std::make_unique<RuntimeCallStats>(RuntimeCallStats::kWorkerThread);
   RuntimeCallStats* result = new_table.get();
@@ -323,13 +322,13 @@ void WorkerThreadRuntimeCallStats::AddToMainTable(
 }
 
 WorkerThreadRuntimeCallStatsScope::WorkerThreadRuntimeCallStatsScope(
-    WorkerThreadRuntimeCallStats* worker_stats)
-    : table_(nullptr) {
+    WorkerThreadRuntimeCallStats* worker_stats) {
   if (V8_LIKELY(!TracingFlags::is_runtime_stats_enabled())) return;
 
   table_ = reinterpret_cast<RuntimeCallStats*>(
       base::Thread::GetThreadLocal(worker_stats->GetKey()));
   if (table_ == nullptr) {
+    if (V8_UNLIKELY(!TracingFlags::is_runtime_stats_enabled())) return;
     table_ = worker_stats->NewTable();
     base::Thread::SetThreadLocal(worker_stats->GetKey(), table_);
   }

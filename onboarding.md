@@ -8,19 +8,17 @@ onboarding session.
 * If the new Collaborator is not yet a member of the nodejs GitHub organization,
   confirm that they are using [two-factor authentication][]. It will not be
   possible to add them to the organization if they are not using two-factor
-  authentication. If they cannot receive SMS messages from GitHub, try
-  [using a TOTP mobile app][].
-* Announce the accepted nomination in a TSC meeting and in the TSC
-  mailing list.
-* Suggest the new Collaborator install [`node-core-utils`][] and
+  authentication. Ask them to use secure two-factor methods: authenticator apps,
+  passkeys, security keys, and/or the GitHub mobile app.
+* Suggest the new Collaborator install [`@node-core/utils`][] and
   [set up the credentials][] for it.
 
 ## Fifteen minutes before the onboarding session
 
 * Prior to the onboarding session, add the new Collaborator to
   [the collaborators team](https://github.com/orgs/nodejs/teams/collaborators).
-* Ask them if they want to join any subsystem teams. See
-  [Who to CC in the issue tracker][who-to-cc].
+* Ask them if they want to join any [subsystem teams](https://github.com/orgs/nodejs/teams/core/teams)
+  and add them accordingly. See [Who to CC in the issue tracker][who-to-cc].
 
 ## Onboarding session
 
@@ -39,11 +37,11 @@ onboarding session.
   * Always create a branch in your own GitHub fork for pull requests
     * Branches in the `nodejs/node` repository are only for release lines
   * Add the canonical nodejs repository as `upstream` remote:
-    * `git remote add upstream git://github.com/nodejs/node.git`
+    * `git remote add upstream git@github.com:nodejs/node.git`
   * To update from `upstream`:
-    * `git checkout master`
-    * `git remote update -p` OR `git fetch --all`
-    * `git merge --ff-only upstream/master` (or `REMOTENAME/BRANCH`)
+    * `git checkout main`
+    * `git fetch upstream HEAD`
+    * `git reset --hard FETCH_HEAD`
   * Make a new branch for each pull request you submit.
   * Membership: Consider making your membership in the Node.js GitHub
     organization public. This makes it easier to identify collaborators.
@@ -55,10 +53,12 @@ onboarding session.
     set up email
   * Watching the main repository will flood your inbox (several hundred
     notifications on typical weekdays), so be prepared
+  * Watching the discussions in the
+    [collaborators repo](https://github.com/nodejs/collaborators) is recommended.
 
 The project has a venue for real-time discussion:
 
-* [`#nodejs-dev`](https://openjs-foundation.slack.com/archives/C019Y2T6STH) on
+* [`#nodejs-core`](https://openjs-foundation.slack.com/archives/C019Y2T6STH) on
   the [OpenJS Foundation Slack](https://slack-invite.openjsf.org/)
 
 ## Project goals and values
@@ -104,12 +104,22 @@ The project has a venue for real-time discussion:
 
 * When a discussion gets heated, you can request that other collaborators keep
   an eye on it by opening an issue at the private
-  [nodejs/moderation](https://github.com/nodejs/moderation) repository.
+  [nodejs/moderation](https://github.com/nodejs/moderation) repository. Note
+  that while that repository is not public, it can be accessed by anyone in the
+  nodejs org, so refrain from using it to report individuals (reporting
+  spam/bots there is fine of course).
   * This is a repository to which all members of the `nodejs` GitHub
     organization (not just collaborators on Node.js core) have access. Its
     contents should not be shared externally.
-  * You can find the full moderation policy
-    [here](https://github.com/nodejs/admin/blob/HEAD/Moderation-Policy.md).
+  * Node.js has a moderation team which you should contact when unsure
+    about taking action in the Node.js org.
+  * You can moderate non-collaborator posts yourself. Please
+    report the moderation action taken in accordance to the moderation
+    policy.
+  * You can always refer to the
+    [full moderation policy](https://github.com/nodejs/admin/blob/main/Moderation-Policy.md).
+  * You can contact someone in the
+    [full list of moderation team members](https://github.com/nodejs/admin/blob/main/Moderation-Policy.md#current-members-of-moderation-team).
 
 ## Reviewing pull requests
 
@@ -144,12 +154,12 @@ The project has a venue for real-time discussion:
 
 * Approving a change
   * Collaborators indicate that they have reviewed and approve of the changes in
-    a pull request using GitHub’s approval interface
+    a pull request using GitHub's approval interface
   * Some people like to comment `LGTM` (“Looks Good To Me”)
-  * You have the authority to approve any other collaborator’s work.
+  * You have the authority to approve any other collaborator's work.
   * You cannot approve your own pull requests.
   * When explicitly using `Changes requested`, show empathy – comments will
-    usually be addressed even if you don’t use it.
+    usually be addressed even if you don't use it.
     * If you do, it is nice if you are available later to check whether your
       comments have been addressed
     * If you see that the requested changes have been made, you can clear
@@ -158,7 +168,7 @@ The project has a venue for real-time discussion:
       comments to block the pull request from landing.
 
 * What belongs in Node.js:
-  * Opinions vary – it’s good to have a broad collaborator base for that reason!
+  * Opinions vary – it's good to have a broad collaborator base for that reason!
   * If Node.js itself needs it (due to historical reasons), then it belongs in
     Node.js.
     * That is to say, `url` is there because of `http`, `freelist` is there
@@ -203,33 +213,54 @@ needs to be pointed out separately during the onboarding.
 ## Exercise: Make a pull request adding yourself to the README
 
 * Example:
-  <https://github.com/nodejs/node/commit/b58fe52692659c0bc25ddbe6afa7f4ae2c7f14a8>
+  <https://github.com/nodejs/node/commit/6669b3857f0f43ee0296eb7ac45086cd907b9e94>
   * For raw commit message:
-    `git show --format=%Bb58fe52692659c0bc25ddbe6afa7f4ae2c7f14a8`
+    `git show --format=%B 6669b3857f0f43ee0296eb7ac45086cd907b9e94`
 * Collaborators are in alphabetical order by GitHub username.
 * Optionally, include your personal pronouns.
-* Add the `Fixes: <collaborator-nomination-issue-url>` to the commit message
+* Commit, including a `Fixes: <collaborator-nomination-issue-url>` trailer
   so that when the commit lands, the nomination issue url will be
   automatically closed.
+* Run `tools/find-inactive-collaborators.mjs`. If that command outputs your name,
+  amend the commit to include an addition to the [mailmap](.mailmap) file. See
+  [gitmailmap](https://git-scm.com/docs/gitmailmap) for information on the
+  format of the mailmap file.
+* Push the commit to your own fork.
 * Label your pull request with the `doc`, `notable-change`, and `fast-track`
   labels. The `fast-track` label should cause the Node.js GitHub bot to post a
   comment in the pull request asking collaborators to approve the pull request
   by leaving a 👍 reaction on the comment.
-* Optional: Run CI on the pull request. Use the `node-test-pull-request` CI
+* Optional: Run Jenkins CI on the pull request. Use the [`node-test-pull-request`][]
   task. As a convenience, you may apply the `request-ci` label to the pull
   request to have a GitHub Actions workflow start the Jenkins CI task for you.
 * After two Collaborator approvals for the change and two Collaborator approvals
-  for fast-tracking, land the PR.
+  for fast-tracking, land the PR. If you have started a full Jenkins CI, cancel it
+  from the Jenkins UI since the PR is a doc-only change and does not need
+  a full CI run, it is just run as an exercise.
 * If there are not enough approvals within a reasonable time, consider the
   single approval of the onboarding TSC member sufficient, and land the pull
   request.
   * Be sure to add the `PR-URL: <full-pr-url>` and appropriate `Reviewed-By:`
     metadata.
-  * [`node-core-utils`][] automates the generation of metadata and the landing
+  * [`@node-core/utils`][] automates the generation of metadata and the landing
     process. See the documentation of [`git-node`][].
   * [`core-validate-commit`][] automates the validation of commit messages.
     This will be run during `git node land --final` of the [`git-node`][]
     command.
+  * Normally you can just use the `commit-queue` label to have the
+    commit queued for landing by the Node.js GitHub bot. But as exercise it is
+    also useful to learn how to land commits manually in case the bot or the CI
+    is broken.
+* If you are landing the commit manually, to make it appear as "Merged" on GitHub,
+  after you prepare the landed commit on the local `main` branch, run this:
+
+  ```bash
+  git push --force-with-lease your-fork-remote HEAD:your-pr-branch # Update the PR branch in your fork.
+  git push upstream main  # Push the landed commit to the upstream main branch.
+  ```
+
+  GitHub will automatically detect that the PR branch is now identical to the
+  `main` branch and will mark the PR as "Merged".
 
 ## Final notes
 
@@ -238,30 +269,38 @@ needs to be pointed out separately during the onboarding.
 * Almost any mistake you could make can be fixed or reverted.
 * The existing collaborators trust you and are grateful for your help!
 * Other repositories:
-  * <https://github.com/nodejs/TSC>
-  * <https://github.com/nodejs/build>
-  * <https://github.com/nodejs/nodejs.org>
-  * <https://github.com/nodejs/readable-stream>
-  * <https://github.com/nodejs/LTS>
-  * <https://github.com/nodejs/citgm>
+  * <https://github.com/nodejs/TSC>: Governance discussions and TSC votes
+  * <https://github.com/nodejs/build>: Build infrastructure discussions and CI issues
+  * <https://github.com/nodejs/nodejs.org>: The Node.js website and blog
+  * <https://github.com/nodejs/Release>: Release management and release planning
+  * <https://github.com/nodejs/citgm>: Tool for testing popular packages against Node.js changes
+  * <https://github.com/nodejs/admin>: Administrative issues and requests to changes in the Node.js
+    GitHub organization (e.g. creating new repositories, new teams, adding organization-wide tokens).
+  * <https://github.com/nodejs/moderation>: Requests to moderate comments or block spammers.
 * The OpenJS Foundation hosts regular summits for active contributors to the
   Node.js project, where we have face-to-face discussions about our work on the
-  project. The Foundation has travel funds to cover participants' expenses
-  including accommodations, transportation, visa fees, etc. if needed. Check out
-  the [summit](https://github.com/nodejs/summit) repository for details.
+  project. The Foundation has travel funds to cover [participants' expenses][]
+  including accommodations, transportation, and visa fees (even in case the visa
+  is denied) if needed. Check out the [summit](https://github.com/nodejs/summit)
+  repository for details.
 * If you are interested in helping to fix coverity reports consider requesting
   access to the projects coverity project as outlined in [static-analysis][].
+* If you are interested in helping out with CI reliability, check out the
+  [reliability repository][] and [guide on how to deal with CI flakes][].
 
 [Code of Conduct]: https://github.com/nodejs/admin/blob/HEAD/CODE_OF_CONDUCT.md
-[Labels]: doc/guides/collaborator-guide.md#labels
-[Landing pull requests]: doc/guides/collaborator-guide.md#landing-pull-requests
+[Labels]: doc/contributing/collaborator-guide.md#labels
+[Landing pull requests]: doc/contributing/collaborator-guide.md#landing-pull-requests
 [Publicizing or hiding organization membership]: https://help.github.com/articles/publicizing-or-hiding-organization-membership/
-[`author-ready`]: doc/guides/collaborator-guide.md#author-ready-pull-requests
+[`@node-core/utils`]: https://github.com/nodejs/node-core-utils
+[`author-ready`]: doc/contributing/collaborator-guide.md#author-ready-pull-requests
 [`core-validate-commit`]: https://github.com/nodejs/core-validate-commit
 [`git-node`]: https://github.com/nodejs/node-core-utils/blob/HEAD/docs/git-node.md
-[`node-core-utils`]: https://github.com/nodejs/node-core-utils
+[`node-test-pull-request`]: https://ci.nodejs.org/job/node-test-pull-request/
+[guide on how to deal with CI flakes]: https://github.com/nodejs/test?tab=readme-ov-file#protocols-in-improving-ci-reliability
+[participants' expenses]: https://github.com/openjs-foundation/cross-project-council/blob/main/community-fund/COMMUNITY_FUND_POLICY.md#community-fund-rules
+[reliability repository]: https://github.com/nodejs/reliability
 [set up the credentials]: https://github.com/nodejs/node-core-utils#setting-up-github-credentials
-[static-analysis]: doc/guides/static-analysis.md
+[static-analysis]: doc/contributing/static-analysis.md
 [two-factor authentication]: https://help.github.com/articles/securing-your-account-with-two-factor-authentication-2fa/
-[using a TOTP mobile app]: https://help.github.com/articles/configuring-two-factor-authentication-via-a-totp-mobile-app/
-[who-to-cc]: doc/guides/collaborator-guide.md#who-to-cc-in-the-issue-tracker
+[who-to-cc]: doc/contributing/collaborator-guide.md#who-to-cc-in-the-issue-tracker

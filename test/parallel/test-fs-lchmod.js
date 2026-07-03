@@ -9,14 +9,14 @@ const f = __filename;
 // This test ensures that input for lchmod is valid, testing for valid
 // inputs for path, mode and callback
 
-if (!common.isOSX) {
+if (!common.isMacOS) {
   common.skip('lchmod is only available on macOS');
 }
 
 // Check callback
-assert.throws(() => fs.lchmod(f), { code: 'ERR_INVALID_CALLBACK' });
-assert.throws(() => fs.lchmod(), { code: 'ERR_INVALID_CALLBACK' });
-assert.throws(() => fs.lchmod(f, {}), { code: 'ERR_INVALID_CALLBACK' });
+assert.throws(() => fs.lchmod(f), { code: 'ERR_INVALID_ARG_TYPE' });
+assert.throws(() => fs.lchmod(), { code: 'ERR_INVALID_ARG_TYPE' });
+assert.throws(() => fs.lchmod(f, {}), { code: 'ERR_INVALID_ARG_TYPE' });
 
 // Check path
 [false, 1, {}, [], null, undefined].forEach((i) => {
@@ -42,7 +42,7 @@ assert.throws(() => fs.lchmod(f, {}), { code: 'ERR_INVALID_CALLBACK' });
     code: 'ERR_INVALID_ARG_TYPE',
   };
 
-  assert.rejects(promises.lchmod(f, input, () => {}), errObj);
+  assert.rejects(promises.lchmod(f, input, () => {}), errObj).then(common.mustCall());
   assert.throws(() => fs.lchmodSync(f, input), errObj);
 });
 
@@ -61,6 +61,6 @@ assert.throws(() => fs.lchmodSync(f, '123x'), {
              `4294967295. Received ${input}`
   };
 
-  assert.rejects(promises.lchmod(f, input, () => {}), errObj);
+  assert.rejects(promises.lchmod(f, input, () => {}), errObj).then(common.mustCall());
   assert.throws(() => fs.lchmodSync(f, input), errObj);
 });

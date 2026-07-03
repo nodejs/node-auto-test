@@ -26,11 +26,11 @@ class WorkloadsTest : public testing::TestWithHeap {
  public:
   void ConservativeGC() {
     internal::Heap::From(GetHeap())->CollectGarbage(
-        Heap::Config::ConservativeAtomicConfig());
+        GCConfig::ConservativeAtomicConfig());
   }
   void PreciseGC() {
     internal::Heap::From(GetHeap())->CollectGarbage(
-        Heap::Config::PreciseAtomicConfig());
+        GCConfig::PreciseAtomicConfig());
   }
 };
 
@@ -207,7 +207,7 @@ class ObjectSizeCounter final : private HeapVisitor<ObjectSizeCounter> {
 
  private:
   static size_t ObjectSize(const HeapObjectHeader& header) {
-    return ObjectView(header).Size();
+    return ObjectView<>(header).Size();
   }
 
   bool VisitHeapObjectHeader(HeapObjectHeader& header) {

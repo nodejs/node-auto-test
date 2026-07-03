@@ -6,28 +6,20 @@
 
 #include "src/compiler/all-nodes.h"
 #include "src/compiler/node-matchers.h"
+#include "src/compiler/operation-typer.h"
 #include "src/compiler/simplified-operator.h"
-#include "src/compiler/type-cache.h"
 #include "src/execution/frame-constants.h"
 
 namespace v8 {
 namespace internal {
 namespace compiler {
 
-#ifdef DEBUG
-#define TRACE(...)                                    \
-  do {                                                \
-    if (FLAG_trace_turbo_escape) PrintF(__VA_ARGS__); \
-  } while (false)
-#else
-#define TRACE(...)
-#endif  // DEBUG
-
 EscapeAnalysisReducer::EscapeAnalysisReducer(
-    Editor* editor, JSGraph* jsgraph, EscapeAnalysisResult analysis_result,
-    Zone* zone)
+    Editor* editor, JSGraph* jsgraph, JSHeapBroker* broker,
+    EscapeAnalysisResult analysis_result, Zone* zone)
     : AdvancedReducer(editor),
       jsgraph_(jsgraph),
+      broker_(broker),
       analysis_result_(analysis_result),
       object_id_cache_(zone),
       node_cache_(jsgraph->graph(), zone),
@@ -124,19 +116,21 @@ Reduction EscapeAnalysisReducer::Reduce(Node* node) {
 // occurrences of virtual objects.
 class Deduplicator {
  public:
-  explicit Deduplicator(Zone* zone) : is_duplicate_(zone) {}
+  explicit Deduplicator(Zone* zone) : zone_(zone) {}
   bool SeenBefore(const VirtualObject* vobject) {
-    VirtualObject::Id id = vobject->id();
-    if (id >= is_duplicate_.size()) {
-      is_duplicate_.resize(id + 1);
+    DCHECK_LE(vobject->id(), std::numeric_limits<int>::max());
+    int id = static_cast<int>(vobject->id());
+    if (id >= is_duplicate_.length()) {
+      is_duplicate_.Resize(id + 1, zone_);
     }
-    bool is_duplicate = is_duplicate_[id];
-    is_duplicate_[id] = true;
+    bool is_duplicate = is_duplicate_.Contains(id);
+    is_duplicate_.Add(id);
     return is_duplicate;
   }
 
  private:
-  ZoneVector<bool> is_duplicate_;
+  Zone* zone_;
+  BitVector is_duplicate_;
 };
 
 void EscapeAnalysisReducer::ReduceFrameStateInputs(Node* node) {
@@ -221,6 +215,7 @@ void EscapeAnalysisReducer::VerifyReplacement() const {
 }
 
 void EscapeAnalysisReducer::Finalize() {
+  OperationTyper op_typer(broker_, jsgraph()->graph()->zone());
   for (Node* node : arguments_elements_) {
     const NewArgumentsElementsParameters& params =
         NewArgumentsElementsParametersOf(node->op());
@@ -276,7 +271,8 @@ void EscapeAnalysisReducer::Finalize() {
           }
           break;
         case IrOpcode::kLoadField:
-          if (FieldAccessOf(use->op()).offset == FixedArray::kLengthOffset) {
+          if (FieldAccessOf(use->op()).offset ==
+              offsetof(FixedArray, length_)) {
             loads.push_back(use);
           } else {
             escaping_use = true;
@@ -299,14 +295,31 @@ void EscapeAnalysisReducer::Finalize() {
       for (Node* load : loads) {
         switch (load->opcode()) {
           case IrOpcode::kLoadElement: {
+            const ElementAccess& access = ElementAccessOf(load->op());
+            if (!access.machine_type.IsTagged()) {
+              // We could have generated (unreachable) branches where we load
+              // non-tagged elements due to clobbered feedback.
+              NodeProperties::RemoveValueInputs(load);
+              NodeProperties::ChangeOp(load,
+                                       jsgraph()->common()->Unreachable());
+              Node* dead_value = jsgraph()->graph()->NewNode(
+                  jsgraph()->common()->DeadValue(
+                      access.machine_type.representation()),
+                  load);
+              NodeProperties::SetType(load, Type::None());
+              NodeProperties::SetType(dead_value, Type::None());
+              NodeProperties::ReplaceUses(load, dead_value, load);
+              continue;
+            }
+
             Node* index = NodeProperties::GetValueInput(load, 1);
             Node* formal_parameter_count =
-                jsgraph()->Constant(params.formal_parameter_count());
+                jsgraph()->ConstantNoHole(params.formal_parameter_count());
             NodeProperties::SetType(
                 formal_parameter_count,
                 Type::Constant(params.formal_parameter_count(),
                                jsgraph()->graph()->zone()));
-            Node* offset_to_first_elem = jsgraph()->Constant(
+            Node* offset_to_first_elem = jsgraph()->ConstantNoHole(
                 CommonFrameConstants::kFixedSlotCountAboveFp);
             if (!NodeProperties::IsTyped(offset_to_first_elem)) {
               NodeProperties::SetType(
@@ -318,17 +331,21 @@ void EscapeAnalysisReducer::Finalize() {
             Node* offset = jsgraph()->graph()->NewNode(
                 jsgraph()->simplified()->NumberAdd(), index,
                 offset_to_first_elem);
+            Type offset_type = op_typer.NumberAdd(
+                NodeProperties::GetType(index),
+                NodeProperties::GetType(offset_to_first_elem));
+            NodeProperties::SetType(offset, offset_type);
             if (type == CreateArgumentsType::kRestParameter) {
               // In the case of rest parameters we should skip the formal
               // parameters.
-              NodeProperties::SetType(offset,
-                                      TypeCache::Get()->kArgumentsLengthType);
               offset = jsgraph()->graph()->NewNode(
                   jsgraph()->simplified()->NumberAdd(), offset,
                   formal_parameter_count);
+              NodeProperties::SetType(
+                  offset, op_typer.NumberAdd(
+                              offset_type,
+                              NodeProperties::GetType(formal_parameter_count)));
             }
-            NodeProperties::SetType(offset,
-                                    TypeCache::Get()->kArgumentsLengthType);
             Node* frame = jsgraph()->graph()->NewNode(
                 jsgraph()->machine()->LoadFramePointer());
             NodeProperties::SetType(frame, Type::ExternalPointer());
@@ -340,7 +357,7 @@ void EscapeAnalysisReducer::Finalize() {
           }
           case IrOpcode::kLoadField: {
             DCHECK_EQ(FieldAccessOf(load->op()).offset,
-                      FixedArray::kLengthOffset);
+                      offsetof(FixedArray, length_));
             Node* length = NodeProperties::GetValueInput(node, 0);
             ReplaceWithValue(load, length);
             break;
@@ -366,7 +383,7 @@ NodeHashCache::Constructor::Constructor(NodeHashCache* cache,
                                         const Operator* op, int input_count,
                                         Node** inputs, Type type)
     : node_cache_(cache), from_(nullptr) {
-  if (node_cache_->temp_nodes_.size() > 0) {
+  if (!node_cache_->temp_nodes_.empty()) {
     tmp_ = node_cache_->temp_nodes_.back();
     node_cache_->temp_nodes_.pop_back();
     int tmp_input_count = tmp_->InputCount();
@@ -432,8 +449,6 @@ Node* NodeHashCache::Constructor::MutableNode() {
   }
   return tmp_;
 }
-
-#undef TRACE
 
 }  // namespace compiler
 }  // namespace internal

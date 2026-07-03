@@ -27,7 +27,7 @@
 
 // Flags: --allow-natives-syntax --expose-gc
 // Flags: --concurrent-recompilation
-// Flags: --opt --no-always-opt
+// Flags: --turbofan
 
 function f(x) {
   var xx = x * x;

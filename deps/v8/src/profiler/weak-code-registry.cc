@@ -4,7 +4,8 @@
 
 #include "src/profiler/weak-code-registry.h"
 
-#include "src/handles/global-handles.h"
+#include "src/handles/global-handles-inl.h"
+#include "src/objects/code-inl.h"
 #include "src/objects/instance-type-inl.h"
 
 namespace v8 {
@@ -22,7 +23,8 @@ void Untrack(CodeEntry* entry) {
 
 }  // namespace
 
-void WeakCodeRegistry::Track(CodeEntry* entry, Handle<AbstractCode> code) {
+void WeakCodeRegistry::Track(CodeEntry* entry,
+                             DirectHandle<AbstractCode> code) {
   DCHECK(!*entry->heap_object_location_address());
   DisallowGarbageCollection no_gc;
   Handle<AbstractCode> handle = isolate_->global_handles()->Create(*code);

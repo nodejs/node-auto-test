@@ -4,12 +4,18 @@
 
 #include "test/inspector/isolate-data.h"
 
+#include <optional>
+
+#include "include/libplatform/libplatform.h"
 #include "include/v8-context.h"
 #include "include/v8-exception.h"
 #include "include/v8-microtask-queue.h"
 #include "include/v8-template.h"
-#include "src/base/vector.h"
+#include "src/execution/isolate.h"
+#include "src/heap/heap.h"
+#include "src/init/v8.h"
 #include "src/inspector/test-interface.h"
+#include "test/inspector/frontend-channel.h"
 #include "test/inspector/task-runner.h"
 #include "test/inspector/utils.h"
 
@@ -17,6 +23,9 @@ namespace v8 {
 namespace internal {
 
 namespace {
+
+const v8::EmbedderDataTypeTag kInspectorIsolateDataTag = 1;
+const v8::EmbedderDataTypeTag kContextGroupIdTag = 2;
 
 const int kIsolateDataIndex = 2;
 const int kContextGroupIdIndex = 3;
@@ -33,7 +42,7 @@ class Inspectable : public v8_inspector::V8InspectorSession::Inspectable {
       : object_(isolate, object) {}
   ~Inspectable() override = default;
   v8::Local<v8::Value> get(v8::Local<v8::Context> context) override {
-    return object_.Get(context->GetIsolate());
+    return object_.Get(v8::Isolate::GetCurrent());
   }
 
  private:
@@ -53,8 +62,8 @@ InspectorIsolateData::InspectorIsolateData(
       v8::ArrayBuffer::Allocator::NewDefaultAllocator());
   params.array_buffer_allocator = array_buffer_allocator_.get();
   params.snapshot_blob = startup_data;
-  params.only_terminate_in_safe_scope = true;
   isolate_.reset(v8::Isolate::New(params));
+  v8::Isolate::Scope isolate_scope(isolate_.get());
   isolate_->SetMicrotasksPolicy(v8::MicrotasksPolicy::kScoped);
   if (with_inspector) {
     isolate_->AddMessageListener(&InspectorIsolateData::MessageHandler);
@@ -73,7 +82,36 @@ InspectorIsolateData::InspectorIsolateData(
 InspectorIsolateData* InspectorIsolateData::FromContext(
     v8::Local<v8::Context> context) {
   return static_cast<InspectorIsolateData*>(
-      context->GetAlignedPointerFromEmbedderData(kIsolateDataIndex));
+      context->GetAlignedPointerFromEmbedderData(kIsolateDataIndex,
+                                                 kInspectorIsolateDataTag));
+}
+
+InspectorIsolateData::~InspectorIsolateData() {
+  // Enter the isolate before destructing this InspectorIsolateData, so that
+  // destructors that run before the Isolate's destructor still see it as
+  // entered. Use a v8::Locker, in case the thread destroying the isolate is
+  // not the last one that entered it.
+  locker_.emplace(isolate());
+  isolate()->Enter();
+
+  // Sessions need to be deleted before channels can be cleaned up, and channels
+  // must be deleted before the isolate gets cleaned up. This means we first
+  // clean up all the sessions and immedatly after all the channels used by
+  // those sessions.
+  for (const auto& pair : sessions_) {
+    session_ids_for_cleanup_.insert(pair.first);
+  }
+
+  context_group_by_session_.clear();
+  sessions_.clear();
+
+  for (int session_id : session_ids_for_cleanup_) {
+    ChannelHolder::RemoveChannel(session_id);
+  }
+
+  // We don't care about completing pending per-isolate tasks, just delete
+  // them in case they still reference this Isolate.
+  v8::platform::NotifyIsolateShutdown(V8::GetCurrentPlatform(), isolate());
 }
 
 int InspectorIsolateData::CreateContextGroup() {
@@ -97,10 +135,12 @@ bool InspectorIsolateData::CreateContext(int context_group_id,
   v8::Local<v8::Context> context =
       v8::Context::New(isolate_.get(), nullptr, global_template);
   if (context.IsEmpty()) return false;
-  context->SetAlignedPointerInEmbedderData(kIsolateDataIndex, this);
+  context->SetAlignedPointerInEmbedderData(kIsolateDataIndex, this,
+                                           kInspectorIsolateDataTag);
   // Should be 2-byte aligned.
   context->SetAlignedPointerInEmbedderData(
-      kContextGroupIdIndex, reinterpret_cast<void*>(context_group_id * 2));
+      kContextGroupIdIndex, reinterpret_cast<void*>(context_group_id * 2),
+      kContextGroupIdTag);
   contexts_[context_group_id].emplace_back(isolate_.get(), context);
   if (inspector_) FireContextCreated(context, context_group_id, name);
   return true;
@@ -118,8 +158,8 @@ void InspectorIsolateData::ResetContextGroup(int context_group_id) {
 
 int InspectorIsolateData::GetContextGroupId(v8::Local<v8::Context> context) {
   return static_cast<int>(
-      reinterpret_cast<intptr_t>(
-          context->GetAlignedPointerFromEmbedderData(kContextGroupIdIndex)) /
+      reinterpret_cast<intptr_t>(context->GetAlignedPointerFromEmbedderData(
+          kContextGroupIdIndex, kContextGroupIdTag)) /
       2);
 }
 
@@ -143,7 +183,7 @@ void InspectorIsolateData::RegisterModule(v8::Local<v8::Context> context,
 // static
 v8::MaybeLocal<v8::Module> InspectorIsolateData::ModuleResolveCallback(
     v8::Local<v8::Context> context, v8::Local<v8::String> specifier,
-    v8::Local<v8::FixedArray> import_assertions,
+    v8::Local<v8::FixedArray> import_attributes,
     v8::Local<v8::Module> referrer) {
   // TODO(v8:11189) Consider JSON modules support in the InspectorClient
   InspectorIsolateData* data = InspectorIsolateData::FromContext(context);
@@ -158,23 +198,45 @@ v8::MaybeLocal<v8::Module> InspectorIsolateData::ModuleResolveCallback(
   return maybe_module;
 }
 
-int InspectorIsolateData::ConnectSession(
+std::optional<int> InspectorIsolateData::ConnectSession(
     int context_group_id, const v8_inspector::StringView& state,
-    v8_inspector::V8Inspector::Channel* channel) {
+    std::unique_ptr<FrontendChannelImpl> channel, bool is_fully_trusted) {
+  if (contexts_.find(context_group_id) == contexts_.end()) return std::nullopt;
+
   v8::SealHandleScope seal_handle_scope(isolate());
   int session_id = ++last_session_id_;
-  sessions_[session_id] = inspector_->connect(context_group_id, channel, state);
+  // It's important that we register the channel before the `connect` as the
+  // inspector will already send notifications.
+  auto* c = channel.get();
+  ChannelHolder::AddChannel(session_id, std::move(channel));
+  sessions_[session_id] = inspector_->connectShared(
+      context_group_id, c, state,
+      is_fully_trusted ? v8_inspector::V8Inspector::kFullyTrusted
+                       : v8_inspector::V8Inspector::kUntrusted,
+      waiting_for_debugger_
+          ? v8_inspector::V8Inspector::kWaitingForDebugger
+          : v8_inspector::V8Inspector::kNotWaitingForDebugger);
   context_group_by_session_[sessions_[session_id].get()] = context_group_id;
   return session_id;
 }
 
-std::vector<uint8_t> InspectorIsolateData::DisconnectSession(int session_id) {
+std::vector<uint8_t> InspectorIsolateData::DisconnectSession(
+    int session_id, TaskRunner* context_task_runner) {
   v8::SealHandleScope seal_handle_scope(isolate());
   auto it = sessions_.find(session_id);
-  CHECK(it != sessions_.end());
+  if (it == sessions_.end()) {
+    CHECK(v8_flags.fuzzing);
+    return {};
+  }
+
   context_group_by_session_.erase(it->second.get());
   std::vector<uint8_t> result = it->second->state();
   sessions_.erase(it);
+
+  // Record the session so we can cleanup the channel later.
+  // We can't delete the channel now as we might be on the nested run loop and
+  // (debugger pause) and the session could be alive for a little while longer.
+  session_ids_for_cleanup_.insert(session_id);
   return result;
 }
 
@@ -193,6 +255,12 @@ void InspectorIsolateData::BreakProgram(
     auto it = sessions_.find(session_id);
     if (it != sessions_.end()) it->second->breakProgram(reason, details);
   }
+}
+
+void InspectorIsolateData::Stop(int session_id) {
+  v8::SealHandleScope seal_handle_scope(isolate());
+  auto it = sessions_.find(session_id);
+  if (it != sessions_.end()) it->second->stop();
 }
 
 void InspectorIsolateData::SchedulePauseOnNextStatement(
@@ -271,7 +339,7 @@ void InspectorIsolateData::DumpAsyncTaskStacksStateForTest() {
 // static
 int InspectorIsolateData::HandleMessage(v8::Local<v8::Message> message,
                                         v8::Local<v8::Value> exception) {
-  v8::Isolate* isolate = message->GetIsolate();
+  v8::Isolate* isolate = v8::Isolate::GetCurrent();
   v8::Local<v8::Context> context = isolate->GetEnteredOrMicrotaskContext();
   if (context.IsEmpty()) return 0;
   v8_inspector::V8Inspector* inspector =
@@ -313,7 +381,7 @@ void InspectorIsolateData::MessageHandler(v8::Local<v8::Message> message,
 
 // static
 void InspectorIsolateData::PromiseRejectHandler(v8::PromiseRejectMessage data) {
-  v8::Isolate* isolate = data.GetPromise()->GetIsolate();
+  v8::Isolate* isolate = v8::Isolate::GetCurrent();
   v8::Local<v8::Context> context = isolate->GetEnteredOrMicrotaskContext();
   if (context.IsEmpty()) return;
   v8::Local<v8::Promise> promise = data.GetPromise();
@@ -333,16 +401,23 @@ void InspectorIsolateData::PromiseRejectHandler(v8::PromiseRejectMessage data) {
         v8_inspector::StringView(reinterpret_cast<const uint8_t*>(reason_str),
                                  strlen(reason_str)));
     return;
+
   }
 
   v8::Local<v8::Value> exception = data.GetValue();
   int exception_id = HandleMessage(
       v8::Exception::CreateMessage(isolate, exception), exception);
-  if (exception_id) {
-    promise
-        ->SetPrivate(isolate->GetCurrentContext(), id_private,
-                     v8::Int32::New(isolate, exception_id))
-        .ToChecked();
+  if (exception_id && !isolate->IsExecutionTerminating()) {
+    if (promise
+            ->SetPrivate(isolate->GetCurrentContext(), id_private,
+                         v8::Int32::New(isolate, exception_id))
+            .IsNothing()) {
+      // Handling the |message| above calls back into JavaScript (by reporting
+      // it via CDP) in case of `inspector-test`, and can lead to terminating
+      // execution on the |isolate|, in which case the API call above will
+      // return immediately.
+      DCHECK(isolate->IsExecutionTerminating());
+    }
   }
 }
 
@@ -381,7 +456,7 @@ bool InspectorIsolateData::isInspectableHeapObject(
     v8::Local<v8::Object> object) {
   v8::Local<v8::Context> context = isolate()->GetCurrentContext();
   v8::MicrotasksScope microtasks_scope(
-      isolate(), v8::MicrotasksScope::kDoNotRunMicrotasks);
+      context, v8::MicrotasksScope::kDoNotRunMicrotasks);
   return !object->HasPrivate(context, not_inspectable_private_.Get(isolate()))
               .FromMaybe(false);
 }
@@ -398,7 +473,7 @@ void InspectorIsolateData::SetCurrentTimeMS(double time) {
 
 double InspectorIsolateData::currentTimeMS() {
   if (current_time_set_) return current_time_;
-  return V8::GetCurrentPlatform()->CurrentClockTimeMillis();
+  return V8::GetCurrentPlatform()->CurrentClockTimeMillisecondsHighResolution();
 }
 
 void InspectorIsolateData::SetMemoryInfo(v8::Local<v8::Value> memory_info) {
@@ -427,7 +502,19 @@ v8::MaybeLocal<v8::Value> InspectorIsolateData::memoryInfo(
 
 void InspectorIsolateData::runMessageLoopOnPause(int) {
   v8::SealHandleScope seal_handle_scope(isolate());
+  // Pumping the message loop below may trigger the execution of a stackless
+  // GC. We need to override the embedder stack state, to force scanning the
+  // stack, if this happens.
+  i::Heap* heap =
+      reinterpret_cast<i::Isolate*>(task_runner_->isolate())->heap();
+  i::EmbedderStackStateScope scope(
+      heap, i::EmbedderStackStateOrigin::kExplicitInvocation,
+      StackState::kMayContainHeapPointers);
   task_runner_->RunMessageLoop(true);
+}
+
+void InspectorIsolateData::runIfWaitingForDebugger(int) {
+  quitMessageLoopOnPause();
 }
 
 void InspectorIsolateData::quitMessageLoopOnPause() {
@@ -438,11 +525,11 @@ void InspectorIsolateData::quitMessageLoopOnPause() {
 void InspectorIsolateData::installAdditionalCommandLineAPI(
     v8::Local<v8::Context> context, v8::Local<v8::Object> object) {
   if (additional_console_api_.IsEmpty()) return;
-  CHECK(context->GetIsolate() == isolate());
+  CHECK_EQ(v8::Isolate::GetCurrent(), isolate());
   v8::HandleScope handle_scope(isolate());
   v8::Context::Scope context_scope(context);
-  v8::ScriptOrigin origin(isolate(), v8::String::NewFromUtf8Literal(
-                                         isolate(), "internal-console-api"));
+  v8::ScriptOrigin origin(
+      v8::String::NewFromUtf8Literal(isolate(), "internal-console-api"));
   v8::ScriptCompiler::Source scriptSource(
       additional_console_api_.Get(isolate()), origin);
   v8::MaybeLocal<v8::Script> script =
@@ -451,11 +538,30 @@ void InspectorIsolateData::installAdditionalCommandLineAPI(
 }
 
 void InspectorIsolateData::consoleAPIMessage(
-    int contextGroupId, v8::Isolate::MessageErrorLevel level,
+    int contextGroupId, int contextId, v8::Isolate::MessageErrorLevel level,
     const v8_inspector::StringView& message,
     const v8_inspector::StringView& url, unsigned lineNumber,
     unsigned columnNumber, v8_inspector::V8StackTrace* stack) {
   if (!log_console_api_message_calls_) return;
+  switch (level) {
+    case v8::Isolate::kMessageLog:
+      fprintf(stdout, "log: ");
+      break;
+    case v8::Isolate::kMessageDebug:
+      fprintf(stdout, "debug: ");
+      break;
+    case v8::Isolate::kMessageInfo:
+      fprintf(stdout, "info: ");
+      break;
+    case v8::Isolate::kMessageError:
+      fprintf(stdout, "error: ");
+      break;
+    case v8::Isolate::kMessageWarning:
+      fprintf(stdout, "warning: ");
+      break;
+    case v8::Isolate::kMessageAll:
+      break;
+  }
   Print(isolate_.get(), message);
   fprintf(stdout, " (");
   Print(isolate_.get(), url);
@@ -478,6 +584,13 @@ bool InspectorIsolateData::AssociateExceptionData(
     v8::Local<v8::Value> value) {
   return inspector_->associateExceptionData(
       this->isolate()->GetCurrentContext(), exception, key, value);
+}
+
+void InspectorIsolateData::WaitForDebugger(int context_group_id) {
+  DCHECK(!waiting_for_debugger_);
+  waiting_for_debugger_ = true;
+  runMessageLoopOnPause(context_group_id);
+  waiting_for_debugger_ = false;
 }
 
 namespace {
@@ -511,6 +624,28 @@ int64_t InspectorIsolateData::generateUniqueId() {
   // Keep it not too random for tests.
   return ++last_unique_id;
 }
+
+// static
+void ChannelHolder::AddChannel(int session_id,
+                               std::unique_ptr<FrontendChannelImpl> channel) {
+  CHECK_NE(channel.get(), nullptr);
+  channel->set_session_id(session_id);
+  channels_[session_id] = std::move(channel);
+}
+
+// static
+FrontendChannelImpl* ChannelHolder::GetChannel(int session_id) {
+  auto it = channels_.find(session_id);
+  return it != channels_.end() ? it->second.get() : nullptr;
+}
+
+// static
+void ChannelHolder::RemoveChannel(int session_id) {
+  channels_.erase(session_id);
+}
+
+// static
+std::map<int, std::unique_ptr<FrontendChannelImpl>> ChannelHolder::channels_;
 
 }  // namespace internal
 }  // namespace v8

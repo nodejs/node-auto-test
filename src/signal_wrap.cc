@@ -34,6 +34,7 @@ using v8::FunctionCallbackInfo;
 using v8::FunctionTemplate;
 using v8::HandleScope;
 using v8::Integer;
+using v8::Isolate;
 using v8::Local;
 using v8::Object;
 using v8::Value;
@@ -52,15 +53,16 @@ class SignalWrap : public HandleWrap {
                          Local<Context> context,
                          void* priv) {
     Environment* env = Environment::GetCurrent(context);
-    Local<FunctionTemplate> constructor = env->NewFunctionTemplate(New);
+    Isolate* isolate = env->isolate();
+    Local<FunctionTemplate> constructor = NewFunctionTemplate(isolate, New);
     constructor->InstanceTemplate()->SetInternalFieldCount(
         SignalWrap::kInternalFieldCount);
     constructor->Inherit(HandleWrap::GetConstructorTemplate(env));
 
-    env->SetProtoMethod(constructor, "start", Start);
-    env->SetProtoMethod(constructor, "stop", Stop);
+    SetProtoMethod(isolate, constructor, "start", Start);
+    SetProtoMethod(isolate, constructor, "stop", Stop);
 
-    env->SetConstructorFunction(target, "Signal", constructor);
+    SetConstructorFunction(context, target, "Signal", constructor);
   }
 
   static void RegisterExternalReferences(ExternalReferenceRegistry* registry) {
@@ -102,7 +104,7 @@ class SignalWrap : public HandleWrap {
 
   static void Start(const FunctionCallbackInfo<Value>& args) {
     SignalWrap* wrap;
-    ASSIGN_OR_RETURN_UNWRAP(&wrap, args.Holder());
+    ASSIGN_OR_RETURN_UNWRAP(&wrap, args.This());
     Environment* env = wrap->env();
     int signum;
     if (!args[0]->Int32Value(env->context()).To(&signum)) return;
@@ -140,7 +142,7 @@ class SignalWrap : public HandleWrap {
 
   static void Stop(const FunctionCallbackInfo<Value>& args) {
     SignalWrap* wrap;
-    ASSIGN_OR_RETURN_UNWRAP(&wrap, args.Holder());
+    ASSIGN_OR_RETURN_UNWRAP(&wrap, args.This());
 
     if (wrap->active_)  {
       wrap->active_ = false;
@@ -168,11 +170,10 @@ void DecreaseSignalHandlerCount(int signum) {
 
 bool HasSignalJSHandler(int signum) {
   Mutex::ScopedLock lock(handled_signals_mutex);
-  return handled_signals.find(signum) != handled_signals.end();
+  return handled_signals.contains(signum);
 }
 }  // namespace node
 
-
-NODE_MODULE_CONTEXT_AWARE_INTERNAL(signal_wrap, node::SignalWrap::Initialize)
-NODE_MODULE_EXTERNAL_REFERENCE(signal_wrap,
-                               node::SignalWrap::RegisterExternalReferences)
+NODE_BINDING_CONTEXT_AWARE_INTERNAL(signal_wrap, node::SignalWrap::Initialize)
+NODE_BINDING_EXTERNAL_REFERENCE(signal_wrap,
+                                node::SignalWrap::RegisterExternalReferences)

@@ -5,72 +5,90 @@
 #ifndef V8_OBJECTS_FEEDBACK_VECTOR_INL_H_
 #define V8_OBJECTS_FEEDBACK_VECTOR_INL_H_
 
+#include "src/objects/feedback-vector.h"
+// Include the non-inl header before the rest of the headers.
+
+#include <optional>
+
 #include "src/common/globals.h"
 #include "src/heap/heap-write-barrier-inl.h"
 #include "src/objects/code-inl.h"
 #include "src/objects/feedback-cell-inl.h"
-#include "src/objects/feedback-vector.h"
 #include "src/objects/maybe-object-inl.h"
 #include "src/objects/shared-function-info.h"
 #include "src/objects/smi.h"
+#include "src/objects/tagged.h"
 #include "src/roots/roots-inl.h"
+#include "src/torque/runtime-macro-shims.h"
+#include "src/torque/runtime-support.h"
 
 // Has to be the last include (doesn't have include guards):
 #include "src/objects/object-macros.h"
 
-namespace v8 {
-namespace internal {
+namespace v8::internal {
 
 #include "torque-generated/src/objects/feedback-vector-tq-inl.inc"
 
 TQ_OBJECT_CONSTRUCTORS_IMPL(FeedbackVector)
 OBJECT_CONSTRUCTORS_IMPL(FeedbackMetadata, HeapObject)
-OBJECT_CONSTRUCTORS_IMPL(ClosureFeedbackCellArray, FixedArray)
-
-NEVER_READ_ONLY_SPACE_IMPL(FeedbackVector)
-NEVER_READ_ONLY_SPACE_IMPL(ClosureFeedbackCellArray)
-
-CAST_ACCESSOR(FeedbackMetadata)
-CAST_ACCESSOR(ClosureFeedbackCellArray)
 
 INT32_ACCESSORS(FeedbackMetadata, slot_count, kSlotCountOffset)
 
 INT32_ACCESSORS(FeedbackMetadata, create_closure_slot_count,
                 kCreateClosureSlotCountOffset)
 
-RELEASE_ACQUIRE_WEAK_ACCESSORS(FeedbackVector, maybe_optimized_code,
-                               kMaybeOptimizedCodeOffset)
+#define ASSERT_BUILTIN_ID_CONSECUTIVE(V, Location, Representation, Kind, \
+                                      Index)                             \
+  static_assert(                                                         \
+      static_cast<intptr_t>(                                             \
+          Builtin::kLoadIC##Location##Representation##Kind##Baseline) +  \
+          1 + Index ==                                                   \
+      static_cast<intptr_t>(                                             \
+          Builtin::kLoadIC##Location##Representation##Kind##Index##Baseline));
 
 int32_t FeedbackMetadata::slot_count(AcquireLoadTag) const {
   return ACQUIRE_READ_INT32_FIELD(*this, kSlotCountOffset);
 }
 
+int32_t FeedbackMetadata::create_closure_slot_count(AcquireLoadTag) const {
+  return ACQUIRE_READ_INT32_FIELD(*this, kCreateClosureSlotCountOffset);
+}
+
 int32_t FeedbackMetadata::get(int index) const {
-  DCHECK(index >= 0 && index < length());
+  CHECK_LT(static_cast<unsigned>(index), static_cast<unsigned>(word_count()));
   int offset = kHeaderSize + index * kInt32Size;
   return ReadField<int32_t>(offset);
 }
 
 void FeedbackMetadata::set(int index, int32_t value) {
-  DCHECK(index >= 0 && index < length());
+  DCHECK_LT(static_cast<unsigned>(index), static_cast<unsigned>(word_count()));
   int offset = kHeaderSize + index * kInt32Size;
   WriteField<int32_t>(offset, value);
 }
 
-bool FeedbackMetadata::is_empty() const { return slot_count() == 0; }
+bool FeedbackMetadata::is_empty() const {
+  DCHECK_IMPLIES(slot_count() == 0, create_closure_slot_count() == 0);
+  return slot_count() == 0;
+}
 
-int FeedbackMetadata::length() const {
-  return FeedbackMetadata::length(slot_count());
+int FeedbackMetadata::AllocatedSize() {
+  return SizeFor(slot_count(kAcquireLoad),
+                 create_closure_slot_count(kAcquireLoad));
+}
+
+int FeedbackMetadata::word_count() const {
+  return FeedbackMetadata::word_count(slot_count());
 }
 
 int FeedbackMetadata::GetSlotSize(FeedbackSlotKind kind) {
   switch (kind) {
     case FeedbackSlotKind::kForIn:
     case FeedbackSlotKind::kInstanceOf:
+    case FeedbackSlotKind::kTypeOf:
     case FeedbackSlotKind::kCompareOp:
     case FeedbackSlotKind::kBinaryOp:
     case FeedbackSlotKind::kLiteral:
-    case FeedbackSlotKind::kTypeProfile:
+    case FeedbackSlotKind::kJumpLoop:
       return 1;
 
     case FeedbackSlotKind::kCall:
@@ -80,40 +98,38 @@ int FeedbackMetadata::GetSlotSize(FeedbackSlotKind kind) {
     case FeedbackSlotKind::kLoadGlobalNotInsideTypeof:
     case FeedbackSlotKind::kLoadKeyed:
     case FeedbackSlotKind::kHasKeyed:
-    case FeedbackSlotKind::kStoreNamedSloppy:
-    case FeedbackSlotKind::kStoreNamedStrict:
-    case FeedbackSlotKind::kStoreOwnNamed:
+    case FeedbackSlotKind::kSetNamedSloppy:
+    case FeedbackSlotKind::kSetNamedStrict:
+    case FeedbackSlotKind::kDefineNamedOwn:
+    case FeedbackSlotKind::kDefineKeyedOwn:
     case FeedbackSlotKind::kStoreGlobalSloppy:
     case FeedbackSlotKind::kStoreGlobalStrict:
-    case FeedbackSlotKind::kStoreKeyedSloppy:
-    case FeedbackSlotKind::kStoreKeyedStrict:
+    case FeedbackSlotKind::kSetKeyedSloppy:
+    case FeedbackSlotKind::kSetKeyedStrict:
     case FeedbackSlotKind::kStoreInArrayLiteral:
-    case FeedbackSlotKind::kStoreDataPropertyInLiteral:
+    case FeedbackSlotKind::kDefineKeyedOwnPropertyInLiteral:
+    case FeedbackSlotKind::kStringAddAndInternalize:
       return 2;
 
     case FeedbackSlotKind::kInvalid:
-    case FeedbackSlotKind::kKindsNumber:
       UNREACHABLE();
   }
-  return 1;
-}
-
-Handle<FeedbackCell> ClosureFeedbackCellArray::GetFeedbackCell(int index) {
-  return handle(FeedbackCell::cast(get(index)), GetIsolate());
-}
-
-FeedbackCell ClosureFeedbackCellArray::cell(int index) {
-  return FeedbackCell::cast(get(index));
+  UNREACHABLE();
 }
 
 bool FeedbackVector::is_empty() const { return length() == 0; }
 
-FeedbackMetadata FeedbackVector::metadata() const {
-  return shared_function_info().feedback_metadata();
+DEF_GETTER(FeedbackVector, has_metadata, bool) {
+  return shared_function_info()->HasFeedbackMetadata();
 }
 
-FeedbackMetadata FeedbackVector::metadata(AcquireLoadTag tag) const {
-  return shared_function_info().feedback_metadata(tag);
+DEF_GETTER(FeedbackVector, metadata, Tagged<FeedbackMetadata>) {
+  return shared_function_info(cage_base)->feedback_metadata(cage_base);
+}
+
+DEF_ACQUIRE_GETTER(FeedbackVector, metadata, Tagged<FeedbackMetadata>) {
+  return shared_function_info(cage_base)->feedback_metadata(cage_base,
+                                                            kAcquireLoad);
 }
 
 RELAXED_INT32_ACCESSORS(FeedbackVector, invocation_count,
@@ -123,47 +139,119 @@ void FeedbackVector::clear_invocation_count(RelaxedStoreTag tag) {
   set_invocation_count(0, tag);
 }
 
-Code FeedbackVector::optimized_code() const {
-  MaybeObject slot = maybe_optimized_code(kAcquireLoad);
-  DCHECK(slot->IsWeakOrCleared());
-  HeapObject heap_object;
-  Code code;
-  if (slot->GetHeapObject(&heap_object)) {
-    code = FromCodeT(CodeT::cast(heap_object));
+RELAXED_UINT8_ACCESSORS(FeedbackVector, invocation_count_before_stable,
+                        kInvocationCountBeforeStableOffset)
+
+int FeedbackVector::osr_urgency() const {
+  return OsrUrgencyBits::decode(osr_state());
+}
+
+void FeedbackVector::set_osr_urgency(int urgency) {
+  DCHECK(0 <= urgency && urgency <= FeedbackVector::kMaxOsrUrgency);
+  static_assert(FeedbackVector::kMaxOsrUrgency <= OsrUrgencyBits::kMax);
+  set_osr_state(OsrUrgencyBits::update(osr_state(), urgency));
+}
+
+void FeedbackVector::reset_osr_urgency() { set_osr_urgency(0); }
+
+void FeedbackVector::RequestOsrAtNextOpportunity() {
+  set_osr_urgency(kMaxOsrUrgency);
+}
+
+void FeedbackVector::reset_osr_state() { set_osr_state(0); }
+
+bool FeedbackVector::maybe_has_optimized_osr_code() const {
+  return maybe_has_maglev_osr_code() || maybe_has_turbofan_osr_code();
+}
+
+bool FeedbackVector::maybe_has_maglev_osr_code() const {
+  return MaybeHasMaglevOsrCodeBit::decode(osr_state());
+}
+
+bool FeedbackVector::maybe_has_turbofan_osr_code() const {
+  return MaybeHasTurbofanOsrCodeBit::decode(osr_state());
+}
+
+void FeedbackVector::set_maybe_has_optimized_osr_code(bool value,
+                                                      CodeKind code_kind) {
+  if (code_kind == CodeKind::MAGLEV) {
+    CHECK(v8_flags.maglev_osr);
+    set_osr_state(MaybeHasMaglevOsrCodeBit::update(osr_state(), value));
+  } else {
+    CHECK_EQ(code_kind, CodeKind::TURBOFAN_JS);
+    set_osr_state(MaybeHasTurbofanOsrCodeBit::update(osr_state(), value));
   }
-  // It is possible that the maybe_optimized_code slot is cleared but the
-  // optimization tier hasn't been updated yet. We update the tier when we
-  // execute the function next time / when we create new closure.
-  DCHECK_IMPLIES(!code.is_null(), OptimizationTierBits::decode(flags()) ==
-                                      GetTierForCodeKind(code.kind()));
+}
+
+bool FeedbackVector::interrupt_budget_reset_by_ic_change() const {
+  return InterruptBudgetResetByIcChangeBit::decode(flags());
+}
+
+void FeedbackVector::set_interrupt_budget_reset_by_ic_change(bool value) {
+  set_flags(InterruptBudgetResetByIcChangeBit::update(flags(), value));
+}
+
+bool FeedbackVector::was_once_deoptimized() const {
+  return invocation_count_before_stable(kRelaxedLoad) ==
+         kInvocationCountBeforeStableDeoptSentinel;
+}
+
+void FeedbackVector::set_was_once_deoptimized() {
+  set_invocation_count_before_stable(kInvocationCountBeforeStableDeoptSentinel,
+                                     kRelaxedStore);
+}
+
+bool FeedbackVector::tiering_in_progress() const {
+  return TieringInProgressBit::decode(flags());
+}
+
+std::optional<Tagged<Code>> FeedbackVector::GetOptimizedOsrCode(
+    Isolate* isolate, Handle<BytecodeArray> bytecode, FeedbackSlot slot) {
+  Tagged<MaybeObject> maybe_code = Get(isolate, slot);
+  if (maybe_code.IsCleared()) return {};
+
+  Tagged<Code> code =
+      Cast<CodeWrapper>(maybe_code.GetHeapObject())->code(isolate);
+  if (code->marked_for_deoptimization()) {
+    // Clear the cached Code object if deoptimized.
+    // TODO(jgruber): Add tracing.
+    Set(slot, ClearedValue());
+    if (!bytecode.is_null()) {
+      RecomputeOptimizedOsrCodeFlags(isolate, bytecode);
+    }
+    return {};
+  }
+
   return code;
 }
 
-OptimizationMarker FeedbackVector::optimization_marker() const {
-  return OptimizationMarkerBits::decode(flags());
-}
-
-OptimizationTier FeedbackVector::optimization_tier() const {
-  OptimizationTier tier = OptimizationTierBits::decode(flags());
-  // It is possible that the optimization tier bits aren't updated when the code
-  // was cleared due to a GC.
-  DCHECK_IMPLIES(tier == OptimizationTier::kNone,
-                 maybe_optimized_code(kAcquireLoad)->IsCleared());
-  return tier;
-}
-
-bool FeedbackVector::has_optimized_code() const {
-  return !optimized_code().is_null();
-}
-
-bool FeedbackVector::has_optimization_marker() const {
-  return optimization_marker() != OptimizationMarker::kLogFirstExecution &&
-         optimization_marker() != OptimizationMarker::kNone;
+void FeedbackVector::RecomputeOptimizedOsrCodeFlags(
+    Isolate* isolate, Handle<BytecodeArray> bytecode_array) {
+  bool turbofan = false;
+  bool maglev = false;
+  interpreter::BytecodeArrayIterator it(bytecode_array);
+  for (; !it.done(); it.Advance()) {
+    if (it.current_bytecode() != interpreter::Bytecode::kJumpLoop) continue;
+    if (auto code = GetOptimizedOsrCode(isolate, {}, it.GetSlotOperand(2))) {
+      if ((*code)->marked_for_deoptimization()) continue;
+      turbofan |= (*code)->is_turbofanned();
+      maglev |= (*code)->is_maglevved();
+    }
+  }
+  if (!maglev && maybe_has_maglev_osr_code()) {
+    set_maybe_has_optimized_osr_code(false, CodeKind::MAGLEV);
+  }
+  if (!turbofan && maybe_has_turbofan_osr_code()) {
+    set_maybe_has_optimized_osr_code(false, CodeKind::TURBOFAN_JS);
+  }
 }
 
 // Conversion from an integer index to either a slot or an ic slot.
 // static
 FeedbackSlot FeedbackVector::ToSlot(intptr_t index) {
+  if (index == static_cast<intptr_t>(FeedbackSlot::Invalid().ToInt())) {
+    return FeedbackSlot();
+  }
   DCHECK_LE(static_cast<uintptr_t>(index),
             static_cast<uintptr_t>(std::numeric_limits<int>::max()));
   return FeedbackSlot(static_cast<int>(index));
@@ -172,74 +260,65 @@ FeedbackSlot FeedbackVector::ToSlot(intptr_t index) {
 #ifdef DEBUG
 // Instead of FixedArray, the Feedback and the Extra should contain
 // WeakFixedArrays. The only allowed FixedArray subtype is HashTable.
-bool FeedbackVector::IsOfLegacyType(MaybeObject value) {
-  HeapObject heap_object;
-  if (value->GetHeapObject(&heap_object)) {
-    return heap_object.IsFixedArray() && !heap_object.IsHashTable();
+bool FeedbackVector::IsOfLegacyType(Tagged<MaybeObject> value) {
+  Tagged<HeapObject> heap_object;
+  if (value.GetHeapObject(&heap_object)) {
+    return IsFixedArray(heap_object) && !IsHashTable(heap_object);
   }
   return false;
 }
 #endif  // DEBUG
 
-MaybeObject FeedbackVector::Get(FeedbackSlot slot) const {
-  MaybeObject value = raw_feedback_slots(GetIndex(slot), kRelaxedLoad);
+Tagged<MaybeObject> FeedbackVector::Get(FeedbackSlot slot) const {
+  Tagged<MaybeObject> value = raw_feedback_slots(GetIndex(slot), kRelaxedLoad);
   DCHECK(!IsOfLegacyType(value));
   return value;
 }
 
-MaybeObject FeedbackVector::Get(PtrComprCageBase cage_base,
-                                FeedbackSlot slot) const {
-  MaybeObject value =
+Tagged<MaybeObject> FeedbackVector::Get(PtrComprCageBase cage_base,
+                                        FeedbackSlot slot) const {
+  Tagged<MaybeObject> value =
       raw_feedback_slots(cage_base, GetIndex(slot), kRelaxedLoad);
   DCHECK(!IsOfLegacyType(value));
   return value;
 }
 
-Handle<FeedbackCell> FeedbackVector::GetClosureFeedbackCell(int index) const {
+DirectHandle<FeedbackCell> FeedbackVector::GetClosureFeedbackCell(
+    Isolate* isolate, int index) const {
   DCHECK_GE(index, 0);
-  return closure_feedback_cell_array().GetFeedbackCell(index);
+  return direct_handle(closure_feedback_cell_array()->get(index), isolate);
 }
 
-FeedbackCell FeedbackVector::closure_feedback_cell(int index) const {
+Tagged<FeedbackCell> FeedbackVector::closure_feedback_cell(int index) const {
   DCHECK_GE(index, 0);
-  return closure_feedback_cell_array().cell(index);
+  return closure_feedback_cell_array()->get(index);
 }
 
-MaybeObject FeedbackVector::SynchronizedGet(FeedbackSlot slot) const {
+Tagged<MaybeObject> FeedbackVector::SynchronizedGet(FeedbackSlot slot) const {
   const int i = slot.ToInt();
   DCHECK_LT(static_cast<unsigned>(i), static_cast<unsigned>(this->length()));
   const int offset = kRawFeedbackSlotsOffset + i * kTaggedSize;
-  MaybeObject value = TaggedField<MaybeObject>::Acquire_Load(*this, offset);
+  Tagged<MaybeObject> value =
+      TaggedField<MaybeObject>::Acquire_Load(*this, offset);
   DCHECK(!IsOfLegacyType(value));
   return value;
 }
 
-void FeedbackVector::SynchronizedSet(FeedbackSlot slot, MaybeObject value,
+void FeedbackVector::SynchronizedSet(FeedbackSlot slot,
+                                     Tagged<MaybeObject> value,
                                      WriteBarrierMode mode) {
   DCHECK(!IsOfLegacyType(value));
   const int i = slot.ToInt();
   DCHECK_LT(static_cast<unsigned>(i), static_cast<unsigned>(this->length()));
   const int offset = kRawFeedbackSlotsOffset + i * kTaggedSize;
   TaggedField<MaybeObject>::Release_Store(*this, offset, value);
-  CONDITIONAL_WEAK_WRITE_BARRIER(*this, offset, value, mode);
+  CONDITIONAL_WRITE_BARRIER(*this, offset, value, mode);
 }
 
-void FeedbackVector::SynchronizedSet(FeedbackSlot slot, Object value,
-                                     WriteBarrierMode mode) {
-  SynchronizedSet(slot, MaybeObject::FromObject(value), mode);
-}
-
-void FeedbackVector::Set(FeedbackSlot slot, MaybeObject value,
+void FeedbackVector::Set(FeedbackSlot slot, Tagged<MaybeObject> value,
                          WriteBarrierMode mode) {
   DCHECK(!IsOfLegacyType(value));
-  set_raw_feedback_slots(GetIndex(slot), value, mode);
-}
-
-void FeedbackVector::Set(FeedbackSlot slot, Object value,
-                         WriteBarrierMode mode) {
-  MaybeObject maybe_value = MaybeObject::FromObject(value);
-  DCHECK(!IsOfLegacyType(maybe_value));
-  set_raw_feedback_slots(GetIndex(slot), maybe_value, mode);
+  set_raw_feedback_slots(GetIndex(slot), value, kRelaxedStore, mode);
 }
 
 inline MaybeObjectSlot FeedbackVector::slots_start() {
@@ -255,14 +334,20 @@ BinaryOperationHint BinaryOperationHintFromFeedback(int type_feedback) {
       return BinaryOperationHint::kSignedSmall;
     case BinaryOperationFeedback::kSignedSmallInputs:
       return BinaryOperationHint::kSignedSmallInputs;
+    case BinaryOperationFeedback::kAdditiveSafeInteger:
+      return BinaryOperationHint::kAdditiveSafeInteger;
     case BinaryOperationFeedback::kNumber:
       return BinaryOperationHint::kNumber;
     case BinaryOperationFeedback::kNumberOrOddball:
       return BinaryOperationHint::kNumberOrOddball;
     case BinaryOperationFeedback::kString:
       return BinaryOperationHint::kString;
+    case BinaryOperationFeedback::kStringOrStringWrapper:
+      return BinaryOperationHint::kStringOrStringWrapper;
     case BinaryOperationFeedback::kBigInt:
       return BinaryOperationHint::kBigInt;
+    case BinaryOperationFeedback::kBigInt64:
+      return BinaryOperationHint::kBigInt64;
     default:
       return BinaryOperationHint::kAny;
   }
@@ -286,12 +371,19 @@ CompareOperationHint CompareOperationHintFromFeedback(int type_feedback) {
     return CompareOperationHint::kNumber;
   } else if (Is<CompareOperationFeedback::kNumberOrBoolean>(type_feedback)) {
     return CompareOperationHint::kNumberOrBoolean;
+  } else if (Is<CompareOperationFeedback::kNumberOrOddball>(type_feedback)) {
+    return CompareOperationHint::kNumberOrOddball;
   }
 
   if (Is<CompareOperationFeedback::kInternalizedString>(type_feedback)) {
     return CompareOperationHint::kInternalizedString;
   } else if (Is<CompareOperationFeedback::kString>(type_feedback)) {
     return CompareOperationHint::kString;
+  } else if (Is<CompareOperationFeedback::kStringOrOddball>(type_feedback) &&
+             !Is<CompareOperationFeedback::kOddball>(type_feedback)) {
+    // Don't return the StringOrOddball feedback for pure oddball comparisons,
+    // that would be too confusing.
+    return CompareOperationHint::kStringOrOddball;
   }
 
   if (Is<CompareOperationFeedback::kReceiver>(type_feedback)) {
@@ -301,7 +393,9 @@ CompareOperationHint CompareOperationHintFromFeedback(int type_feedback) {
     return CompareOperationHint::kReceiverOrNullOrUndefined;
   }
 
-  if (Is<CompareOperationFeedback::kBigInt>(type_feedback)) {
+  if (Is<CompareOperationFeedback::kBigInt64>(type_feedback)) {
+    return CompareOperationHint::kBigInt64;
+  } else if (Is<CompareOperationFeedback::kBigInt>(type_feedback)) {
     return CompareOperationHint::kBigInt;
   }
 
@@ -328,30 +422,30 @@ ForInHint ForInHintFromFeedback(ForInFeedback type_feedback) {
   UNREACHABLE();
 }
 
-Handle<Symbol> FeedbackVector::UninitializedSentinel(Isolate* isolate) {
-  return ReadOnlyRoots(isolate).uninitialized_symbol_handle();
+DirectHandle<Symbol> FeedbackVector::UninitializedSentinel(Isolate* isolate) {
+  return isolate->factory()->uninitialized_symbol();
 }
 
 Handle<Symbol> FeedbackVector::MegamorphicSentinel(Isolate* isolate) {
-  return ReadOnlyRoots(isolate).megamorphic_symbol_handle();
+  return isolate->factory()->megamorphic_symbol();
 }
 
-Handle<Symbol> FeedbackVector::MegaDOMSentinel(Isolate* isolate) {
-  return ReadOnlyRoots(isolate).mega_dom_symbol_handle();
+DirectHandle<Symbol> FeedbackVector::MegaDOMSentinel(Isolate* isolate) {
+  return isolate->factory()->mega_dom_symbol();
 }
 
-Symbol FeedbackVector::RawUninitializedSentinel(Isolate* isolate) {
+Tagged<Symbol> FeedbackVector::RawUninitializedSentinel(Isolate* isolate) {
   return ReadOnlyRoots(isolate).uninitialized_symbol();
 }
 
 bool FeedbackMetadataIterator::HasNext() const {
-  return next_slot_.ToInt() < metadata().slot_count();
+  return next_slot_.ToInt() < metadata()->slot_count();
 }
 
 FeedbackSlot FeedbackMetadataIterator::Next() {
   DCHECK(HasNext());
   cur_slot_ = next_slot_;
-  slot_kind_ = metadata().GetKind(cur_slot_);
+  slot_kind_ = metadata()->GetKind(cur_slot_);
   next_slot_ = FeedbackSlot(next_slot_.ToInt() + entry_size());
   return cur_slot_;
 }
@@ -360,54 +454,61 @@ int FeedbackMetadataIterator::entry_size() const {
   return FeedbackMetadata::GetSlotSize(kind());
 }
 
-MaybeObject NexusConfig::GetFeedback(FeedbackVector vector,
-                                     FeedbackSlot slot) const {
-  return vector.SynchronizedGet(slot);
+template <typename T>
+Handle<T> NexusConfig::NewHandle(Tagged<T> object) const {
+  if (mode() == Mode::MainThread) {
+    return handle(object, isolate_);
+  }
+  DCHECK_EQ(mode(), Mode::BackgroundThread);
+  return handle(object, local_heap_);
 }
 
-void NexusConfig::SetFeedback(FeedbackVector vector, FeedbackSlot slot,
-                              MaybeObject feedback,
+Tagged<MaybeObject> NexusConfig::GetFeedback(Tagged<FeedbackVector> vector,
+                                             FeedbackSlot slot) const {
+  return vector->SynchronizedGet(slot);
+}
+
+void NexusConfig::SetFeedback(Tagged<FeedbackVector> vector, FeedbackSlot slot,
+                              Tagged<MaybeObject> feedback,
                               WriteBarrierMode mode) const {
   DCHECK(can_write());
-  vector.SynchronizedSet(slot, feedback, mode);
+  vector->SynchronizedSet(slot, feedback, mode);
 }
 
-MaybeObject FeedbackNexus::UninitializedSentinel() const {
-  return MaybeObject::FromObject(
-      *FeedbackVector::UninitializedSentinel(GetIsolate()));
+Tagged<MaybeObject> FeedbackNexus::UninitializedSentinel() const {
+  return *FeedbackVector::UninitializedSentinel(config()->isolate());
 }
 
-MaybeObject FeedbackNexus::MegamorphicSentinel() const {
-  return MaybeObject::FromObject(
-      *FeedbackVector::MegamorphicSentinel(GetIsolate()));
+Tagged<MaybeObject> FeedbackNexus::MegamorphicSentinel() const {
+  return *FeedbackVector::MegamorphicSentinel(config()->isolate());
 }
 
-MaybeObject FeedbackNexus::MegaDOMSentinel() const {
-  return MaybeObject::FromObject(
-      *FeedbackVector::MegaDOMSentinel(GetIsolate()));
+Tagged<MaybeObject> FeedbackNexus::MegaDOMSentinel() const {
+  return *FeedbackVector::MegaDOMSentinel(config()->isolate());
 }
 
-MaybeObject FeedbackNexus::FromHandle(MaybeObjectHandle slot) const {
-  return slot.is_null() ? HeapObjectReference::ClearedValue(config()->isolate())
-                        : *slot;
+Tagged<MaybeObject> FeedbackNexus::FromHandle(
+    MaybeObjectDirectHandle slot) const {
+  return slot.is_null() ? ClearedValue() : *slot;
 }
 
-MaybeObjectHandle FeedbackNexus::ToHandle(MaybeObject value) const {
+MaybeObjectHandle FeedbackNexus::ToHandle(Tagged<MaybeObject> value) const {
   return value.IsCleared() ? MaybeObjectHandle()
                            : MaybeObjectHandle(config()->NewHandle(value));
 }
 
-MaybeObject FeedbackNexus::GetFeedback() const {
+Tagged<MaybeObject> FeedbackNexus::GetFeedback() const {
   auto pair = GetFeedbackPair();
   return pair.first;
 }
 
-MaybeObject FeedbackNexus::GetFeedbackExtra() const {
+Tagged<MaybeObject> FeedbackNexus::GetFeedbackExtra() const {
   auto pair = GetFeedbackPair();
   return pair.second;
 }
 
-std::pair<MaybeObject, MaybeObject> FeedbackNexus::GetFeedbackPair() const {
+std::pair<Tagged<MaybeObject>, Tagged<MaybeObject>>
+FeedbackNexus::GetFeedbackPair() const {
   if (config()->mode() == NexusConfig::BackgroundThread &&
       feedback_cache_.has_value()) {
     return std::make_pair(FromHandle(feedback_cache_->first),
@@ -416,7 +517,7 @@ std::pair<MaybeObject, MaybeObject> FeedbackNexus::GetFeedbackPair() const {
   auto pair = FeedbackMetadata::GetSlotSize(kind()) == 2
                   ? config()->GetFeedbackPair(vector(), slot())
                   : std::make_pair(config()->GetFeedback(vector(), slot()),
-                                   MaybeObject());
+                                   Tagged<MaybeObject>());
   if (config()->mode() == NexusConfig::BackgroundThread &&
       !feedback_cache_.has_value()) {
     feedback_cache_ =
@@ -425,36 +526,80 @@ std::pair<MaybeObject, MaybeObject> FeedbackNexus::GetFeedbackPair() const {
   return pair;
 }
 
-template <typename T>
-struct IsValidFeedbackType
-    : public std::integral_constant<bool,
-                                    std::is_base_of<MaybeObject, T>::value ||
-                                        std::is_base_of<Object, T>::value> {};
-
 template <typename FeedbackType>
-void FeedbackNexus::SetFeedback(FeedbackType feedback, WriteBarrierMode mode) {
-  static_assert(IsValidFeedbackType<FeedbackType>(),
-                "feedbacks need to be Smi, Object or MaybeObject");
-  MaybeObject fmo = MaybeObject::Create(feedback);
-  config()->SetFeedback(vector(), slot(), fmo, mode);
+void FeedbackNexus::SetFeedback(Tagged<FeedbackType> feedback,
+                                WriteBarrierMode mode) {
+  config()->SetFeedback(vector(), slot(), feedback, mode);
 }
 
 template <typename FeedbackType, typename FeedbackExtraType>
-void FeedbackNexus::SetFeedback(FeedbackType feedback, WriteBarrierMode mode,
-                                FeedbackExtraType feedback_extra,
+void FeedbackNexus::SetFeedback(Tagged<FeedbackType> feedback,
+                                WriteBarrierMode mode,
+                                Tagged<FeedbackExtraType> feedback_extra,
                                 WriteBarrierMode mode_extra) {
-  static_assert(IsValidFeedbackType<FeedbackType>(),
-                "feedbacks need to be Smi, Object or MaybeObject");
-  static_assert(IsValidFeedbackType<FeedbackExtraType>(),
-                "feedbacks need to be Smi, Object or MaybeObject");
-  MaybeObject fmo = MaybeObject::Create(feedback);
-  MaybeObject fmo_extra = MaybeObject::Create(feedback_extra);
-  config()->SetFeedbackPair(vector(), slot(), fmo, mode, fmo_extra, mode_extra);
+  config()->SetFeedbackPair(vector(), slot(), feedback, mode, feedback_extra,
+                            mode_extra);
 }
 
-Isolate* FeedbackNexus::GetIsolate() const { return vector().GetIsolate(); }
-}  // namespace internal
-}  // namespace v8
+template <typename F>
+void FeedbackNexus::IterateMapsWithUnclearedHandler(F function) const {
+  // We don't need DisallowGarbageCollection here: accessing it.map() and
+  // it.handle() is safe between it.Advance() and a potential GC call in
+  // function(). The it itself is not invalidated, since it holds the
+  // polymorphic array by handle.
+  // TODO(370727490): Make the FeedbackIterator GC safe (e.g. look up
+  // map/handler in the feedback array on-demand).
+  for (FeedbackIterator it(this); !it.done(); it.Advance()) {
+    DirectHandle<Map> map = config()->NewHandle(it.map());
+    if (!it.handler().IsCleared()) {
+      function(map);
+    }
+  }
+}
+
+Builtin FeedbackNexus::GetLoadICHandlerForFieldIndex(int field_index,
+                                                     bool is_inobject,
+                                                     bool is_double) {
+  if (is_double) return Builtin::kLoadICDoubleFieldBaseline;
+
+  if (is_inobject) {
+    int in_object_index = field_index - JSObject::kHeaderSize / kTaggedSize;
+    DCHECK_GE(in_object_index, 0);
+    // Currently we have eight handlers that support loading in-object field
+    // with fixed index 0~7.
+    int kMaxIndex = 7;
+    if (in_object_index > kMaxIndex)
+      return Builtin::kLoadICInObjectNonDoubleFieldBaseline;
+
+    LOAD_IC_IN_OBJECT_FIELD_WITH_INDEX_HANDLER_LIST(
+        /*V*/, ASSERT_BUILTIN_ID_CONSECUTIVE)
+    int32_t builtin_id =
+        static_cast<int32_t>(Builtin::kLoadICInObjectNonDoubleFieldBaseline) +
+        in_object_index + 1;
+    return static_cast<Builtin>(builtin_id);
+  } else {
+    int out_of_object_index =
+        field_index - OFFSET_OF_DATA_START(FixedArray) / kTaggedSize;
+    DCHECK_GE(out_of_object_index, 0);
+    // Currently we have four handlers that support loading out-of-object
+    // field with fixed index 0~3.
+    int kMaxIndex = 3;
+    if (out_of_object_index > kMaxIndex)
+      return Builtin::kLoadICOutOfObjectNonDoubleFieldBaseline;
+
+    LOAD_IC_OUT_OF_OBJECT_FIELD_WITH_INDEX_HANDLER_LIST(
+        /*V*/, ASSERT_BUILTIN_ID_CONSECUTIVE)
+    int32_t builtin_id =
+        static_cast<int32_t>(
+            Builtin::kLoadICOutOfObjectNonDoubleFieldBaseline) +
+        out_of_object_index + 1;
+    return static_cast<Builtin>(builtin_id);
+  }
+}
+
+#undef ASSERT_BUILTIN_ID_CONSECUTIVE
+
+}  // namespace v8::internal
 
 #include "src/objects/object-macros-undef.h"
 

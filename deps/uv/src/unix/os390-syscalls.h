@@ -45,7 +45,7 @@ struct epoll_event {
 };
 
 typedef struct {
-  QUEUE member;
+  struct uv__queue member;
   struct pollfd* items;
   unsigned long size;
   int msg_queue;
@@ -70,5 +70,6 @@ int sem_destroy(UV_PLATFORM_SEM_T* semid);
 int sem_post(UV_PLATFORM_SEM_T* semid);
 int sem_trywait(UV_PLATFORM_SEM_T* semid);
 int sem_wait(UV_PLATFORM_SEM_T* semid);
+void uv__os390_cleanup(void);
 
 #endif /* UV_OS390_SYSCALL_H_ */

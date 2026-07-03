@@ -95,10 +95,17 @@ function testForLoop() {
 |R|}
 
 function testForOfLoop() {
-  for (var |C|k of |_|[]) {}
-  for (var |C|k of |_|[1]) |_|k;
+  for (var |_|k of |_|[]) {}
+  for (var |_|k of |_|[1]) |_|k;
   var a = |_|[];
-  for (var |C|k of |_|a) {}
+  for (var |_|k of |_|a) {}
+|R|}
+
+async function testPromiseForAwaitLoop() {
+  for await (var |_|k of |_|[]) { }
+  for await (var |_|k of |_|[Promise.|C|resolve(1)]) |_|k;
+  var a = |_|[];
+  for await (var |_|k of |_|a) {}
 |R|}
 
 function testForInLoop() {
@@ -152,7 +159,7 @@ function testSwitch() {
   }
 |R|}
 
-function* idMaker|_|() {
+function* idMaker() {
   |_|yield 1;
   |_|yield 2;
   |_|yield 3;
@@ -230,8 +237,8 @@ async function testPromiseAsyncWithCode() {
       |_|await p;
     |R|}
     |C|setTimeout(returnCall, 0);
-    |_|await |C|foo();
-    |_|await |C|foo();
+    await |C|foo();
+    await |C|foo();
     |C|nextTest();
   |R|}
   |C|main();
@@ -252,7 +259,7 @@ async function testPromiseComplex() {
     }
     var x = |_|1;
     var y = |_|2;
-    |C|returnFunction(|C|emptyFunction(), x++, --y, x => 2 |_|* x|R|, |C|returnCall())|C|().a = |_|await |C|foo((a => 2 |_|*a|R|)|C|(5));
+    |C|returnFunction(|C|emptyFunction(), x++, --y, x => 2 |_|* x|R|, |C|returnCall())|C|().a = await |C|foo((a => 2 |_|*a|R|)|C|(5));
     |C|nextTest();
   |R|}
   |C|main();

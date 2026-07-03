@@ -11,6 +11,7 @@
 #include "include/cppgc/allocation.h"
 #include "include/cppgc/cross-thread-persistent.h"
 #include "include/cppgc/heap-consistency.h"
+#include "include/cppgc/heap-state.h"
 #include "include/cppgc/persistent.h"
 #include "include/cppgc/prefinalizer.h"
 #include "src/heap/cppgc/globals.h"
@@ -26,11 +27,11 @@ class GCHeapTest : public testing::TestWithHeap {
  public:
   void ConservativeGC() {
     internal::Heap::From(GetHeap())->CollectGarbage(
-        Heap::Config::ConservativeAtomicConfig());
+        GCConfig::ConservativeAtomicConfig());
   }
   void PreciseGC() {
     internal::Heap::From(GetHeap())->CollectGarbage(
-        Heap::Config::PreciseAtomicConfig());
+        GCConfig::PreciseAtomicConfig());
   }
 };
 
@@ -71,9 +72,9 @@ TEST_F(GCHeapTest, PreciseGCReclaimsObjectOnStack) {
 namespace {
 
 const void* ConservativeGCReturningObject(cppgc::Heap* heap,
-                                          const void* volatile object) {
+                                          const void* object) {
   internal::Heap::From(heap)->CollectGarbage(
-      Heap::Config::ConservativeAtomicConfig());
+      GCConfig::ConservativeAtomicConfig());
   return object;
 }
 
@@ -112,7 +113,7 @@ class LargeObjectGCDuringCtor final
       : child_(MakeGarbageCollected<GCedWithFinalizer>(
             heap->GetAllocationHandle())) {
     internal::Heap::From(heap)->CollectGarbage(
-        Heap::Config::ConservativeAtomicConfig());
+        GCConfig::ConservativeAtomicConfig());
   }
 
   void Trace(Visitor* visitor) const { visitor->Trace(child_); }
@@ -234,8 +235,8 @@ TEST_F(GCHeapTest, IsGarbageCollectionAllowed) {
 }
 
 TEST_F(GCHeapTest, IsMarking) {
-  GarbageCollector::Config config = GarbageCollector::Config::
-      PreciseIncrementalMarkingConcurrentSweepingConfig();
+  GCConfig config =
+      GCConfig::PreciseIncrementalMarkingConcurrentSweepingConfig();
   auto* heap = Heap::From(GetHeap());
   EXPECT_FALSE(subtle::HeapState::IsMarking(*heap));
   heap->StartIncrementalGarbageCollection(config);
@@ -247,8 +248,8 @@ TEST_F(GCHeapTest, IsMarking) {
 }
 
 TEST_F(GCHeapTest, IsSweeping) {
-  GarbageCollector::Config config = GarbageCollector::Config::
-      PreciseIncrementalMarkingConcurrentSweepingConfig();
+  GCConfig config =
+      GCConfig::PreciseIncrementalMarkingConcurrentSweepingConfig();
   auto* heap = Heap::From(GetHeap());
   EXPECT_FALSE(subtle::HeapState::IsSweeping(*heap));
   heap->StartIncrementalGarbageCollection(config);
@@ -257,6 +258,40 @@ TEST_F(GCHeapTest, IsSweeping) {
   EXPECT_TRUE(subtle::HeapState::IsSweeping(*heap));
   heap->AsBase().sweeper().FinishIfRunning();
   EXPECT_FALSE(subtle::HeapState::IsSweeping(*heap));
+}
+
+namespace {
+
+class GCedExpectSweepingOnOwningThread final
+    : public GarbageCollected<GCedExpectSweepingOnOwningThread> {
+ public:
+  explicit GCedExpectSweepingOnOwningThread(const HeapHandle& heap_handle)
+      : heap_handle_(heap_handle) {}
+  ~GCedExpectSweepingOnOwningThread() {
+    EXPECT_TRUE(subtle::HeapState::IsSweepingOnOwningThread(heap_handle_));
+  }
+
+  void Trace(Visitor*) const {}
+
+ private:
+  const HeapHandle& heap_handle_;
+};
+
+}  // namespace
+
+TEST_F(GCHeapTest, IsSweepingOnOwningThread) {
+  GCConfig config =
+      GCConfig::PreciseIncrementalMarkingConcurrentSweepingConfig();
+  auto* heap = Heap::From(GetHeap());
+  MakeGarbageCollected<GCedExpectSweepingOnOwningThread>(
+      heap->GetAllocationHandle(), *heap);
+  EXPECT_FALSE(subtle::HeapState::IsSweepingOnOwningThread(*heap));
+  heap->StartIncrementalGarbageCollection(config);
+  EXPECT_FALSE(subtle::HeapState::IsSweepingOnOwningThread(*heap));
+  heap->FinalizeIncrementalGarbageCollectionIfRunning(config);
+  EXPECT_FALSE(subtle::HeapState::IsSweepingOnOwningThread(*heap));
+  heap->AsBase().sweeper().FinishIfRunning();
+  EXPECT_FALSE(subtle::HeapState::IsSweepingOnOwningThread(*heap));
 }
 
 namespace {
@@ -281,8 +316,7 @@ class ExpectAtomicPause final : public GarbageCollected<ExpectAtomicPause> {
 }  // namespace
 
 TEST_F(GCHeapTest, IsInAtomicPause) {
-  GarbageCollector::Config config =
-      GarbageCollector::Config::PreciseIncrementalConfig();
+  GCConfig config = GCConfig::PreciseIncrementalConfig();
   auto* heap = Heap::From(GetHeap());
   MakeGarbageCollected<ExpectAtomicPause>(heap->object_allocator(), *heap);
   EXPECT_FALSE(subtle::HeapState::IsInAtomicPause(*heap));

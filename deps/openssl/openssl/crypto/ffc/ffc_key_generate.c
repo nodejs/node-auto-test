@@ -20,16 +20,16 @@
  * priv_key is the returned private key,
  */
 int ossl_ffc_generate_private_key(BN_CTX *ctx, const FFC_PARAMS *params,
-                                  int N, int s, BIGNUM *priv)
+    int N, int s, BIGNUM *priv)
 {
     int ret = 0, qbits = BN_num_bits(params->q);
     BIGNUM *m, *two_powN = NULL;
 
-    /* Deal with the edge case where the value of N is not set */
-    if (N == 0)
-        N = qbits;
+    /* Deal with the edge cases where the value of N and/or s is not set */
     if (s == 0)
-        s = N / 2;
+        goto err;
+    if (N == 0)
+        N = params->keylength ? params->keylength : 2 * s;
 
     /* Step (2) : check range of N */
     if (N < 2 * s || N > qbits)

@@ -63,7 +63,7 @@ async function tests() {
     });
 
     await (async () => {
-      for await (const d of readable) { // eslint-disable-line no-unused-vars
+      for await (const d of readable) {
         return;
       }
     })();
@@ -181,18 +181,14 @@ async function tests() {
     resolved.forEach(common.mustCall(
       (item, i) => assert.strictEqual(item.value, 'hello-' + i), max));
 
-    errors.slice(0, 1).forEach((promise) => {
-      promise.catch(common.mustCall((err) => {
-        assert.strictEqual(err.message, 'kaboom');
-      }));
-    });
+    assert.rejects(errors[0], { message: 'kaboom' }).then(common.mustCall());
 
-    errors.slice(1).forEach((promise) => {
+    errors.slice(1).forEach(common.mustCallAtLeast((promise) => {
       promise.then(common.mustCall(({ done, value }) => {
         assert.strictEqual(done, true);
         assert.strictEqual(value, undefined);
       }));
-    });
+    }));
 
     readable.destroy(new Error('kaboom'));
   }
@@ -243,8 +239,8 @@ async function tests() {
 
     let err;
     try {
-      // eslint-disable-next-line no-unused-vars
-      for await (const k of readable) {}
+      // eslint-disable-next-line no-unused-vars, no-empty
+      for await (const k of readable) { }
     } catch (e) {
       err = e;
     }
@@ -461,12 +457,10 @@ async function tests() {
         this.push(null);
       }
     });
-    // eslint-disable-next-line no-unused-vars
-    for await (const a of r) {
-    }
-    // eslint-disable-next-line no-unused-vars
-    for await (const b of r) {
-    }
+    // eslint-disable-next-line no-unused-vars, no-empty
+    for await (const a of r) { }
+    // eslint-disable-next-line no-unused-vars, no-empty
+    for await (const b of r) { }
   }
 
   {
@@ -616,7 +610,7 @@ async function tests() {
       }
     });
 
-    for await (const chunk of r) {} // eslint-disable-line no-unused-vars
+    for await (const chunk of r) { } // eslint-disable-line no-unused-vars, no-empty
     assert.strictEqual(r.destroyed, false);
   }
 
@@ -645,12 +639,11 @@ async function tests() {
         this.push('asd');
         this.push(null);
       }
-    }).on('end', () => {
+    }).on('end', common.mustCall(() => {
       assert.strictEqual(r.destroyed, false);
-    });
+    }));
 
-    for await (const chunk of r) {} // eslint-disable-line no-unused-vars
-
+    for await (const chunk of r) { } // eslint-disable-line no-unused-vars, no-empty
     assert.strictEqual(r.destroyed, true);
   }
 }
@@ -693,7 +686,7 @@ async function tests() {
   const it = r[Symbol.asyncIterator]();
   const p = it.return();
   r.emit('close');
-  p.then(common.mustCall()).catch(common.mustNotCall());
+  p.then(common.mustCall());
 }
 
 {
@@ -706,15 +699,11 @@ async function tests() {
   });
 
   r.destroy();
-  r.on('close', () => {
+  r.on('close', common.mustCall(() => {
     const it = r[Symbol.asyncIterator]();
     const next = it.next();
-    next
-      .then(common.mustNotCall())
-      .catch(common.mustCall((err) => {
-        assert.strictEqual(err.code, 'ERR_STREAM_PREMATURE_CLOSE');
-      }));
-  });
+    assert.rejects(next, { code: 'ERR_STREAM_PREMATURE_CLOSE' }).then(common.mustCall());
+  }));
 }
 
 {
@@ -792,6 +781,20 @@ async function tests() {
       }
     );
   }
+
+  // Check for dangling listeners
+  (async function() {
+    const readable = createReadable();
+    const opts = { destroyOnReturn: false };
+    while (readable.readable) {
+      // eslint-disable-next-line no-unused-vars
+      for await (const chunk of readable.iterator(opts)) {
+        break;
+      }
+    }
+
+    assert.deepStrictEqual(readable.eventNames(), []);
+  })().then(common.mustCall());
 }
 
 {
@@ -801,7 +804,7 @@ async function tests() {
     response.write('never ends');
   });
 
-  server.listen(() => {
+  server.listen(common.mustCall(() => {
     _req = http.request(`http://localhost:${server.address().port}`)
       .on('response', common.mustCall(async (res) => {
         setTimeout(() => {
@@ -812,8 +815,8 @@ async function tests() {
 
         let _err;
         try {
-          // eslint-disable-next-line no-unused-vars
-          for await (const chunk of res) {}
+          // eslint-disable-next-line no-unused-vars, no-empty
+          for await (const chunk of res) { }
         } catch (err) {
           _err = err;
         }
@@ -823,7 +826,7 @@ async function tests() {
       }))
       .on('error', common.mustCall())
       .end();
-  });
+  }));
 }
 
 {
@@ -842,12 +845,12 @@ async function tests() {
   }
 
   const str = JSON.stringify({ asd: true });
-  const server = http.createServer(async (request, response) => {
+  const server = http.createServer(common.mustCallAtLeast(async (request, response) => {
     const body = await getParsedBody(request);
     response.statusCode = 200;
     assert.strictEqual(JSON.stringify(body), str);
     response.end(JSON.stringify(body));
-  }).listen(() => {
+  })).listen(common.mustCall(() => {
     http
       .request({
         method: 'POST',
@@ -855,15 +858,15 @@ async function tests() {
         port: server.address().port,
       })
       .end(str)
-      .on('response', async (res) => {
+      .on('response', common.mustCall(async (res) => {
         let body = '';
         for await (const chunk of res) {
           body += chunk;
         }
         assert.strictEqual(body, str);
         server.close();
-      });
-  });
+      }));
+  }));
 }
 
 // To avoid missing some tests if a promise does not resolve

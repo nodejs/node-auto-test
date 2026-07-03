@@ -26,14 +26,15 @@ class TestResolver : public CompilationResultResolver {
   explicit TestResolver(std::atomic<int>* pending)
       : native_module_(nullptr), pending_(pending) {}
 
-  void OnCompilationSucceeded(i::Handle<i::WasmModuleObject> module) override {
+  void OnCompilationSucceeded(
+      i::DirectHandle<i::WasmModuleObject> module) override {
     if (!module.is_null()) {
       native_module_ = module->shared_native_module();
       pending_->fetch_sub(1);
     }
   }
 
-  void OnCompilationFailed(i::Handle<i::Object> error_reason) override {
+  void OnCompilationFailed(i::DirectHandle<i::JSAny> error_reason) override {
     CHECK(false);
   }
 
@@ -50,22 +51,17 @@ class StreamTester {
       : internal_scope_(CcTest::i_isolate()), test_resolver_(test_resolver) {
     i::Isolate* i_isolate = CcTest::i_isolate();
 
-    Handle<Context> context = i_isolate->native_context();
-
     stream_ = GetWasmEngine()->StartStreamingCompilation(
-        i_isolate, WasmFeatures::All(), context,
+        WasmEnabledFeatures::All(), CompileTimeImports{},
         "WebAssembly.compileStreaming()", test_resolver_);
+    stream_->InitializeIsolateSpecificInfo(i_isolate);
   }
 
   void OnBytesReceived(const uint8_t* start, size_t length) {
     stream_->OnBytesReceived(base::Vector<const uint8_t>(start, length));
   }
 
-  void FinishStream() { stream_->Finish(); }
-
-  void SetCompiledModuleBytes(const uint8_t* start, size_t length) {
-    stream_->SetCompiledModuleBytes(base::Vector<const uint8_t>(start, length));
-  }
+  void FinishStream() { stream_->Finish({}); }
 
  private:
   i::HandleScope internal_scope_;
@@ -80,8 +76,7 @@ ZoneBuffer GetValidModuleBytes(Zone* zone, uint8_t n) {
   WasmModuleBuilder builder(zone);
   {
     WasmFunctionBuilder* f = builder.AddFunction(sigs.v_v());
-    uint8_t code[] = {kExprI32Const, n, kExprDrop, kExprEnd};
-    f->EmitCode(code, arraysize(code));
+    f->EmitCode({kExprI32Const, n, kExprDrop, kExprEnd});
   }
   builder.WriteTo(&buffer);
   return buffer;
@@ -89,12 +84,12 @@ ZoneBuffer GetValidModuleBytes(Zone* zone, uint8_t n) {
 
 std::shared_ptr<NativeModule> SyncCompile(base::Vector<const uint8_t> bytes) {
   ErrorThrower thrower(CcTest::i_isolate(), "Test");
-  auto enabled_features = WasmFeatures::FromIsolate(CcTest::i_isolate());
-  auto wire_bytes = ModuleWireBytes(bytes.begin(), bytes.end());
-  Handle<WasmModuleObject> module =
+  auto enabled_features = WasmEnabledFeatures::FromIsolate(CcTest::i_isolate());
+  DirectHandle<WasmModuleObject> module =
       GetWasmEngine()
-          ->SyncCompile(CcTest::i_isolate(), enabled_features, &thrower,
-                        wire_bytes)
+          ->SyncCompile(CcTest::i_isolate(), enabled_features,
+                        CompileTimeImports{}, &thrower,
+                        base::OwnedCopyOf(bytes))
           .ToHandleChecked();
   return module->shared_native_module();
 }
@@ -142,18 +137,15 @@ TEST(TestAsyncCache) {
   auto resolverA2 = std::make_shared<TestResolver>(&pending);
   auto resolverB = std::make_shared<TestResolver>(&pending);
 
-  GetWasmEngine()->AsyncCompile(CcTest::i_isolate(), WasmFeatures::All(),
-                                resolverA1,
-                                ModuleWireBytes(bufferA.begin(), bufferA.end()),
-                                true, "WebAssembly.compile");
-  GetWasmEngine()->AsyncCompile(CcTest::i_isolate(), WasmFeatures::All(),
-                                resolverA2,
-                                ModuleWireBytes(bufferA.begin(), bufferA.end()),
-                                true, "WebAssembly.compile");
-  GetWasmEngine()->AsyncCompile(CcTest::i_isolate(), WasmFeatures::All(),
-                                resolverB,
-                                ModuleWireBytes(bufferB.begin(), bufferB.end()),
-                                true, "WebAssembly.compile");
+  GetWasmEngine()->AsyncCompile(
+      CcTest::i_isolate(), WasmEnabledFeatures::All(), CompileTimeImports{},
+      resolverA1, base::OwnedCopyOf(bufferA), "WebAssembly.compile");
+  GetWasmEngine()->AsyncCompile(
+      CcTest::i_isolate(), WasmEnabledFeatures::All(), CompileTimeImports{},
+      resolverA2, base::OwnedCopyOf(bufferA), "WebAssembly.compile");
+  GetWasmEngine()->AsyncCompile(
+      CcTest::i_isolate(), WasmEnabledFeatures::All(), CompileTimeImports{},
+      resolverB, base::OwnedCopyOf(bufferB), "WebAssembly.compile");
 
   while (pending > 0) {
     v8::platform::PumpMessageLoop(i::V8::GetCurrentPlatform(),
@@ -231,6 +223,87 @@ TEST(TestStreamingAndSyncCache) {
   std::shared_ptr<NativeModule> native_module_streaming =
       resolver->native_module();
   CHECK_EQ(native_module_streaming, native_module_sync);
+}
+
+void TestModuleSharingBetweenIsolates() {
+  class ShareModuleThread : public base::Thread {
+   public:
+    ShareModuleThread(
+        const char* name,
+        std::function<void(std::shared_ptr<NativeModule>)> register_module)
+        : base::Thread(base::Thread::Options{name}),
+          register_module_(std::move(register_module)) {}
+
+    void Run() override {
+      v8::Isolate::CreateParams isolate_create_params;
+      auto* ab_allocator = v8::ArrayBuffer::Allocator::NewDefaultAllocator();
+      isolate_create_params.array_buffer_allocator = ab_allocator;
+      v8::Isolate* isolate = v8::Isolate::New(isolate_create_params);
+      Isolate* i_isolate = reinterpret_cast<Isolate*>(isolate);
+      isolate->Enter();
+
+      {
+        i::HandleScope handle_scope(i_isolate);
+        v8::Context::New(isolate)->Enter();
+        auto full_bytes =
+            base::OwnedVector<uint8_t>::New(kPrefixSize + kFunctionSize);
+        memcpy(full_bytes.begin(), kPrefix, kPrefixSize);
+        memcpy(full_bytes.begin() + kPrefixSize, kFunctionA, kFunctionSize);
+        ErrorThrower thrower(i_isolate, "Test");
+        std::shared_ptr<NativeModule> native_module =
+            GetWasmEngine()
+                ->SyncCompile(i_isolate, WasmEnabledFeatures::All(),
+                              CompileTimeImports{}, &thrower,
+                              std::move(full_bytes))
+                .ToHandleChecked()
+                ->shared_native_module();
+        register_module_(native_module);
+        // Check that we can access the code (see https://crbug.com/1280451).
+        WasmCodeRefScope code_ref_scope;
+        uint8_t* code_start = native_module->GetCode(0)->instructions().begin();
+        // Use the loaded value in a CHECK to prevent the compiler from just
+        // optimizing it away. Even {volatile} would require that.
+        CHECK_NE(0, *code_start);
+      }
+
+      isolate->Exit();
+      isolate->Dispose();
+      delete ab_allocator;
+    }
+
+   private:
+    const std::function<void(std::shared_ptr<NativeModule>)> register_module_;
+  };
+
+  std::vector<std::shared_ptr<NativeModule>> modules;
+  base::Mutex mutex;
+  auto register_module = [&](std::shared_ptr<NativeModule> module) {
+    base::MutexGuard guard(&mutex);
+    modules.emplace_back(std::move(module));
+  };
+
+  ShareModuleThread thread1("ShareModuleThread1", register_module);
+  CHECK(thread1.Start());
+  thread1.Join();
+
+  // Start a second thread which should get the cached module.
+  ShareModuleThread thread2("ShareModuleThread2", register_module);
+  CHECK(thread2.Start());
+  thread2.Join();
+
+  CHECK_EQ(2, modules.size());
+  CHECK_EQ(modules[0].get(), modules[1].get());
+}
+
+UNINITIALIZED_TEST(TwoIsolatesShareNativeModule) {
+  v8_flags.wasm_lazy_compilation = false;
+  TestModuleSharingBetweenIsolates();
+}
+
+UNINITIALIZED_TEST(TwoIsolatesShareNativeModuleWithPku) {
+  v8_flags.wasm_lazy_compilation = false;
+  v8_flags.memory_protection_keys = true;
+  TestModuleSharingBetweenIsolates();
 }
 
 }  // namespace wasm

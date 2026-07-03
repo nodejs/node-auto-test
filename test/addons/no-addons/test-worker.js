@@ -9,13 +9,13 @@ const { Worker } = require('worker_threads');
 
 const binding = path.resolve(__dirname, `./build/${common.buildType}/binding`);
 
-const assertError = (error) => {
+const assertError = common.mustCall((error) => {
   assert.strictEqual(error.code, 'ERR_DLOPEN_DISABLED');
   assert.strictEqual(
     error.message,
-    'Cannot load native addon because loading addons is disabled.'
+    'Cannot load native addon because loading addons is disabled.',
   );
-};
+}, 4);
 
 {
   // Flags should be inherited
@@ -23,7 +23,7 @@ const assertError = (error) => {
     eval: true,
   });
 
-  worker.on('error', common.mustCall(assertError));
+  worker.on('error', assertError);
 }
 
 {
@@ -32,10 +32,10 @@ const assertError = (error) => {
     `process.dlopen({ exports: {} }, ${JSON.stringify(binding)});`,
     {
       eval: true,
-    }
+    },
   );
 
-  worker.on('error', common.mustCall(assertError));
+  worker.on('error', assertError);
 }
 
 {
@@ -45,7 +45,7 @@ const assertError = (error) => {
     execArgv: ['--no-addons'],
   });
 
-  worker.on('error', common.mustCall(assertError));
+  worker.on('error', assertError);
 }
 
 {
@@ -55,5 +55,5 @@ const assertError = (error) => {
     execArgv: [],
   });
 
-  worker.on('error', common.mustCall(assertError));
+  worker.on('error', assertError);
 }

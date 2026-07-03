@@ -7,16 +7,15 @@ declare namespace InternalUtilBinding {
   }
 }
 
-declare function InternalBinding(binding: 'util'): {
-  // PER_ISOLATE_PRIVATE_SYMBOL_PROPERTIES, defined in src/env.h
-  alpn_buffer_private_symbol: 0;
+export interface UtilBinding {
+  // PER_ISOLATE_PRIVATE_SYMBOL_PROPERTIES, defined in src/env_properties.h
   arrow_message_private_symbol: 1;
   contextify_context_private_symbol: 2;
-  contextify_global_private_symbol: 3;
-  decorated_private_symbol: 4;
-  napi_type_tag: 5;
-  napi_wrapper: 6;
-  untransferable_object_private_symbol: 7;
+  decorated_private_symbol: 3;
+  napi_type_tag: 4;
+  napi_wrapper: 5;
+  untransferable_object_private_symbol: 6;
+  exiting_aliased_Uint32Array: 7;
 
   kPending: 0;
   kFulfilled: 1;
@@ -44,5 +43,26 @@ declare function InternalBinding(binding: 'util'): {
   shouldAbortOnUncaughtToggle: [shouldAbort: 0 | 1];
   WeakReference: typeof InternalUtilBinding.WeakReference;
   guessHandleType(fd: number): 'TCP' | 'TTY' | 'UDP' | 'FILE' | 'PIPE' | 'UNKNOWN';
-  toUSVString(str: string, start: number): string;
-};
+  parseEnv(content: string): Record<string, string>;
+  styleText(format: Array<string> | string, text: string): string;
+  isInsideNodeModules(frameLimit?: number): boolean;
+  constructSharedArrayBuffer(length?: number): SharedArrayBuffer;
+
+  constants: {
+    kPending: 0;
+    kFulfilled: 1;
+    kRejected: 2;
+    kExiting: 0;
+    kExitCode: 1;
+    kHasExitCode: 2;
+    ALL_PROPERTIES: 0;
+    ONLY_WRITABLE: 1;
+    ONLY_ENUMERABLE: 2;
+    ONLY_CONFIGURABLE: 4;
+    SKIP_STRINGS: 8;
+    SKIP_SYMBOLS: 16;
+    kDisallowCloneAndTransfer: 0;
+    kTransferable: 1;
+    kCloneable: 2;
+  };
+}

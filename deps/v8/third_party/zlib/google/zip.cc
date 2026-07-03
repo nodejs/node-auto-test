@@ -1,19 +1,25 @@
-// Copyright (c) 2012 The Chromium Authors. All rights reserved.
+// Copyright 2012 The Chromium Authors
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
 #include "third_party/zlib/google/zip.h"
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
-#include "base/bind.h"
 #include "base/files/file.h"
 #include "base/files/file_enumerator.h"
+#include "base/files/file_path.h"
+#include "base/files/file_util.h"
+#include "base/functional/bind.h"
+#include "base/functional/callback.h"
+#include "base/containers/flat_set.h"
 #include "base/logging.h"
 #include "base/memory/ptr_util.h"
 #include "base/strings/string_util.h"
 #include "build/build_config.h"
+#include "third_party/zlib/google/redact.h"
 #include "third_party/zlib/google/zip_internal.h"
 #include "third_party/zlib/google/zip_reader.h"
 #include "third_party/zlib/google/zip_writer.h"
@@ -21,19 +27,51 @@
 namespace zip {
 namespace {
 
+#if defined(OS_POSIX)
+// The maximum allowed size of a symbolic link in bytes.
+constexpr uint64_t kMaxSymlinkFileSize = 8192;
+#endif
+
 bool IsHiddenFile(const base::FilePath& file_path) {
   return file_path.BaseName().value()[0] == '.';
-}
-
-bool ExcludeNoFilesFilter(const base::FilePath& file_path) {
-  return true;
 }
 
 // Creates a directory at |extract_dir|/|entry_path|, including any parents.
 bool CreateDirectory(const base::FilePath& extract_dir,
                      const base::FilePath& entry_path) {
-  return base::CreateDirectory(extract_dir.Append(entry_path));
+  const base::FilePath dir = extract_dir.Append(entry_path);
+  const bool ok = base::CreateDirectory(dir);
+  PLOG_IF(ERROR, !ok) << "Cannot create directory " << Redact(dir);
+  return ok;
 }
+
+#if defined(OS_POSIX)
+// Creates a symbolic link at |extract_dir|/|target| to |link|. Fails if |link|
+// points outside of |extract_dir|.
+bool CreateSymbolicLink(const base::FilePath& extract_dir,
+                        const base::FilePath& target,
+                        const base::FilePath& link) {
+  const base::FilePath full_link_path = extract_dir.Append(link);
+  if (target.IsAbsolute()) {
+    LOG(ERROR) << "Won't create link with an absolute target "
+               << Redact(target);
+    return false;
+  }
+  std::optional<base::FilePath> absolute_target =
+      base::MakeAbsoluteFilePathNoResolveSymbolicLinks(
+          full_link_path.DirName().Append(target));
+  if (!absolute_target) {
+    LOG(ERROR) << "Failed to make an absolute path to " << Redact(target);
+    return false;
+  }
+  if (!extract_dir.IsParent(*absolute_target)) {
+    LOG(ERROR) << "Won't create link with target outside extract dir "
+               << Redact(target);
+    return false;
+  }
+  return base::CreateSymbolicLink(target, full_link_path);
+}
+#endif  // defined(OS_POSIX)
 
 // Creates a WriterDelegate that can write a file at |extract_dir|/|entry_path|.
 std::unique_ptr<WriterDelegate> CreateFilePathWriterDelegate(
@@ -59,12 +97,13 @@ class DirectFileAccessor : public FileAccessor {
       const base::FilePath absolute_path = src_dir_.Append(path);
       if (base::DirectoryExists(absolute_path)) {
         files->emplace_back();
-        LOG(ERROR) << "Cannot open '" << path << "': It is a directory";
+        LOG(ERROR) << "Cannot open " << Redact(path) << ": It is a directory";
       } else {
-        files->emplace_back(absolute_path,
-                            base::File::FLAG_OPEN | base::File::FLAG_READ);
-        LOG_IF(ERROR, !files->back().IsValid())
-            << "Cannot open '" << path << "'";
+        const base::File& file = files->emplace_back(
+            absolute_path, base::File::FLAG_OPEN | base::File::FLAG_READ);
+        LOG_IF(ERROR, !file.IsValid())
+            << "Cannot open " << Redact(path) << ": "
+            << base::File::ErrorToString(file.error_details());
       }
     }
 
@@ -97,7 +136,7 @@ class DirectFileAccessor : public FileAccessor {
 
     base::File::Info file_info;
     if (!base::GetFileInfo(src_dir_.Append(path), &file_info)) {
-      LOG(ERROR) << "Cannot get info of '" << path << "'";
+      PLOG(ERROR) << "Cannot get info of " << Redact(path);
       return false;
     }
 
@@ -111,11 +150,122 @@ class DirectFileAccessor : public FileAccessor {
   const base::FilePath src_dir_;
 };
 
+// |symlink_creator| may be null in which case symbolic link entries are
+// considered errors.
+bool UnzipImpl(
+    const base::PlatformFile& src_file,
+    WriterFactory writer_factory,
+    DirectoryCreator directory_creator,
+    UnzipOptions options,
+    base::RepeatingCallback<bool(const base::FilePath&, const base::FilePath&)>
+        symlink_creator) {
+  ZipReader reader;
+  reader.SetEncoding(std::move(options.encoding));
+  reader.SetPassword(std::move(options.password));
+
+  if (!reader.OpenFromPlatformFile(src_file)) {
+    LOG(ERROR) << "Cannot open ZIP from file handle " << src_file;
+    return false;
+  }
+
+  base::flat_set<base::FilePath> symlinks;
+
+  while (const ZipReader::Entry* const entry = reader.Next()) {
+    if (entry->is_unsafe) {
+      LOG(ERROR) << "Found unsafe entry " << Redact(entry->path) << " in ZIP";
+      if (!options.continue_on_error) {
+        return false;
+      }
+      continue;
+    }
+
+    if (options.filter && !options.filter.Run(entry->path)) {
+      VLOG(1) << "Skipped ZIP entry " << Redact(entry->path);
+      continue;
+    }
+
+    base::FilePath path = entry->path;
+    bool is_in_symlinked_dir = false;
+    while (path.DirName() != path) {
+      path = path.DirName();
+      if (symlinks.contains(path)) {
+        is_in_symlinked_dir = true;
+        break;
+      }
+    }
+    if (is_in_symlinked_dir) {
+      LOG(ERROR) << "Found entry " << Redact(entry->path)
+                 << " in symlinked directory " << Redact(path);
+      if (!options.continue_on_error) {
+        return false;
+      }
+      continue;
+    }
+
+    if (entry->is_directory) {
+      // It's a directory.
+      if (!directory_creator.Run(entry->path)) {
+        LOG(ERROR) << "Cannot create directory " << Redact(entry->path);
+        if (!options.continue_on_error) {
+          return false;
+        }
+      }
+
+      continue;
+    }
+
+#if defined(OS_POSIX)
+    if (entry->is_symbolic_link) {
+      if (!symlink_creator) {
+        LOG(ERROR) << "Skipping symbolic link " << Redact(entry->path);
+        if (!options.continue_on_error) {
+          return false;
+        }
+        continue;
+      }
+      std::string target;
+      if (!reader.ExtractCurrentEntryToString(kMaxSymlinkFileSize, &target)) {
+        LOG(ERROR) << "Failed to read link target " << Redact(entry->path);
+        if (!options.continue_on_error) {
+          return false;
+        }
+        continue;
+      }
+      if (!symlink_creator.Run(base::FilePath(target), entry->path)) {
+        LOG(ERROR) << "Failed to create symbolic link " << Redact(entry->path);
+        if (!options.continue_on_error) {
+          return false;
+        }
+        continue;
+      }
+      symlinks.insert(entry->path);
+      continue;
+    }
+#endif  // defined(OS_POSIX)
+
+    // It's a file.
+    std::unique_ptr<WriterDelegate> writer = writer_factory.Run(entry->path);
+    if (!writer ||
+        (options.progress ? !reader.ExtractCurrentEntryWithListener(
+                                writer.get(), options.progress)
+                          : !reader.ExtractCurrentEntry(writer.get()))) {
+      LOG(ERROR) << "Cannot extract file " << Redact(entry->path)
+                 << " from ZIP";
+      if (!options.continue_on_error) {
+        return false;
+      }
+    }
+  }
+
+  return reader.ok();
+}
+
 }  // namespace
 
 std::ostream& operator<<(std::ostream& out, const Progress& progress) {
   return out << progress.bytes << " bytes, " << progress.files << " files, "
-             << progress.directories << " dirs";
+             << progress.directories << " dirs, " << progress.errors
+             << " errors";
 }
 
 bool Zip(const ZipParams& params) {
@@ -124,27 +274,30 @@ bool Zip(const ZipParams& params) {
 
   std::unique_ptr<internal::ZipWriter> zip_writer;
 
-#if defined(OS_POSIX)
+#if defined(OS_POSIX) || defined(OS_FUCHSIA)
   if (params.dest_fd != base::kInvalidPlatformFile) {
     DCHECK(params.dest_file.empty());
     zip_writer =
         internal::ZipWriter::CreateWithFd(params.dest_fd, file_accessor);
-    if (!zip_writer)
+    if (!zip_writer) {
       return false;
+    }
   }
 #endif
 
   if (!zip_writer) {
     zip_writer = internal::ZipWriter::Create(params.dest_file, file_accessor);
-    if (!zip_writer)
+    if (!zip_writer) {
       return false;
+    }
   }
 
   zip_writer->SetProgressCallback(params.progress_callback,
                                   params.progress_period);
   zip_writer->SetRecursive(params.recursive);
+  zip_writer->ContinueOnError(params.continue_on_error);
 
-  if (!params.include_hidden_files || params.filter_callback)
+  if (!params.include_hidden_files || params.filter_callback) {
     zip_writer->SetFilterCallback(base::BindRepeating(
         [](const ZipParams* const params, const base::FilePath& path) -> bool {
           return (params->include_hidden_files || !IsHiddenFile(path)) &&
@@ -152,94 +305,68 @@ bool Zip(const ZipParams& params) {
                   params->filter_callback.Run(params->src_dir.Append(path)));
         },
         &params));
+  }
 
   if (params.src_files.empty()) {
     // No source items are specified. Zip the entire source directory.
     zip_writer->SetRecursive(true);
-    if (!zip_writer->AddDirectoryContents(base::FilePath()))
+    if (!zip_writer->AddDirectoryContents(base::FilePath())) {
       return false;
+    }
   } else {
     // Only zip the specified source items.
-    if (!zip_writer->AddMixedEntries(params.src_files))
+    if (!zip_writer->AddMixedEntries(params.src_files)) {
       return false;
+    }
   }
 
   return zip_writer->Close();
 }
 
-bool Unzip(const base::FilePath& src_file, const base::FilePath& dest_dir) {
-  return UnzipWithFilterCallback(
-      src_file, dest_dir, base::BindRepeating(&ExcludeNoFilesFilter), true);
-}
-
-bool UnzipWithFilterCallback(const base::FilePath& src_file,
-                             const base::FilePath& dest_dir,
-                             FilterCallback filter_cb,
-                             bool log_skipped_files) {
+bool Unzip(const base::FilePath& src_file,
+           const base::FilePath& dest_dir,
+           UnzipOptions options,
+           UnzipSymlinkOption symlink_option) {
   base::File file(src_file, base::File::FLAG_OPEN | base::File::FLAG_READ);
   if (!file.IsValid()) {
-    DLOG(WARNING) << "Cannot open '" << src_file << "'";
+    PLOG(ERROR) << "Cannot open " << Redact(src_file) << ": "
+                << base::File::ErrorToString(file.error_details());
     return false;
   }
 
-  return UnzipWithFilterAndWriters(
-      file.GetPlatformFile(),
-      base::BindRepeating(&CreateFilePathWriterDelegate, dest_dir),
-      base::BindRepeating(&CreateDirectory, dest_dir), std::move(filter_cb),
-      log_skipped_files);
+  DLOG_IF(WARNING, !base::IsDirectoryEmpty(dest_dir))
+      << "ZIP extraction directory is not empty: " << dest_dir;
+
+  base::RepeatingCallback<bool(const base::FilePath&, const base::FilePath&)>
+      symlink_creator;
+#if defined(OS_POSIX)
+  if (symlink_option == UnzipSymlinkOption::PRESERVE) {
+    symlink_creator = base::BindRepeating(&CreateSymbolicLink, dest_dir);
+  }
+#endif  // defined(OS_POSIX)
+
+  return UnzipImpl(file.GetPlatformFile(),
+                   base::BindRepeating(&CreateFilePathWriterDelegate, dest_dir),
+                   base::BindRepeating(&CreateDirectory, dest_dir),
+                   std::move(options), symlink_creator);
 }
 
-bool UnzipWithFilterAndWriters(const base::PlatformFile& src_file,
-                               WriterFactory writer_factory,
-                               DirectoryCreator directory_creator,
-                               FilterCallback filter_cb,
-                               bool log_skipped_files) {
-  ZipReader reader;
-  if (!reader.OpenFromPlatformFile(src_file)) {
-    DLOG(WARNING) << "Cannot open '" << src_file << "'";
-    return false;
-  }
-  while (reader.HasMore()) {
-    if (!reader.OpenCurrentEntryInZip()) {
-      DLOG(WARNING) << "Failed to open the current file in zip";
-      return false;
-    }
-    const base::FilePath& entry_path = reader.current_entry_info()->file_path();
-    if (reader.current_entry_info()->is_unsafe()) {
-      DLOG(WARNING) << "Found an unsafe file in zip " << entry_path;
-      return false;
-    }
-    if (filter_cb.Run(entry_path)) {
-      if (reader.current_entry_info()->is_directory()) {
-        if (!directory_creator.Run(entry_path))
-          return false;
-      } else {
-        std::unique_ptr<WriterDelegate> writer = writer_factory.Run(entry_path);
-        if (!reader.ExtractCurrentEntry(writer.get(),
-                                        std::numeric_limits<uint64_t>::max())) {
-          DLOG(WARNING) << "Failed to extract " << entry_path;
-          return false;
-        }
-      }
-    } else if (log_skipped_files) {
-      DLOG(WARNING) << "Skipped file " << entry_path;
-    }
-
-    if (!reader.AdvanceToNextEntry()) {
-      DLOG(WARNING) << "Failed to advance to the next file";
-      return false;
-    }
-  }
-  return true;
+bool Unzip(const base::PlatformFile& src_file,
+           WriterFactory writer_factory,
+           DirectoryCreator directory_creator,
+           UnzipOptions options) {
+  return UnzipImpl(src_file, writer_factory, directory_creator,
+                   std::move(options),
+                   /*symlink_creator=*/{});
 }
 
 bool ZipWithFilterCallback(const base::FilePath& src_dir,
                            const base::FilePath& dest_file,
-                           FilterCallback filter_cb) {
+                           FilterCallback filter) {
   DCHECK(base::DirectoryExists(src_dir));
   return Zip({.src_dir = src_dir,
               .dest_file = dest_file,
-              .filter_callback = std::move(filter_cb)});
+              .filter_callback = std::move(filter)});
 }
 
 bool Zip(const base::FilePath& src_dir,
@@ -250,7 +377,7 @@ bool Zip(const base::FilePath& src_dir,
               .include_hidden_files = include_hidden_files});
 }
 
-#if defined(OS_POSIX)
+#if defined(OS_POSIX) || defined(OS_FUCHSIA)
 bool ZipFiles(const base::FilePath& src_dir,
               Paths src_relative_paths,
               int dest_fd) {
@@ -259,6 +386,6 @@ bool ZipFiles(const base::FilePath& src_dir,
               .dest_fd = dest_fd,
               .src_files = src_relative_paths});
 }
-#endif  // defined(OS_POSIX)
+#endif  // defined(OS_POSIX) || defined(OS_FUCHSIA)
 
 }  // namespace zip

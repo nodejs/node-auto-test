@@ -1,5 +1,5 @@
 /*
- * Copyright 2020-2021 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2020-2023 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -24,10 +24,7 @@ int ossl_ffc_params_fromdata(FFC_PARAMS *ffc, const OSSL_PARAM params[])
     BIGNUM *p = NULL, *q = NULL, *g = NULL, *j = NULL;
     int i;
 
-    if (ffc == NULL)
-        return 0;
-
-    prm  = OSSL_PARAM_locate_const(params, OSSL_PKEY_PARAM_GROUP_NAME);
+    prm = OSSL_PARAM_locate_const(params, OSSL_PKEY_PARAM_GROUP_NAME);
     if (prm != NULL) {
         /*
          * In a no-dh build we just go straight to err because we have no
@@ -37,8 +34,9 @@ int ossl_ffc_params_fromdata(FFC_PARAMS *ffc, const OSSL_PARAM params[])
         const DH_NAMED_GROUP *group = NULL;
 
         if (prm->data_type != OSSL_PARAM_UTF8_STRING
+            || prm->data == NULL
             || (group = ossl_ffc_name_to_dh_named_group(prm->data)) == NULL
-            || !ossl_ffc_named_group_set_pqg(ffc, group))
+            || !ossl_ffc_named_group_set(ffc, group))
 #endif
             goto err;
     }
@@ -56,7 +54,7 @@ int ossl_ffc_params_fromdata(FFC_PARAMS *ffc, const OSSL_PARAM params[])
     if (prm != NULL) {
         if (!OSSL_PARAM_get_int(prm, &i))
             goto err;
-        ffc->gindex =  i;
+        ffc->gindex = i;
     }
     prm = OSSL_PARAM_locate_const(params, OSSL_PKEY_PARAM_FFC_PCOUNTER);
     if (prm != NULL) {
@@ -71,28 +69,27 @@ int ossl_ffc_params_fromdata(FFC_PARAMS *ffc, const OSSL_PARAM params[])
     if (prm != NULL) {
         if (!OSSL_PARAM_get_int(prm, &i))
             goto err;
-        ffc->h =  i;
+        ffc->h = i;
     }
-    prm  = OSSL_PARAM_locate_const(params, OSSL_PKEY_PARAM_FFC_SEED);
+    prm = OSSL_PARAM_locate_const(params, OSSL_PKEY_PARAM_FFC_SEED);
     if (prm != NULL) {
-        if (prm->data_type != OSSL_PARAM_OCTET_STRING)
-            goto err;
-        if (!ossl_ffc_params_set_seed(ffc, prm->data, prm->data_size))
+        if (prm->data_type != OSSL_PARAM_OCTET_STRING
+            || !ossl_ffc_params_set_seed(ffc, prm->data, prm->data_size))
             goto err;
     }
-    prm  = OSSL_PARAM_locate_const(params, OSSL_PKEY_PARAM_FFC_VALIDATE_PQ);
+    prm = OSSL_PARAM_locate_const(params, OSSL_PKEY_PARAM_FFC_VALIDATE_PQ);
     if (prm != NULL) {
         if (!OSSL_PARAM_get_int(prm, &i))
             goto err;
         ossl_ffc_params_enable_flags(ffc, FFC_PARAM_FLAG_VALIDATE_PQ, i);
     }
-    prm  = OSSL_PARAM_locate_const(params, OSSL_PKEY_PARAM_FFC_VALIDATE_G);
+    prm = OSSL_PARAM_locate_const(params, OSSL_PKEY_PARAM_FFC_VALIDATE_G);
     if (prm != NULL) {
         if (!OSSL_PARAM_get_int(prm, &i))
             goto err;
         ossl_ffc_params_enable_flags(ffc, FFC_PARAM_FLAG_VALIDATE_G, i);
     }
-    prm  = OSSL_PARAM_locate_const(params, OSSL_PKEY_PARAM_FFC_VALIDATE_LEGACY);
+    prm = OSSL_PARAM_locate_const(params, OSSL_PKEY_PARAM_FFC_VALIDATE_LEGACY);
     if (prm != NULL) {
         if (!OSSL_PARAM_get_int(prm, &i))
             goto err;
@@ -110,16 +107,15 @@ int ossl_ffc_params_fromdata(FFC_PARAMS *ffc, const OSSL_PARAM params[])
         if (p1 != NULL) {
             if (p1->data_type != OSSL_PARAM_UTF8_STRING)
                 goto err;
+            props = p1->data;
         }
-        if (!ossl_ffc_set_digest(ffc, prm->data, props))
-            goto err;
+        ossl_ffc_set_digest(ffc, prm->data, props);
     }
-
     ossl_ffc_params_set0_pqg(ffc, p, q, g);
     ossl_ffc_params_set0_j(ffc, j);
     return 1;
 
- err:
+err:
     BN_free(j);
     BN_free(p);
     BN_free(q);

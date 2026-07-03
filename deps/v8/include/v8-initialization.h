@@ -8,10 +8,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "v8-internal.h"  // NOLINT(build/include_directory)
-#include "v8-isolate.h"   // NOLINT(build/include_directory)
-#include "v8-platform.h"  // NOLINT(build/include_directory)
-#include "v8config.h"     // NOLINT(build/include_directory)
+#include "v8-callbacks.h"  // NOLINT(build/include_directory)
+#include "v8-internal.h"   // NOLINT(build/include_directory)
+#include "v8-isolate.h"    // NOLINT(build/include_directory)
+#include "v8-platform.h"   // NOLINT(build/include_directory)
+#include "v8config.h"      // NOLINT(build/include_directory)
 
 // We reserve the V8_* prefix for macros defined in V8 public API and
 // assume there are no name conflicts with the embedder's code.
@@ -51,6 +52,9 @@ using ReturnAddressLocationResolver =
 using DcheckErrorCallback = void (*)(const char* file, int line,
                                      const char* message);
 
+using V8FatalErrorCallback = void (*)(const char* file, int line,
+                                      const char* message);
+
 /**
  * Container class for static utility functions.
  */
@@ -76,6 +80,12 @@ class V8_EXPORT V8 {
   /** Set the callback to invoke in case of Dcheck failures. */
   static void SetDcheckErrorHandler(DcheckErrorCallback that);
 
+  /** Set the callback to invoke in the case of CHECK failures or fatal
+   * errors. This is distinct from Isolate::SetFatalErrorHandler, which
+   * is invoked in response to API usage failures.
+   * */
+  static void SetFatalErrorHandler(V8FatalErrorCallback that);
+
   /**
    * Sets V8 flags from a string.
    */
@@ -96,11 +106,24 @@ class V8_EXPORT V8 {
    * is created. It always returns true.
    */
   V8_INLINE static bool Initialize() {
+#ifdef V8_TARGET_OS_ANDROID
+    const bool kV8TargetOsIsAndroid = true;
+#else
+    const bool kV8TargetOsIsAndroid = false;
+#endif
+
+#ifdef V8_ENABLE_CHECKS
+    const bool kV8EnableChecks = true;
+#else
+    const bool kV8EnableChecks = false;
+#endif
+
     const int kBuildConfiguration =
         (internal::PointerCompressionIsEnabled() ? kPointerCompression : 0) |
         (internal::SmiValuesAre31Bits() ? k31BitSmis : 0) |
-        (internal::HeapSandboxIsEnabled() ? kHeapSandbox : 0) |
-        (internal::VirtualMemoryCageIsEnabled() ? kVirtualMemoryCage : 0);
+        (internal::SandboxIsEnabled() ? kSandbox : 0) |
+        (kV8TargetOsIsAndroid ? kTargetOsIsAndroid : 0) |
+        (kV8EnableChecks ? kEnableChecks : 0);
     return Initialize(kBuildConfiguration);
   }
 
@@ -180,38 +203,84 @@ class V8_EXPORT V8 {
    * Clears all references to the v8::Platform. This should be invoked after
    * V8 was disposed.
    */
-  static void ShutdownPlatform();
+  static void DisposePlatform();
 
-#ifdef V8_VIRTUAL_MEMORY_CAGE
-  //
-  // Virtual Memory Cage related API.
-  //
-  // This API is not yet stable and subject to changes in the future.
-  //
+#if defined(V8_ENABLE_SANDBOX)
+  /**
+   * Returns true if the sandbox is configured securely.
+   *
+   * If V8 cannot create a regular sandbox during initialization, for example
+   * because not enough virtual address space can be reserved, it will instead
+   * create a fallback sandbox that still allows it to function normally but
+   * does not have the same security properties as a regular sandbox. This API
+   * can be used to determine if such a fallback sandbox is being used, in
+   * which case it will return false.
+   */
+  static bool IsSandboxConfiguredSecurely();
 
   /**
-   * Initializes the virtual memory cage for V8.
+   * Provides access to the virtual address subspace backing the sandbox.
    *
-   * This must be invoked after the platform was initialized but before V8 is
-   * initialized. The virtual memory cage is torn down during platform shutdown.
-   * Returns true on success, false otherwise.
+   * This can be used to allocate pages inside the sandbox, for example to
+   * obtain virtual memory for ArrayBuffer backing stores, which must be
+   * located inside the sandbox.
+   *
+   * It should be assumed that an attacker can corrupt data inside the sandbox,
+   * and so in particular the contents of pages allocagted in this virtual
+   * address space, arbitrarily and concurrently. Due to this, it is
+   * recommended to to only place pure data buffers in them.
    */
-  static bool InitializeVirtualMemoryCage();
+  static VirtualAddressSpace* GetSandboxAddressSpace();
 
   /**
-   * Provides access to the data page allocator for the virtual memory cage.
+   * Returns the size of the sandbox in bytes.
    *
-   * This allocator allocates pages inside the data cage part of the virtual
-   * memory cage in which data buffers such as ArrayBuffer backing stores must
-   * be allocated. Objects in this region should generally consists purely of
-   * data and not contain any pointers. It should be assumed that an attacker
-   * can corrupt data inside the cage, and so in particular the contents of
-   * pages returned by this allocator, arbitrarily and concurrently.
-   *
-   * The virtual memory cage must have been initialized before.
+   * This represents the size of the address space that V8 can directly address
+   * and in which it allocates its objects.
    */
-  static PageAllocator* GetVirtualMemoryCageDataPageAllocator();
-#endif
+  static size_t GetSandboxSizeInBytes();
+
+  /**
+   * Returns the size of the address space reservation backing the sandbox.
+   *
+   * This may be larger than the sandbox (i.e. |GetSandboxSizeInBytes()|) due
+   * to surrounding guard regions, or may be smaller than the sandbox in case a
+   * fallback sandbox is being used, which will use a smaller virtual address
+   * space reservation. In the latter case this will also be different from
+   * |GetSandboxAddressSpace()->size()| as that will cover a larger part of the
+   * address space than what has actually been reserved.
+   */
+  static size_t GetSandboxReservationSizeInBytes();
+#endif  // V8_ENABLE_SANDBOX
+
+  enum class WasmMemoryType {
+    kMemory32,
+    kMemory64,
+  };
+
+  /**
+   * Returns the virtual address space reservation size (in bytes) needed
+   * for one WebAssembly memory instance of the given capacity.
+   *
+   * \param type Whether this is a memory32 or memory64 instance.
+   * \param byte_capacity The maximum size, in bytes, of the WebAssembly
+   *   memory. Values exceeding the engine's maximum allocatable memory
+   *   size for the given type (determined by max_mem32_pages or
+   *   max_mem64_pages) are clamped.
+   *
+   * When trap-based bounds checking is enabled by
+   * EnableWebAssemblyTrapHandler(), the amount of virtual address space
+   * that V8 needs to reserve for each WebAssembly memory instance can
+   * be much bigger than the requested size. If the process does
+   * not have enough virtual memory available, WebAssembly memory allocation
+   * would fail. During the initialization of V8, embedders can use this method
+   * to estimate whether the process has enough virtual memory for their
+   * usage of WebAssembly, and decide whether to enable the trap handler
+   * via EnableWebAssemblyTrapHandler(), or to skip it and reduce the amount of
+   * virtual memory required to keep the application running.
+   */
+  static size_t GetWasmMemoryReservationSizeInBytes(WasmMemoryType type,
+                                                    size_t byte_capacity);
 
   /**
    * Activate trap-based bounds checking for WebAssembly.
@@ -232,8 +301,15 @@ class V8_EXPORT V8 {
    * exceptions in V8-generated code.
    */
   static void SetUnhandledExceptionCallback(
-      UnhandledExceptionCallback unhandled_exception_callback);
+      UnhandledExceptionCallback callback);
 #endif
+
+  /**
+   * Allows the host application to provide a callback that will be called when
+   * v8 has encountered a fatal failure to allocate memory and is about to
+   * terminate.
+   */
+  static void SetFatalMemoryErrorCallback(OOMErrorCallback callback);
 
   /**
    * Get statistics about the shared memory usage.
@@ -246,8 +322,9 @@ class V8_EXPORT V8 {
   enum BuildConfigurationFeatures {
     kPointerCompression = 1 << 0,
     k31BitSmis = 1 << 1,
-    kHeapSandbox = 1 << 2,
-    kVirtualMemoryCage = 1 << 3,
+    kSandbox = 1 << 2,
+    kTargetOsIsAndroid = 1 << 3,
+    kEnableChecks = 1 << 4,
   };
 
   /**

@@ -27,7 +27,7 @@
 
 #ifdef HAVE_CONFIG_H
 #  include <config.h>
-#endif /* HAVE_CONFIG_H */
+#endif /* defined(HAVE_CONFIG_H) */
 
 #include <nghttp3/nghttp3.h>
 
@@ -37,8 +37,7 @@
 #include "nghttp3_tnode.h"
 #include "nghttp3_idtr.h"
 #include "nghttp3_gaptr.h"
-
-#define NGHTTP3_VARINT_MAX ((1ull << 62) - 1)
+#include "nghttp3_ratelim.h"
 
 /* NGHTTP3_QPACK_ENCODER_MAX_TABLE_CAPACITY is the maximum dynamic
    table size for QPACK encoder. */
@@ -48,83 +47,45 @@
    blocked streams for QPACK encoder. */
 #define NGHTTP3_QPACK_ENCODER_MAX_BLOCK_STREAMS 100
 
-/* NGHTTP3_PUSH_PROMISE_FLAG_NONE indicates that no flag is set. */
-#define NGHTTP3_PUSH_PROMISE_FLAG_NONE 0x00
-/* NGHTTP3_PUSH_PROMISE_FLAG_RECVED is set when PUSH_PROMISE is
-   completely received. */
-#define NGHTTP3_PUSH_PROMISE_FLAG_RECVED 0x01
-/* NGHTTP3_PUSH_PROMISE_FLAG_RECV_CANCEL is set when push is
-   cancelled by server before receiving PUSH_PROMISE completely.
-   This flag should have no effect if push stream has already
-   opened. */
-#define NGHTTP3_PUSH_PROMISE_FLAG_RECV_CANCEL 0x02
-/* NGHTTP3_PUSH_PROMISE_FLAG_SENT_CANCEL is set when push is
-   canceled by the local endpoint. */
-#define NGHTTP3_PUSH_PROMISE_FLAG_SENT_CANCEL 0x04
-#define NGHTTP3_PUSH_PROMISE_FLAG_CANCELLED                                    \
-  (NGHTTP3_PUSH_PROMISE_FLAG_RECV_CANCEL |                                     \
-   NGHTTP3_PUSH_PROMISE_FLAG_SENT_CANCEL)
-/* NGHTTP3_PUSH_PROMISE_FLAG_PUSH_ID_RECLAIMED indicates that
-   unsent_max_pushes has been updated for this push ID. */
-#define NGHTTP3_PUSH_PROMISE_FLAG_PUSH_ID_RECLAIMED 0x08
-/* NGHTTP3_PUSH_PROMISE_FLAG_BOUND is set if nghttp3_push_promise
-   object is bound to a stream where PUSH_PROMISE frame is received
-   first.  nghttp3_push_promise object might be created before
-   receiving any PUSH_PROMISE when pushed stream is received before
-   it.*/
-#define NGHTTP3_PUSH_PROMISE_FLAG_BOUND 0x10
-
-typedef struct nghttp3_push_promise {
-  nghttp3_map_entry me;
-  nghttp3_tnode node;
-  nghttp3_http_state http;
-  /* stream is server initiated unidirectional stream which fulfils
-     the push promise. */
-  nghttp3_stream *stream;
-  /* stream_id is the stream ID where this PUSH_PROMISE is first
-     received.  PUSH_PROMISE with same push ID is allowed to be sent
-     in the multiple streams.  We ignore those duplicated PUSH_PROMISE
-     entirely because we don't see any value to add extra cost of
-     processing for it.  Even ignoring those frame is not yet easy
-     because we have to decode the header blocks.  Server push is
-     overly complex and there is no good use case after all. */
-  int64_t stream_id;
-  /* flags is bitwise OR of zero or more of
-     NGHTTP3_PUSH_PROMISE_FLAG_*. */
-  uint16_t flags;
-} nghttp3_push_promise;
-
 /* NGHTTP3_CONN_FLAG_NONE indicates that no flag is set. */
-#define NGHTTP3_CONN_FLAG_NONE 0x0000
+#define NGHTTP3_CONN_FLAG_NONE 0x0000U
 /* NGHTTP3_CONN_FLAG_SETTINGS_RECVED is set when SETTINGS frame has
    been received. */
-#define NGHTTP3_CONN_FLAG_SETTINGS_RECVED 0x0001
+#define NGHTTP3_CONN_FLAG_SETTINGS_RECVED 0x0001U
 /* NGHTTP3_CONN_FLAG_CONTROL_OPENED is set when a control stream has
    opened. */
-#define NGHTTP3_CONN_FLAG_CONTROL_OPENED 0x0002
+#define NGHTTP3_CONN_FLAG_CONTROL_OPENED 0x0002U
 /* NGHTTP3_CONN_FLAG_QPACK_ENCODER_OPENED is set when a QPACK encoder
    stream has opened. */
-#define NGHTTP3_CONN_FLAG_QPACK_ENCODER_OPENED 0x0004
+#define NGHTTP3_CONN_FLAG_QPACK_ENCODER_OPENED 0x0004U
 /* NGHTTP3_CONN_FLAG_QPACK_DECODER_OPENED is set when a QPACK decoder
    stream has opened. */
-#define NGHTTP3_CONN_FLAG_QPACK_DECODER_OPENED 0x0008
-/* NGHTTP3_CONN_FLAG_MAX_PUSH_ID_QUEUED indicates that MAX_PUSH_ID has
-   been queued to control stream. */
-#define NGHTTP3_CONN_FLAG_MAX_PUSH_ID_QUEUED 0x0010
+#define NGHTTP3_CONN_FLAG_QPACK_DECODER_OPENED 0x0008U
+/* NGHTTP3_CONN_FLAG_SHUTDOWN_COMMENCED is set when graceful shutdown
+   has started. */
+#define NGHTTP3_CONN_FLAG_SHUTDOWN_COMMENCED 0x0010U
 /* NGHTTP3_CONN_FLAG_GOAWAY_RECVED indicates that GOAWAY frame has
    received. */
-#define NGHTTP3_CONN_FLAG_GOAWAY_RECVED 0x0020
+#define NGHTTP3_CONN_FLAG_GOAWAY_RECVED 0x0020U
 /* NGHTTP3_CONN_FLAG_GOAWAY_QUEUED indicates that GOAWAY frame has
    been submitted for transmission. */
-#define NGHTTP3_CONN_FLAG_GOAWAY_QUEUED 0x0040
+#define NGHTTP3_CONN_FLAG_GOAWAY_QUEUED 0x0040U
+
+typedef struct nghttp3_chunk {
+  nghttp3_opl_entry oplent;
+} nghttp3_chunk;
+
+nghttp3_objalloc_decl(chunk, nghttp3_chunk, oplent)
 
 struct nghttp3_conn {
+  nghttp3_objalloc out_chunk_objalloc;
+  nghttp3_objalloc stream_objalloc;
   nghttp3_callbacks callbacks;
   nghttp3_map streams;
-  nghttp3_map pushes;
   nghttp3_qpack_decoder qdec;
   nghttp3_qpack_encoder qenc;
   nghttp3_pq qpack_blocked_streams;
+  nghttp3_ratelim glitch_rlim;
   struct {
     nghttp3_pq spq;
   } sched[NGHTTP3_URGENCY_LEVELS];
@@ -132,17 +93,19 @@ struct nghttp3_conn {
   void *user_data;
   int server;
   uint16_t flags;
-  uint64_t next_seq;
 
   struct {
+    /* origin_list contains the shallow copy of
+       nghttp3_settings.origin_list passed from an application if this
+       object is initialized as server.  settings.origin_list may
+       point to the address of this field. */
+    nghttp3_vec origin_list;
     nghttp3_settings settings;
     struct {
       /* max_pushes is the number of push IDs that local endpoint can
-         issue.  This field is used by server only. */
+         issue.  This field is used by server only and used just for
+         validation */
       uint64_t max_pushes;
-      /* next_push_id is the next push ID server uses.  This field is
-         used by server only. */
-      int64_t next_push_id;
     } uni;
   } local;
 
@@ -153,20 +116,12 @@ struct nghttp3_conn {
          initiated bidirectional stream ID the remote endpoint can
          issue.  This field is used on server side only. */
       uint64_t max_client_streams;
+      /* num_streams is the number of client initiated bidirectional
+         streams that are currently open.  This field is for server
+         use only. */
+      size_t num_streams;
     } bidi;
-    struct {
-      /* push_idtr tracks which push ID has been used by remote
-         server.  This field is used by client only. */
-      nghttp3_gaptr push_idtr;
-      /* unsent_max_pushes is the maximum number of push which the local
-         endpoint can accept.  This limit is not yet notified to the
-         remote endpoint.  This field is used by client only. */
-      uint64_t unsent_max_pushes;
-      /* max_push is the maximum number of push which the local
-         endpoint can accept.  This field is used by client only. */
-      uint64_t max_pushes;
-    } uni;
-    nghttp3_settings settings;
+    nghttp3_proto_settings settings;
   } remote;
 
   struct {
@@ -174,7 +129,37 @@ struct nghttp3_conn {
     int64_t goaway_id;
 
     int64_t max_stream_id_bidi;
-    int64_t max_push_id;
+
+    union {
+      struct {
+        /* pri_fieldbuf is a buffer to store incoming Priority Field Value
+           in PRIORITY_UPDATE frame. */
+        uint8_t pri_fieldbuf[8];
+        /* pri_fieldlen is the number of bytes written into
+           pri_fieldbuf. */
+        size_t pri_fieldbuflen;
+      };
+      /* ORIGIN frame */
+      struct {
+        /* originlen_offset is the offset to Origin-Len that is going
+           to be added to originlen.  If this value equals
+           sizeof(originlen), Origin-Len is fully read, and the length
+           of ASCII-Origin is determined. */
+        size_t originlen_offset;
+        /* originlen is Origin-Len of ASCII-Origin currently read. */
+        uint16_t originlen;
+      };
+    };
+
+    /* originbuf points to the buffer that contains ASCII-Origin that
+       is not fully available in a single input buffer.  If it is
+       fully available in the input buffer, it is emitted to an
+       application without using this field.  Otherwise, partial
+       ASCII-Origin is copied to this field, and the complete
+       ASCII-Origin is emitted when the assembly finishes. */
+    uint8_t *originbuf;
+    /* originbuflen is the length of bytes written to originbuf. */
+    size_t originbuflen;
   } rx;
 
   struct {
@@ -190,60 +175,41 @@ struct nghttp3_conn {
   } tx;
 };
 
-nghttp3_stream *nghttp3_conn_find_stream(nghttp3_conn *conn, int64_t stream_id);
-
-nghttp3_push_promise *nghttp3_conn_find_push_promise(nghttp3_conn *conn,
-                                                     int64_t push_id);
+nghttp3_stream *nghttp3_conn_find_stream(const nghttp3_conn *conn,
+                                         int64_t stream_id);
 
 int nghttp3_conn_create_stream(nghttp3_conn *conn, nghttp3_stream **pstream,
                                int64_t stream_id);
 
-int nghttp3_conn_create_push_promise(nghttp3_conn *conn,
-                                     nghttp3_push_promise **ppp,
-                                     int64_t push_id,
-                                     nghttp3_tnode *assoc_tnode);
-
 nghttp3_ssize nghttp3_conn_read_bidi(nghttp3_conn *conn, size_t *pnproc,
                                      nghttp3_stream *stream, const uint8_t *src,
-                                     size_t srclen, int fin);
+                                     size_t srclen, int fin, nghttp3_tstamp ts);
 
 nghttp3_ssize nghttp3_conn_read_uni(nghttp3_conn *conn, nghttp3_stream *stream,
-                                    const uint8_t *src, size_t srclen, int fin);
+                                    const uint8_t *src, size_t srclen, int fin,
+                                    nghttp3_tstamp ts);
 
 nghttp3_ssize nghttp3_conn_read_control(nghttp3_conn *conn,
                                         nghttp3_stream *stream,
-                                        const uint8_t *src, size_t srclen);
-
-nghttp3_ssize nghttp3_conn_read_push(nghttp3_conn *conn, size_t *pnproc,
-                                     nghttp3_stream *stream, const uint8_t *src,
-                                     size_t srclen, int fin);
+                                        const uint8_t *src, size_t srclen,
+                                        nghttp3_tstamp ts);
 
 nghttp3_ssize nghttp3_conn_read_qpack_encoder(nghttp3_conn *conn,
-                                              const uint8_t *src,
-                                              size_t srclen);
+                                              const uint8_t *src, size_t srclen,
+                                              nghttp3_tstamp ts);
 
 nghttp3_ssize nghttp3_conn_read_qpack_decoder(nghttp3_conn *conn,
                                               const uint8_t *src,
                                               size_t srclen);
 
-int nghttp3_conn_on_push_promise_push_id(nghttp3_conn *conn, int64_t push_id,
-                                         nghttp3_stream *stream);
-
-int nghttp3_conn_on_client_cancel_push(nghttp3_conn *conn,
-                                       const nghttp3_frame_cancel_push *fr);
-
-int nghttp3_conn_on_server_cancel_push(nghttp3_conn *conn,
-                                       const nghttp3_frame_cancel_push *fr);
-
-int nghttp3_conn_on_stream_push_id(nghttp3_conn *conn, nghttp3_stream *stream,
-                                   int64_t push_id);
-
 int nghttp3_conn_on_data(nghttp3_conn *conn, nghttp3_stream *stream,
                          const uint8_t *data, size_t datalen);
 
+int nghttp3_conn_on_priority_update(nghttp3_conn *conn,
+                                    const nghttp3_frame_priority_update *fr);
+
 nghttp3_ssize nghttp3_conn_on_headers(nghttp3_conn *conn,
                                       nghttp3_stream *stream,
-                                      nghttp3_push_promise *pp,
                                       const uint8_t *data, size_t datalen,
                                       int fin);
 
@@ -255,11 +221,8 @@ int nghttp3_conn_qpack_blocked_streams_push(nghttp3_conn *conn,
 
 void nghttp3_conn_qpack_blocked_streams_pop(nghttp3_conn *conn);
 
-int nghttp3_conn_server_cancel_push(nghttp3_conn *conn, int64_t push_id);
-
-int nghttp3_conn_client_cancel_push(nghttp3_conn *conn, int64_t push_id);
-
-int nghttp3_conn_submit_max_push_id(nghttp3_conn *conn);
+void nghttp3_conn_qpack_blocked_streams_remove(nghttp3_conn *conn,
+                                               nghttp3_stream *stream);
 
 int nghttp3_conn_schedule_stream(nghttp3_conn *conn, nghttp3_stream *stream);
 
@@ -270,20 +233,10 @@ void nghttp3_conn_unschedule_stream(nghttp3_conn *conn, nghttp3_stream *stream);
 
 int nghttp3_conn_reject_stream(nghttp3_conn *conn, nghttp3_stream *stream);
 
-int nghttp3_conn_reject_push_stream(nghttp3_conn *conn, nghttp3_stream *stream);
-
-int nghttp3_conn_cancel_push_stream(nghttp3_conn *conn, nghttp3_stream *stream);
-
 /*
  * nghttp3_conn_get_next_tx_stream returns next stream to send.  It
  * returns NULL if there is no such stream.
  */
 nghttp3_stream *nghttp3_conn_get_next_tx_stream(nghttp3_conn *conn);
 
-int nghttp3_push_promise_new(nghttp3_push_promise **ppp, int64_t push_id,
-                             uint64_t seq, nghttp3_tnode *assoc_tnode,
-                             const nghttp3_mem *mem);
-
-void nghttp3_push_promise_del(nghttp3_push_promise *pp, const nghttp3_mem *mem);
-
-#endif /* NGHTTP3_CONN_H */
+#endif /* !defined(NGHTTP3_CONN_H) */

@@ -46,18 +46,25 @@ function validateContent(report, fields = []) {
   } catch (err) {
     try {
       err.stack += util.format('\n------\nFailing Report:\n%O', report);
-    } catch {}
+    } catch {
+      // Continue regardless of error.
+    }
     throw err;
   }
 }
 
 function _validateContent(report, fields = []) {
   const isWindows = process.platform === 'win32';
-  const isJavaScriptThreadReport = report.javascriptStack != null;
+  const isJavaScriptThreadReport = report.javascriptHeap != null;
 
   // Verify that all sections are present as own properties of the report.
-  const sections = ['header', 'nativeStack', 'libuv', 'environmentVariables',
+  const sections = ['header', 'nativeStack', 'javascriptStack', 'libuv',
                     'sharedObjects', 'resourceUsage', 'workers'];
+
+  if (!process.report.excludeEnv) {
+    sections.push('environmentVariables');
+  }
+
   if (!isWindows)
     sections.push('userLimits');
 
@@ -65,11 +72,11 @@ function _validateContent(report, fields = []) {
     sections.push('uvthreadResourceUsage');
 
   if (isJavaScriptThreadReport)
-    sections.push('javascriptStack', 'javascriptHeap');
+    sections.push('javascriptHeap');
 
   checkForUnknownFields(report, sections);
   sections.forEach((section) => {
-    assert(report.hasOwnProperty(section));
+    assert(Object.hasOwn(report, section));
     assert(typeof report[section] === 'object' && report[section] !== null);
   });
 
@@ -103,7 +110,7 @@ function _validateContent(report, fields = []) {
                         'glibcVersionRuntime', 'glibcVersionCompiler', 'cwd',
                         'reportVersion', 'networkInterfaces', 'threadId'];
   checkForUnknownFields(header, headerFields);
-  assert.strictEqual(header.reportVersion, 2);  // Increment as needed.
+  assert.strictEqual(header.reportVersion, 5);  // Increment as needed.
   assert.strictEqual(typeof header.event, 'string');
   assert.strictEqual(typeof header.trigger, 'string');
   assert(typeof header.filename === 'string' || header.filename === null);
@@ -191,14 +198,32 @@ function _validateContent(report, fields = []) {
 
     // Verify the format of the javascriptHeap section.
     const heap = report.javascriptHeap;
-    const jsHeapFields = ['totalMemory', 'totalCommittedMemory', 'usedMemory',
-                          'availableMemory', 'memoryLimit', 'heapSpaces'];
+    // See `PrintGCStatistics` in node_report.cc
+    const jsHeapFields = [
+      'totalMemory',
+      'executableMemory',
+      'totalCommittedMemory',
+      'availableMemory',
+      'totalGlobalHandlesMemory',
+      'usedGlobalHandlesMemory',
+      'usedMemory',
+      'memoryLimit',
+      'mallocedMemory',
+      'externalMemory',
+      'peakMallocedMemory',
+      'nativeContextCount',
+      'detachedContextCount',
+      'doesZapGarbage',
+      'heapSpaces',
+    ];
     checkForUnknownFields(heap, jsHeapFields);
-    assert(Number.isSafeInteger(heap.totalMemory));
-    assert(Number.isSafeInteger(heap.totalCommittedMemory));
-    assert(Number.isSafeInteger(heap.usedMemory));
-    assert(Number.isSafeInteger(heap.availableMemory));
-    assert(Number.isSafeInteger(heap.memoryLimit));
+    // Do not check `heapSpaces` here
+    for (let i = 0; i < jsHeapFields.length - 1; i++) {
+      assert(
+        Number.isSafeInteger(heap[jsHeapFields[i]]),
+        `heap.${jsHeapFields[i]} is not a safe integer`,
+      );
+    }
     assert(typeof heap.heapSpaces === 'object' && heap.heapSpaces !== null);
     const heapSpaceFields = ['memorySize', 'committedMemory', 'capacity',
                              'used', 'available'];
@@ -212,15 +237,29 @@ function _validateContent(report, fields = []) {
   }
 
   // Verify the format of the resourceUsage section.
-  const usage = report.resourceUsage;
+  const usage = { ...report.resourceUsage };
+  // Delete it, otherwise checkForUnknownFields will throw error
+  delete usage.constrained_memory;
   const resourceUsageFields = ['userCpuSeconds', 'kernelCpuSeconds',
-                               'cpuConsumptionPercent', 'maxRss',
-                               'pageFaults', 'fsActivity'];
+                               'cpuConsumptionPercent', 'userCpuConsumptionPercent',
+                               'kernelCpuConsumptionPercent',
+                               'maxRss', 'rss', 'free_memory', 'total_memory',
+                               'available_memory', 'pageFaults', 'fsActivity'];
   checkForUnknownFields(usage, resourceUsageFields);
   assert.strictEqual(typeof usage.userCpuSeconds, 'number');
   assert.strictEqual(typeof usage.kernelCpuSeconds, 'number');
   assert.strictEqual(typeof usage.cpuConsumptionPercent, 'number');
-  assert(Number.isSafeInteger(usage.maxRss));
+  assert.strictEqual(typeof usage.userCpuConsumptionPercent, 'number');
+  assert.strictEqual(typeof usage.kernelCpuConsumptionPercent, 'number');
+  assert(typeof usage.rss, 'string');
+  assert(typeof usage.maxRss, 'string');
+  assert(typeof usage.free_memory, 'string');
+  assert(typeof usage.total_memory, 'string');
+  assert(typeof usage.available_memory, 'string');
+  // This field may not exist
+  if (report.resourceUsage.constrained_memory) {
+    assert(typeof report.resourceUsage.constrained_memory, 'string');
+  }
   assert(typeof usage.pageFaults === 'object' && usage.pageFaults !== null);
   checkForUnknownFields(usage.pageFaults, ['IORequired', 'IONotRequired']);
   assert(Number.isSafeInteger(usage.pageFaults.IORequired));
@@ -234,11 +273,15 @@ function _validateContent(report, fields = []) {
   if (report.uvthreadResourceUsage) {
     const usage = report.uvthreadResourceUsage;
     const threadUsageFields = ['userCpuSeconds', 'kernelCpuSeconds',
-                               'cpuConsumptionPercent', 'fsActivity'];
+                               'cpuConsumptionPercent', 'fsActivity',
+                               'userCpuConsumptionPercent',
+                               'kernelCpuConsumptionPercent'];
     checkForUnknownFields(usage, threadUsageFields);
     assert.strictEqual(typeof usage.userCpuSeconds, 'number');
     assert.strictEqual(typeof usage.kernelCpuSeconds, 'number');
     assert.strictEqual(typeof usage.cpuConsumptionPercent, 'number');
+    assert.strictEqual(typeof usage.userCpuConsumptionPercent, 'number');
+    assert.strictEqual(typeof usage.kernelCpuConsumptionPercent, 'number');
     assert(typeof usage.fsActivity === 'object' && usage.fsActivity !== null);
     checkForUnknownFields(usage.fsActivity, ['reads', 'writes']);
     assert(Number.isSafeInteger(usage.fsActivity.reads));
@@ -256,19 +299,21 @@ function _validateContent(report, fields = []) {
                        resource.type === 'loop' ? 'undefined' : 'boolean');
   });
 
-  // Verify the format of the environmentVariables section.
-  for (const [key, value] of Object.entries(report.environmentVariables)) {
-    assert.strictEqual(typeof key, 'string');
-    assert.strictEqual(typeof value, 'string');
+  if (!process.report.excludeEnv) {
+    // Verify the format of the environmentVariables section.
+    for (const [key, value] of Object.entries(report.environmentVariables)) {
+      assert.strictEqual(typeof key, 'string');
+      assert.strictEqual(typeof value, 'string');
+    }
   }
 
   // Verify the format of the userLimits section on non-Windows platforms.
   if (!isWindows) {
-    const userLimitsFields = ['core_file_size_blocks', 'data_seg_size_kbytes',
+    const userLimitsFields = ['core_file_size_blocks', 'data_seg_size_bytes',
                               'file_size_blocks', 'max_locked_memory_bytes',
-                              'max_memory_size_kbytes', 'open_files',
+                              'max_memory_size_bytes', 'open_files',
                               'stack_size_bytes', 'cpu_time_seconds',
-                              'max_user_processes', 'virtual_memory_kbytes'];
+                              'max_user_processes', 'virtual_memory_bytes'];
     checkForUnknownFields(report.userLimits, userLimitsFields);
     for (const [type, limits] of Object.entries(report.userLimits)) {
       assert.strictEqual(typeof type, 'string');

@@ -147,3 +147,38 @@ const {
   finished(duplex, common.mustCall());
   pipeline(readable, duplex, writable, common.mustCall());
 }
+
+{
+  const transform = new TransformStream();
+  const duplex = newStreamDuplexFromReadableWritablePair(transform);
+  duplex.setEncoding('utf-8');
+  duplex.on('data', common.mustCall((data) => {
+    assert.strictEqual(data, 'hello');
+  }, 5));
+
+  duplex.write(Buffer.from('hello'));
+  duplex.write(Buffer.from('hello'));
+  duplex.write(Buffer.from('hello'));
+  duplex.write(Buffer.from('hello'));
+  duplex.write(Buffer.from('hello'));
+
+  duplex.end();
+}
+
+{
+  const transform = { readable: {}, writable: {} };
+  assert.throws(() => newStreamDuplexFromReadableWritablePair(transform), {
+    code: 'ERR_INVALID_ARG_TYPE'
+  });
+}
+
+{
+  const transform = {
+    readable: new ReadableStream(),
+    writable: null
+  };
+
+  assert.throws(() => newStreamDuplexFromReadableWritablePair(transform), {
+    code: 'ERR_INVALID_ARG_TYPE',
+  });
+}

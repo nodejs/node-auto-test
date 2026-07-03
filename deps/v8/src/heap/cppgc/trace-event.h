@@ -12,13 +12,13 @@ using ConvertableToTraceFormat = v8::ConvertableToTraceFormat;
 // This is a subset of stc/tracing/trace-event.h required to support
 // tracing in the cppgc standalone library using TracingController.
 
-#include "base/trace_event/common/trace_event_common.h"
 #include "include/cppgc/platform.h"
 #include "src/base/atomicops.h"
 #include "src/base/macros.h"
+#include "src/tracing/trace-event-no-perfetto.h"
 
 // This header file defines implementation details of how the trace macros in
-// trace_event_common.h collect and store trace events. Anything not
+// trace-event-no-erfetto.h collect and store trace events. Anything not
 // implementation-specific should go in trace_macros_common.h instead of here.
 
 // The pointer returned from GetCategoryGroupEnabled() points to a
@@ -70,10 +70,14 @@ enum CategoryGroupEnabledFlags {
 #define TRACE_EVENT_API_ADD_TRACE_EVENT cppgc::internal::AddTraceEventImpl
 
 // Defines atomic operations used internally by the tracing system.
+// Acquire/release barriers are important here: crbug.com/1330114#c8.
 #define TRACE_EVENT_API_ATOMIC_WORD v8::base::AtomicWord
-#define TRACE_EVENT_API_ATOMIC_LOAD(var) v8::base::Relaxed_Load(&(var))
+#define TRACE_EVENT_API_ATOMIC_LOAD(var) v8::base::Acquire_Load(&(var))
 #define TRACE_EVENT_API_ATOMIC_STORE(var, value) \
-  v8::base::Relaxed_Store(&(var), (value))
+  v8::base::Release_Store(&(var), (value))
+// This load can be Relaxed because it's reading the state of
+// `category_group_enabled` and not inferring other variable's state from the
+// result.
 #define TRACE_EVENT_API_LOAD_CATEGORY_GROUP_ENABLED()                \
   v8::base::Relaxed_Load(reinterpret_cast<const v8::base::Atomic8*>( \
       INTERNAL_TRACE_EVENT_UID(category_group_enabled)))
@@ -162,13 +166,12 @@ static V8_INLINE uint64_t AddTraceEventImpl(
 // structures so that it is portable to third_party libraries.
 // This is the base implementation for integer types (including bool) and enums.
 template <typename T>
-static V8_INLINE typename std::enable_if<
-    std::is_integral<T>::value || std::is_enum<T>::value, void>::type
-SetTraceValue(T arg, unsigned char* type, uint64_t* value) {
-  *type = std::is_same<T, bool>::value
-              ? TRACE_VALUE_TYPE_BOOL
-              : std::is_signed<T>::value ? TRACE_VALUE_TYPE_INT
-                                         : TRACE_VALUE_TYPE_UINT;
+static V8_INLINE
+    typename std::enable_if_t<std::is_integral_v<T> || std::is_enum_v<T>, void>
+    SetTraceValue(T arg, unsigned char* type, uint64_t* value) {
+  *type = std::is_same_v<T, bool> ? TRACE_VALUE_TYPE_BOOL
+          : std::is_signed_v<T>   ? TRACE_VALUE_TYPE_INT
+                                  : TRACE_VALUE_TYPE_UINT;
   *value = static_cast<uint64_t>(arg);
 }
 
@@ -177,7 +180,7 @@ SetTraceValue(T arg, unsigned char* type, uint64_t* value) {
                                       uint64_t* value) {                    \
     *type = value_type_id;                                                  \
     *value = 0;                                                             \
-    STATIC_ASSERT(sizeof(arg) <= sizeof(*value));                           \
+    static_assert(sizeof(arg) <= sizeof(*value));                           \
     memcpy(value, &arg, sizeof(arg));                                       \
   }
 INTERNAL_DECLARE_SET_TRACE_VALUE(double, TRACE_VALUE_TYPE_DOUBLE)

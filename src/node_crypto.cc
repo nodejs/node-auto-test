@@ -38,6 +38,7 @@ namespace crypto {
 
 #define CRYPTO_NAMESPACE_LIST_BASE(V)                                          \
   V(AES)                                                                       \
+  V(ChaCha20Poly1305)                                                          \
   V(CipherBase)                                                                \
   V(DiffieHellman)                                                             \
   V(DSAAlg)                                                                    \
@@ -47,6 +48,7 @@ namespace crypto {
   V(Hmac)                                                                      \
   V(Keygen)                                                                    \
   V(Keys)                                                                      \
+  V(NativeCryptoKey)                                                           \
   V(NativeKeyObject)                                                           \
   V(PBKDF2Job)                                                                 \
   V(Random)                                                                    \
@@ -59,6 +61,26 @@ namespace crypto {
   V(Verify)                                                                    \
   V(X509Certificate)
 
+#if OPENSSL_WITH_ARGON2
+#define ARGON2_NAMESPACE_LIST(V) V(Argon2)
+#else
+#define ARGON2_NAMESPACE_LIST(V)
+#endif  // OPENSSL_WITH_ARGON2
+
+#if OPENSSL_WITH_KEM
+#define KEM_NAMESPACE_LIST(V) V(KEM)
+#else
+#define KEM_NAMESPACE_LIST(V)
+#endif
+
+#if OPENSSL_WITH_EVP_MAC
+#define KMAC_NAMESPACE_LIST(V) V(Kmac)
+#else
+#define KMAC_NAMESPACE_LIST(V)
+#endif  // OPENSSL_WITH_EVP_MAC
+
+#define TURBOSHAKE_NAMESPACE_LIST(V) V(TurboShake)
+
 #ifdef OPENSSL_NO_SCRYPT
 #define SCRYPT_NAMESPACE_LIST(V)
 #else
@@ -67,7 +89,11 @@ namespace crypto {
 
 #define CRYPTO_NAMESPACE_LIST(V)                                               \
   CRYPTO_NAMESPACE_LIST_BASE(V)                                                \
-  SCRYPT_NAMESPACE_LIST(V)
+  ARGON2_NAMESPACE_LIST(V)                                                     \
+  KEM_NAMESPACE_LIST(V)                                                        \
+  KMAC_NAMESPACE_LIST(V)                                                       \
+  SCRYPT_NAMESPACE_LIST(V)                                                     \
+  TURBOSHAKE_NAMESPACE_LIST(V)
 
 void Initialize(Local<Object> target,
                 Local<Value> unused,
@@ -75,8 +101,6 @@ void Initialize(Local<Object> target,
                 void* priv) {
   Environment* env = Environment::GetCurrent(context);
 
-  // TODO(joyeecheung): this needs to be called again if the instance is
-  // deserialized from a snapshot with the crypto bindings.
   if (!InitCryptoOnce(env->isolate())) {
     return;
   }
@@ -94,5 +118,6 @@ void RegisterExternalReferences(ExternalReferenceRegistry* registry) {
 }  // namespace crypto
 }  // namespace node
 
-NODE_MODULE_CONTEXT_AWARE_INTERNAL(crypto, node::crypto::Initialize)
-NODE_MODULE_EXTERNAL_REFERENCE(crypto, node::crypto::RegisterExternalReferences)
+NODE_BINDING_CONTEXT_AWARE_INTERNAL(crypto, node::crypto::Initialize)
+NODE_BINDING_EXTERNAL_REFERENCE(crypto,
+                                node::crypto::RegisterExternalReferences)

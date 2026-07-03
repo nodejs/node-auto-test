@@ -2,10 +2,10 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Helper functions that operate on individual digits.
-
 #ifndef V8_BIGINT_DIGIT_ARITHMETIC_H_
 #define V8_BIGINT_DIGIT_ARITHMETIC_H_
+
+// Helper functions that operate on individual digits.
 
 #include "src/bigint/bigint.h"
 #include "src/bigint/util.h"
@@ -16,6 +16,8 @@ namespace bigint {
 static constexpr int kHalfDigitBits = kDigitBits / 2;
 static constexpr digit_t kHalfDigitBase = digit_t{1} << kHalfDigitBits;
 static constexpr digit_t kHalfDigitMask = kHalfDigitBase - 1;
+
+constexpr bool digit_ismax(digit_t x) { return static_cast<digit_t>(~x) == 0; }
 
 // {carry} will be set to 0 or 1.
 inline digit_t digit_add2(digit_t a, digit_t b, digit_t* carry) {
@@ -118,7 +120,7 @@ static inline digit_t digit_div(digit_t high, digit_t low, digit_t divisor,
                                 digit_t* remainder) {
 #if defined(DCHECK)
   DCHECK(high < divisor);
-  DCHECK(divisor != 0);  // NOLINT(readability/check)
+  DCHECK(divisor != 0);
 #endif
 #if __x86_64__ && (__GNUC__ || __clang__)
   digit_t quotient;

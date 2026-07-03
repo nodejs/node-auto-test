@@ -1,87 +1,57 @@
-const chalk = require('chalk')
-const nocolor = {
-  bold: s => s,
-  dim: s => s,
-  red: s => s,
-  yellow: s => s,
-  cyan: s => s,
-  magenta: s => s,
-  blue: s => s,
-  green: s => s,
-}
+const { relative } = require('node:path')
 
-const { relative } = require('path')
+const explainNode = (node, depth, chalk, seen = new Set()) =>
+  printNode(node, chalk) +
+  explainDependents(node, depth, chalk, seen) +
+  explainLinksIn(node, depth, chalk, seen)
 
-const explainNode = (node, depth, color) =>
-  printNode(node, color) +
-  explainDependents(node, depth, color) +
-  explainLinksIn(node, depth, color)
-
-const colorType = (type, color) => {
-  const { red, yellow, cyan, magenta, blue, green } = color ? chalk : nocolor
-  const style = type === 'extraneous' ? red
-    : type === 'dev' ? yellow
-    : type === 'optional' ? cyan
-    : type === 'peer' ? magenta
-    : type === 'bundled' ? blue
-    : type === 'workspace' ? green
+const colorType = (type, chalk) => {
+  const style = type === 'extraneous' ? chalk.red
+    : type === 'dev' ? chalk.blue
+    : type === 'optional' ? chalk.magenta
+    : type === 'peer' ? chalk.magentaBright
+    : type === 'bundled' ? chalk.underline.cyan
+    : type === 'workspace' ? chalk.blueBright
+    : type === 'overridden' ? chalk.dim
     : /* istanbul ignore next */ s => s
   return style(type)
 }
 
-const printNode = (node, color) => {
-  const {
-    name,
-    version,
-    location,
-    extraneous,
-    dev,
-    optional,
-    peer,
-    bundled,
-    isWorkspace,
-  } = node
-  const { bold, dim, green } = color ? chalk : nocolor
+const printNode = (node, chalk) => {
   const extra = []
-  if (extraneous)
-    extra.push(' ' + bold(colorType('extraneous', color)))
 
-  if (dev)
-    extra.push(' ' + bold(colorType('dev', color)))
+  for (const meta of ['extraneous', 'dev', 'optional', 'peer', 'bundled', 'overridden']) {
+    if (node[meta]) {
+      extra.push(` ${colorType(meta, chalk)}`)
+    }
+  }
 
-  if (optional)
-    extra.push(' ' + bold(colorType('optional', color)))
-
-  if (peer)
-    extra.push(' ' + bold(colorType('peer', color)))
-
-  if (bundled)
-    extra.push(' ' + bold(colorType('bundled', color)))
-
-  const pkgid = isWorkspace
-    ? green(`${name}@${version}`)
-    : `${bold(name)}@${bold(version)}`
+  const pkgid = node.isWorkspace
+    ? chalk.blueBright(`${node.name}@${node.version}`)
+    : `${node.name}@${node.version}`
 
   return `${pkgid}${extra.join('')}` +
-    (location ? dim(`\n${location}`) : '')
+    (node.location ? chalk.dim(`\n${node.location}`) : '')
 }
 
-const explainLinksIn = ({ linksIn }, depth, color) => {
-  if (!linksIn || !linksIn.length || depth <= 0)
+const explainLinksIn = ({ linksIn }, depth, chalk, seen) => {
+  if (!linksIn || !linksIn.length || depth <= 0) {
     return ''
+  }
 
-  const messages = linksIn.map(link => explainNode(link, depth - 1, color))
+  const messages = linksIn.map(link => explainNode(link, depth - 1, chalk, seen))
   const str = '\n' + messages.join('\n')
   return str.split('\n').join('\n  ')
 }
 
-const explainDependents = ({ name, dependents }, depth, color) => {
-  if (!dependents || !dependents.length || depth <= 0)
+const explainDependents = ({ dependents }, depth, chalk, seen) => {
+  if (!dependents || !dependents.length || depth <= 0) {
     return ''
+  }
 
   const max = Math.ceil(depth / 2)
   const messages = dependents.slice(0, max)
-    .map(edge => explainEdge(edge, depth, color))
+    .map(edge => explainEdge(edge, depth, chalk, seen))
 
   // show just the names of the first 5 deps that overflowed the list
   if (dependents.length > max) {
@@ -89,13 +59,13 @@ const explainDependents = ({ name, dependents }, depth, color) => {
     const maxLen = 50
     const showNames = []
     for (let i = max; i < dependents.length; i++) {
-      const { from: { name = 'the root project' } } = dependents[i]
-      len += name.length
+      const { from: { name: depName = 'the root project' } } = dependents[i]
+      len += depName.length
       if (len >= maxLen && i < dependents.length - 1) {
         showNames.push('...')
         break
       }
-      showNames.push(name)
+      showNames.push(depName)
     }
     const show = `(${showNames.join(', ')})`
     messages.push(`${dependents.length - max} more ${show}`)
@@ -105,25 +75,42 @@ const explainDependents = ({ name, dependents }, depth, color) => {
   return str.split('\n').join('\n  ')
 }
 
-const explainEdge = ({ name, type, bundled, from, spec }, depth, color) => {
-  const { bold } = color ? chalk : nocolor
-  const dep = type === 'workspace'
-    ? bold(relative(from.location, spec.slice('file:'.length)))
-    : `${bold(name)}@"${bold(spec)}"`
-  const fromMsg = ` from ${explainFrom(from, depth, color)}`
+const explainEdge = (
+  { name, type, bundled, from, spec, rawSpec, overridden },
+  depth, chalk, seen = new Set()
+) => {
+  let dep = type === 'workspace'
+    ? chalk.bold(relative(from.location, spec.slice('file:'.length)))
+    : `${name}@"${spec}"`
+  if (overridden) {
+    dep = `${colorType('overridden', chalk)} ${dep} (was "${rawSpec}")`
+  }
 
-  return (type === 'prod' ? '' : `${colorType(type, color)} `) +
-    (bundled ? `${colorType('bundled', color)} ` : '') +
+  const fromMsg = ` from ${explainFrom(from, depth, chalk, seen)}`
+
+  return (type === 'prod' ? '' : `${colorType(type, chalk)} `) +
+    (bundled ? `${colorType('bundled', chalk)} ` : '') +
     `${dep}${fromMsg}`
 }
 
-const explainFrom = (from, depth, color) => {
-  if (!from.name && !from.version)
+const explainFrom = (from, depth, chalk, seen) => {
+  if (!from.name && !from.version) {
     return 'the root project'
+  }
 
-  return printNode(from, color) +
-    explainDependents(from, depth - 1, color) +
-    explainLinksIn(from, depth - 1, color)
+  // Prevent infinite recursion from cycles in the dependency graph (e.g. linked strategy store nodes). Use stack-based tracking so diamond dependencies (same node reached via different paths) are still explained, but recursive cycles are broken.
+  const nodeId = `${from.name}@${from.version}:${from.location}`
+  if (seen.has(nodeId)) {
+    return printNode(from, chalk)
+  }
+  seen.add(nodeId)
+
+  const result = printNode(from, chalk) +
+    explainDependents(from, depth - 1, chalk, seen) +
+    explainLinksIn(from, depth - 1, chalk, seen)
+
+  seen.delete(nodeId)
+  return result
 }
 
 module.exports = { explainNode, printNode, explainEdge }

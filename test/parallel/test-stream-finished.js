@@ -1,3 +1,4 @@
+// Flags: --expose-internals
 'use strict';
 
 const common = require('../common');
@@ -7,13 +8,15 @@ const {
   Transform,
   finished,
   Duplex,
-  PassThrough
+  PassThrough,
+  Stream,
 } = require('stream');
 const assert = require('assert');
 const EE = require('events');
 const fs = require('fs');
 const { promisify } = require('util');
 const http = require('http');
+const { kEosNodeSynchronousCallback } = require('internal/streams/end-of-stream');
 
 {
   const rs = new Readable({
@@ -94,13 +97,20 @@ const http = require('http');
 
 {
   // Check pre-cancelled
-  const signal = new EventTarget();
-  signal.aborted = true;
+  const signal = AbortSignal.abort();
 
   const rs = Readable.from((function* () {})());
-  finished(rs, { signal }, common.mustCall((err) => {
+  const cleanup = finished(rs, { signal }, common.mustCall((err) => {
     assert.strictEqual(err.name, 'AbortError');
+    cleanup();
   }));
+  const unset = Symbol('unset');
+  let cleanup2 = unset;
+  cleanup2 = finished(rs, { signal, [kEosNodeSynchronousCallback]: true }, common.mustCall((err) => {
+    assert.strictEqual(err.name, 'AbortError');
+    assert.strictEqual(cleanup2, unset);
+  }));
+  cleanup2();
 }
 
 {
@@ -159,8 +169,7 @@ const http = require('http');
   // Promisified pre-aborted works
   const finishedPromise = promisify(finished);
   async function run() {
-    const signal = new EventTarget();
-    signal.aborted = true;
+    const signal = AbortSignal.abort();
     const rs = Readable.from((function* () {})());
     await finishedPromise(rs, { signal });
   }
@@ -259,7 +268,12 @@ const http = require('http');
   const streamLike = new EE();
   streamLike.readableEnded = true;
   streamLike.readable = true;
-  finished(streamLike, common.mustCall());
+  assert.throws(
+    () => {
+      finished(streamLike, () => {});
+    },
+    { code: 'ERR_INVALID_ARG_TYPE' }
+  );
   streamLike.emit('close');
 }
 
@@ -336,10 +350,10 @@ function testClosed(factory) {
 
     const s = factory({
       emitClose: false,
-      destroy(err, cb) {
+      destroy: common.mustCall((err, cb) => {
         cb();
         finished(s, common.mustCall());
-      }
+      }),
     });
     s.destroy();
   }
@@ -348,14 +362,14 @@ function testClosed(factory) {
     // Invoke with deep async.
 
     const s = factory({
-      destroy(err, cb) {
-        setImmediate(() => {
+      destroy: common.mustCall((err, cb) => {
+        setImmediate(common.mustCall(() => {
           cb();
-          setImmediate(() => {
+          setImmediate(common.mustCall(() => {
             finished(s, common.mustCall());
-          });
-        });
-      }
+          }));
+        }));
+      }),
     });
     s.destroy();
   }
@@ -561,13 +575,13 @@ testClosed((opts) => new Writable({ write() {}, ...opts }));
     }));
     res.end();
   }))
-  .listen(0, function() {
+  .listen(0, common.mustCall(function() {
     http.request({
       method: 'GET',
       port: this.address().port
     }).end()
       .on('response', common.mustCall());
-  });
+  }));
 }
 
 {
@@ -578,12 +592,35 @@ testClosed((opts) => new Writable({ write() {}, ...opts }));
       }));
     }));
     req.destroy();
-  })).listen(0, function() {
+  })).listen(0, common.mustCall(function() {
     http.request({
       method: 'GET',
       port: this.address().port
     }).end().on('error', common.mustCall());
-  });
+  }));
+}
+
+{
+  let serverRes;
+  const server = http.createServer(common.mustCall((req, res) => {
+    serverRes = res;
+    res.write('hello');
+  })).listen(0, common.mustCall(function() {
+    http.get({ port: this.address().port }, common.mustCall((res) => {
+      res.on('aborted', common.mustCall(() => {
+        finished(res, common.mustCall((err) => {
+          assert.strictEqual(err.code, 'ECONNRESET');
+          assert.strictEqual(err.message, 'aborted');
+          server.close();
+        }));
+      }));
+      res.on('error', common.expectsError({
+        code: 'ECONNRESET',
+        message: 'aborted',
+      }));
+      serverRes.destroy();
+    })).on('error', common.mustNotCall());
+  }));
 }
 
 {
@@ -595,10 +632,10 @@ testClosed((opts) => new Writable({ write() {}, ...opts }));
   w.aborted = false;
   w.end();
   let closed = false;
-  w.on('finish', () => {
+  w.on('finish', common.mustCall(() => {
     assert.strictEqual(closed, false);
     w.emit('aborted');
-  });
+  }));
   w.on('close', common.mustCall(() => {
     closed = true;
   }));
@@ -612,8 +649,10 @@ testClosed((opts) => new Writable({ write() {}, ...opts }));
   const w = new Writable();
   const _err = new Error();
   w.destroy(_err);
+  assert.strictEqual(w.errored, _err);
   finished(w, common.mustCall((err) => {
     assert.strictEqual(_err, err);
+    assert.strictEqual(w.closed, true);
     finished(w, common.mustCall((err) => {
       assert.strictEqual(_err, err);
     }));
@@ -623,10 +662,72 @@ testClosed((opts) => new Writable({ write() {}, ...opts }));
 {
   const w = new Writable();
   w.destroy();
+  assert.strictEqual(w.errored, null);
   finished(w, common.mustCall((err) => {
+    assert.strictEqual(w.closed, true);
     assert.strictEqual(err.code, 'ERR_STREAM_PREMATURE_CLOSE');
     finished(w, common.mustCall((err) => {
       assert.strictEqual(err.code, 'ERR_STREAM_PREMATURE_CLOSE');
     }));
   }));
+}
+
+{
+  // Legacy Streams do not inherit from Readable or Writable.
+  // We cannot really assume anything about them, so we cannot close them
+  // automatically.
+  const s = new Stream();
+  finished(s, common.mustNotCall());
+}
+
+{
+  const server = http.createServer(common.mustCall(function(req, res) {
+    fs.createReadStream(__filename).pipe(res);
+    finished(res, common.mustCall(function(err) {
+      assert.strictEqual(err, undefined);
+    }));
+  })).listen(0, common.mustCall(function() {
+    http.request(
+      { method: 'GET', port: this.address().port },
+      common.mustCall(function(res) {
+        res.resume();
+        finished(res, common.mustCall(() => {
+          server.close();
+        }));
+      })
+    ).end();
+  }));
+}
+
+{
+  let isCalled = false;
+  const stream = new Duplex({
+    write(chunk, enc, cb) {
+      setImmediate(() => {
+        isCalled = true;
+        cb();
+      });
+    }
+  });
+
+  stream.end('foo');
+
+  finished(stream, { readable: false }, common.mustCall((err) => {
+    assert(!err);
+    assert.strictEqual(isCalled, true);
+    assert.strictEqual(stream._writableState.pendingcb, 0);
+  }));
+}
+
+{
+  const stream = new Duplex({
+    write(chunk, enc, cb) {}
+  });
+
+  stream.end('foo');
+
+  // Simulate an old stream implementation that doesn't have pendingcb
+  delete stream._writableState.pendingcb;
+
+  finished(stream, { readable: false }, common.mustCall());
 }

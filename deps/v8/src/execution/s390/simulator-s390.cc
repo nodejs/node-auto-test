@@ -14,13 +14,14 @@
 
 #include "src/base/bits.h"
 #include "src/base/once.h"
+#include "src/base/platform/memory.h"
 #include "src/base/platform/platform.h"
-#include "src/base/platform/wrappers.h"
 #include "src/codegen/assembler.h"
 #include "src/codegen/macro-assembler.h"
 #include "src/codegen/register-configuration.h"
 #include "src/codegen/s390/constants-s390.h"
 #include "src/diagnostics/disasm.h"
+#include "src/heap/base/stack.h"
 #include "src/heap/combined-heap.h"
 #include "src/heap/heap-inl.h"  // For CodeSpaceMemoryModificationScope.
 #include "src/objects/objects-inl.h"
@@ -139,7 +140,8 @@ namespace {
 // (simulator) builds.
 void SetInstructionBitsInCodeSpace(Instruction* instr, Instr value,
                                    Heap* heap) {
-  CodeSpaceMemoryModificationScope scope(heap);
+  CodePageMemoryModificationScopeForDebugging scope(
+      BasePage::FromAddress(heap->isolate(), reinterpret_cast<Address>(instr)));
   instr->SetInstructionBits(value);
 }
 }  // namespace
@@ -165,6 +167,10 @@ void S390Debugger::RedoBreakpoint() {
 }
 
 void S390Debugger::Debug() {
+  if (!v8_flags.simulator_debugger) {
+    // Debugger not enabled; crash instead.
+    UNREACHABLE();
+  }
   intptr_t last_pc = -1;
   bool done = false;
 
@@ -188,8 +194,8 @@ void S390Debugger::Debug() {
   // to all commands.
   UndoBreakpoint();
   // Disable tracing while simulating
-  bool trace = ::v8::internal::FLAG_trace_sim;
-  ::v8::internal::FLAG_trace_sim = false;
+  bool trace = v8_flags.trace_sim;
+  v8_flags.trace_sim = false;
 
   while (!done && !sim_->has_bad_pc()) {
     if (last_pc != sim_->get_pc()) {
@@ -197,7 +203,8 @@ void S390Debugger::Debug() {
       disasm::Disassembler dasm(converter);
       // use a reasonably large buffer
       v8::base::EmbeddedVector<char, 256> buffer;
-      dasm.InstructionDecode(buffer, reinterpret_cast<byte*>(sim_->get_pc()));
+      dasm.InstructionDecode(buffer,
+                             reinterpret_cast<uint8_t*>(sim_->get_pc()));
       PrintF("  0x%08" V8PRIxPTR "  %s\n", sim_->get_pc(), buffer.begin());
       last_pc = sim_->get_pc();
     }
@@ -241,8 +248,8 @@ void S390Debugger::Debug() {
             // Interpret a numeric argument as the number of instructions to
             // step past.
             for (int i = 1; (!sim_->has_bad_pc()) && i < value; i++) {
-              dasm.InstructionDecode(buffer,
-                                     reinterpret_cast<byte*>(sim_->get_pc()));
+              dasm.InstructionDecode(
+                  buffer, reinterpret_cast<uint8_t*>(sim_->get_pc()));
               PrintF("  0x%08" V8PRIxPTR "  %s\n", sim_->get_pc(),
                      buffer.begin());
               sim_->ExecuteInstruction(
@@ -252,8 +259,8 @@ void S390Debugger::Debug() {
             // Otherwise treat it as the mnemonic of the opcode to stop at.
             char mnemonic[256];
             while (!sim_->has_bad_pc()) {
-              dasm.InstructionDecode(buffer,
-                                     reinterpret_cast<byte*>(sim_->get_pc()));
+              dasm.InstructionDecode(
+                  buffer, reinterpret_cast<uint8_t*>(sim_->get_pc()));
               char* mnemonicStart = buffer.begin();
               while (*mnemonicStart != 0 && *mnemonicStart != ' ')
                 mnemonicStart++;
@@ -316,7 +323,7 @@ void S390Debugger::Debug() {
           } else if (strcmp(arg1, "allf") == 0) {
             for (int i = 0; i < DoubleRegister::kNumRegisters; i++) {
               float fvalue = GetFPFloatRegisterValue(i);
-              uint32_t as_words = bit_cast<uint32_t>(fvalue);
+              uint32_t as_words = base::bit_cast<uint32_t>(fvalue);
               PrintF("%3s: %f 0x%08x\n",
                      RegisterName(DoubleRegister::from_code(i)), fvalue,
                      as_words);
@@ -324,7 +331,7 @@ void S390Debugger::Debug() {
           } else if (strcmp(arg1, "alld") == 0) {
             for (int i = 0; i < DoubleRegister::kNumRegisters; i++) {
               dvalue = GetFPDoubleRegisterValue(i);
-              uint64_t as_words = bit_cast<uint64_t>(dvalue);
+              uint64_t as_words = base::bit_cast<uint64_t>(dvalue);
               PrintF("%3s: %f 0x%08x %08x\n",
                      RegisterName(DoubleRegister::from_code(i)), dvalue,
                      static_cast<uint32_t>(as_words >> 32),
@@ -347,7 +354,7 @@ void S390Debugger::Debug() {
               PrintF("%s: 0x%08" V8PRIxPTR " %" V8PRIdPTR "\n", arg1, value,
                      value);
             } else if (GetFPDoubleValue(arg1, &dvalue)) {
-              uint64_t as_words = bit_cast<uint64_t>(dvalue);
+              uint64_t as_words = base::bit_cast<uint64_t>(dvalue);
               PrintF("%s: %f 0x%08x %08x\n", arg1, dvalue,
                      static_cast<uint32_t>(as_words >> 32),
                      static_cast<uint32_t>(as_words & 0xFFFFFFFF));
@@ -364,10 +371,10 @@ void S390Debugger::Debug() {
           intptr_t value;
           StdoutStream os;
           if (GetValue(arg1, &value)) {
-            Object obj(value);
+            Tagged<Object> obj(value);
             os << arg1 << ": \n";
 #ifdef DEBUG
-            obj.Print(os);
+            Print(obj, os);
             os << "\n";
 #else
             os << Brief(obj) << "\n";
@@ -418,14 +425,14 @@ void S390Debugger::Debug() {
         while (cur < end) {
           PrintF("  0x%08" V8PRIxPTR ":  0x%08" V8PRIxPTR " %10" V8PRIdPTR,
                  reinterpret_cast<intptr_t>(cur), *cur, *cur);
-          Object obj(*cur);
+          Tagged<Object> obj(*cur);
           Heap* current_heap = sim_->isolate_->heap();
           if (!skip_obj_print) {
-            if (obj.IsSmi()) {
+            if (IsSmi(obj)) {
               PrintF(" (smi %d)", Smi::ToInt(obj));
-            } else if (IsValidHeapObject(current_heap, HeapObject::cast(obj))) {
+            } else if (IsValidHeapObject(current_heap, Cast<HeapObject>(obj))) {
               PrintF(" (");
-              obj.ShortPrint();
+              ShortPrint(obj);
               PrintF(")");
             }
             PrintF("\n");
@@ -438,26 +445,26 @@ void S390Debugger::Debug() {
         // use a reasonably large buffer
         v8::base::EmbeddedVector<char, 256> buffer;
 
-        byte* prev = nullptr;
-        byte* cur = nullptr;
+        uint8_t* prev = nullptr;
+        uint8_t* cur = nullptr;
         // Default number of instructions to disassemble.
         int32_t numInstructions = 10;
 
         if (argc == 1) {
-          cur = reinterpret_cast<byte*>(sim_->get_pc());
+          cur = reinterpret_cast<uint8_t*>(sim_->get_pc());
         } else if (argc == 2) {
           int regnum = Registers::Number(arg1);
           if (regnum != kNoRegister || strncmp(arg1, "0x", 2) == 0) {
             // The argument is an address or a register name.
             intptr_t value;
             if (GetValue(arg1, &value)) {
-              cur = reinterpret_cast<byte*>(value);
+              cur = reinterpret_cast<uint8_t*>(value);
             }
           } else {
             // The argument is the number of instructions.
             intptr_t value;
             if (GetValue(arg1, &value)) {
-              cur = reinterpret_cast<byte*>(sim_->get_pc());
+              cur = reinterpret_cast<uint8_t*>(sim_->get_pc());
               // Disassemble <arg1> instructions.
               numInstructions = static_cast<int32_t>(value);
             }
@@ -466,7 +473,7 @@ void S390Debugger::Debug() {
           intptr_t value1;
           intptr_t value2;
           if (GetValue(arg1, &value1) && GetValue(arg2, &value2)) {
-            cur = reinterpret_cast<byte*>(value1);
+            cur = reinterpret_cast<uint8_t*>(value1);
             // Disassemble <arg2> instructions.
             numInstructions = static_cast<int32_t>(value2);
           }
@@ -558,9 +565,9 @@ void S390Debugger::Debug() {
       } else if (strcmp(cmd, "icount") == 0) {
         PrintF("%05" PRId64 "\n", sim_->icount_);
       } else if ((strcmp(cmd, "t") == 0) || strcmp(cmd, "trace") == 0) {
-        ::v8::internal::FLAG_trace_sim = !::v8::internal::FLAG_trace_sim;
+        sim_->ToggleInstructionTracing();
         PrintF("Trace of executed instructions is %s\n",
-               ::v8::internal::FLAG_trace_sim ? "on" : "off");
+               sim_->InstructionTracingEnabled() ? "on" : "off");
       } else if ((strcmp(cmd, "h") == 0) || (strcmp(cmd, "help") == 0)) {
         PrintF("cont\n");
         PrintF("  continue execution (alias 'c')\n");
@@ -633,13 +640,19 @@ void S390Debugger::Debug() {
   // hit.
   RedoBreakpoint();
   // Restore tracing
-  ::v8::internal::FLAG_trace_sim = trace;
+  v8_flags.trace_sim = trace;
 
 #undef COMMAND_SIZE
 #undef ARG_SIZE
 
 #undef STR
 #undef XSTR
+}
+
+bool Simulator::InstructionTracingEnabled() { return instruction_tracing_; }
+
+void Simulator::ToggleInstructionTracing() {
+  instruction_tracing_ = !instruction_tracing_;
 }
 
 bool Simulator::ICacheMatch(void* one, void* two) {
@@ -1288,9 +1301,13 @@ void Simulator::EvalTableInit() {
   EvalTable[OGR] = &Simulator::Evaluate_OGR;
   EvalTable[XGR] = &Simulator::Evaluate_XGR;
   EvalTable[FLOGR] = &Simulator::Evaluate_FLOGR;
+  EvalTable[CLZG] = &Simulator::Evaluate_CLZG;
+  EvalTable[CTZG] = &Simulator::Evaluate_CTZG;
   EvalTable[LLGCR] = &Simulator::Evaluate_LLGCR;
   EvalTable[LLGHR] = &Simulator::Evaluate_LLGHR;
   EvalTable[MLGR] = &Simulator::Evaluate_MLGR;
+  EvalTable[MGRK] = &Simulator::Evaluate_MGRK;
+  EvalTable[MG] = &Simulator::Evaluate_MG;
   EvalTable[DLGR] = &Simulator::Evaluate_DLGR;
   EvalTable[ALCGR] = &Simulator::Evaluate_ALCGR;
   EvalTable[SLBGR] = &Simulator::Evaluate_SLBGR;
@@ -1572,24 +1589,14 @@ Simulator::Simulator(Isolate* isolate) : isolate_(isolate) {
   base::CallOnce(&once, &Simulator::EvalTableInit);
 // Set up simulator support first. Some of this information is needed to
 // setup the architecture state.
-#if V8_TARGET_ARCH_S390X
-  size_t stack_size = FLAG_sim_stack_size * KB;
-#else
-  size_t stack_size = MB;  // allocate 1MB for stack
-#endif
-  stack_size += 2 * stack_protection_size_;
-  stack_ = reinterpret_cast<char*>(base::Malloc(stack_size));
+  stack_ = reinterpret_cast<uint8_t*>(base::Malloc(AllocatedStackSize()));
   pc_modified_ = false;
   icount_ = 0;
   break_pc_ = nullptr;
   break_instr_ = 0;
 
 // make sure our register type can hold exactly 4/8 bytes
-#ifdef V8_TARGET_ARCH_S390X
   DCHECK_EQ(sizeof(intptr_t), 8);
-#else
-  DCHECK_EQ(sizeof(intptr_t), 4);
-#endif
   // Set up architecture state.
   // All registers are initialized to zero to start with.
   for (int i = 0; i < kNumGPRs; i++) {
@@ -1607,10 +1614,12 @@ Simulator::Simulator(Isolate* isolate) : isolate_(isolate) {
   // The sp is initialized to point to the bottom (high address) of the
   // allocated stack area. To be safe in potential stack underflows we leave
   // some buffer below.
-  registers_[sp] =
-      reinterpret_cast<intptr_t>(stack_) + stack_size - stack_protection_size_;
+  registers_[sp] = StackBase();
 
   last_debugger_input_ = nullptr;
+
+  // Enabling deadlock detection while simulating is too slow.
+  SetMutexDeadlockDetectionMode(absl::OnDeadlockCycle::kIgnore);
 }
 
 Simulator::~Simulator() { base::Free(stack_); }
@@ -1633,6 +1642,10 @@ Simulator* Simulator::current(Isolate* isolate) {
 // Sets the register in the architecture state.
 void Simulator::set_register(int reg, uint64_t value) {
   DCHECK((reg >= 0) && (reg < kNumGPRs));
+  if (InstructionTracingEnabled()) {
+    PrintF("%s <- 0x%08" V8PRIxPTR "\n",
+           i::RegisterName(i::Register::from_code(reg)), value);
+  }
   registers_[reg] = value;
 }
 
@@ -1721,6 +1734,10 @@ void Simulator::set_low_register(int reg, uint32_t value) {
   uint64_t shifted_val = static_cast<uint64_t>(value);
   uint64_t orig_val = static_cast<uint64_t>(registers_[reg]);
   uint64_t result = (orig_val >> 32 << 32) | shifted_val;
+  if (InstructionTracingEnabled()) {
+    PrintF("%s <- 0x%08" V8PRIxPTR "\n",
+           i::RegisterName(i::Register::from_code(reg)), result);
+  }
   registers_[reg] = result;
 }
 
@@ -1728,20 +1745,16 @@ void Simulator::set_high_register(int reg, uint32_t value) {
   uint64_t shifted_val = static_cast<uint64_t>(value) << 32;
   uint64_t orig_val = static_cast<uint64_t>(registers_[reg]);
   uint64_t result = (orig_val & 0xFFFFFFFF) | shifted_val;
+  if (InstructionTracingEnabled()) {
+    PrintF("%s <- 0x%08" V8PRIxPTR "\n",
+           i::RegisterName(i::Register::from_code(reg)), result);
+  }
   registers_[reg] = result;
 }
 
 double Simulator::get_double_from_register_pair(int reg) {
   DCHECK((reg >= 0) && (reg < kNumGPRs) && ((reg % 2) == 0));
-
   double dm_val = 0.0;
-#if 0 && !V8_TARGET_ARCH_S390X  // doesn't make sense in 64bit mode
-  // Read the bits from the unsigned integer register_[] array
-  // into the double precision floating point value and return it.
-  char buffer[sizeof(fp_registers_[0])];
-  memcpy(buffer, &registers_[reg], 2 * sizeof(registers_[0]));
-  memcpy(&dm_val, buffer, 2 * sizeof(registers_[0]));
-#endif
   return (dm_val);
 }
 
@@ -1883,7 +1896,34 @@ uintptr_t Simulator::StackLimit(uintptr_t c_limit) const {
 
   // Otherwise the limit is the JS stack. Leave a safety margin to prevent
   // overrunning the stack when pushing values.
-  return reinterpret_cast<uintptr_t>(stack_) + stack_protection_size_;
+  return reinterpret_cast<uintptr_t>(stack_) + kStackProtectionSize;
+}
+
+uintptr_t Simulator::StackBase() const {
+  return reinterpret_cast<uintptr_t>(stack_) + UsableStackSize();
+}
+
+base::Vector<uint8_t> Simulator::GetCentralStackView() const {
+  // We do not add an additional safety margin as above in
+  // Simulator::StackLimit, as this is currently only used in wasm::StackMemory,
+  // which adds its own margin.
+  return base::VectorOf(stack_, UsableStackSize());
+}
+
+void Simulator::IterateRegistersAndStack(::heap::base::StackVisitor* visitor) {
+  for (int i = 0; i < kNumGPRs; ++i) {
+    visitor->VisitPointer(reinterpret_cast<const void*>(get_register(i)));
+  }
+
+  for (const void* const* current =
+           reinterpret_cast<const void* const*>(get_sp());
+       current < reinterpret_cast<const void* const*>(StackBase()); ++current) {
+    const void* address = *current;
+    if (address == nullptr) {
+      continue;
+    }
+    visitor->VisitPointer(address);
+  }
 }
 
 // Unsupported instructions use Format to print an error and stop execution.
@@ -1936,32 +1976,40 @@ static void decodeObjectPair(ObjectPair* pair, intptr_t* x, intptr_t* y) {
 }
 
 // Calls into the V8 runtime.
-using SimulatorRuntimeCall = intptr_t (*)(intptr_t arg0, intptr_t arg1,
-                                          intptr_t arg2, intptr_t arg3,
-                                          intptr_t arg4, intptr_t arg5,
-                                          intptr_t arg6, intptr_t arg7,
-                                          intptr_t arg8, intptr_t arg9);
-using SimulatorRuntimePairCall = ObjectPair (*)(intptr_t arg0, intptr_t arg1,
-                                                intptr_t arg2, intptr_t arg3,
-                                                intptr_t arg4, intptr_t arg5,
-                                                intptr_t arg6, intptr_t arg7,
-                                                intptr_t arg8, intptr_t arg9);
+using SimulatorRuntimeCall = intptr_t (*)(
+    intptr_t arg0, intptr_t arg1, intptr_t arg2, intptr_t arg3, intptr_t arg4,
+    intptr_t arg5, intptr_t arg6, intptr_t arg7, intptr_t arg8, intptr_t arg9,
+    intptr_t arg10, intptr_t arg11, intptr_t arg12, intptr_t arg13,
+    intptr_t arg14, intptr_t arg15, intptr_t arg16, intptr_t arg17,
+    intptr_t arg18, intptr_t arg19);
+using SimulatorRuntimePairCall = ObjectPair (*)(
+    intptr_t arg0, intptr_t arg1, intptr_t arg2, intptr_t arg3, intptr_t arg4,
+    intptr_t arg5, intptr_t arg6, intptr_t arg7, intptr_t arg8, intptr_t arg9,
+    intptr_t arg10, intptr_t arg11, intptr_t arg12, intptr_t arg13,
+    intptr_t arg14, intptr_t arg15, intptr_t arg16, intptr_t arg17,
+    intptr_t arg18, intptr_t arg19);
 
 // These prototypes handle the four types of FP calls.
 using SimulatorRuntimeCompareCall = int (*)(double darg0, double darg1);
 using SimulatorRuntimeFPFPCall = double (*)(double darg0, double darg1);
 using SimulatorRuntimeFPCall = double (*)(double darg0);
 using SimulatorRuntimeFPIntCall = double (*)(double darg0, intptr_t arg0);
+using SimulatorRuntimeIntFPCall = int32_t (*)(double darg0);
+// Define four args for future flexibility; at the time of this writing only
+// one is ever used.
+using SimulatorRuntimeFPTaggedCall = double (*)(int32_t arg0, int32_t arg1,
+                                                int32_t arg2, int32_t arg3);
 
 // This signature supports direct call in to API function native callback
 // (refer to InvocationCallback in v8.h).
 using SimulatorRuntimeDirectApiCall = void (*)(intptr_t arg0);
-using SimulatorRuntimeProfilingApiCall = void (*)(intptr_t arg0, void* arg1);
-
-// This signature supports direct call to accessor getter callback.
-using SimulatorRuntimeDirectGetterCall = void (*)(intptr_t arg0, intptr_t arg1);
-using SimulatorRuntimeProfilingGetterCall = void (*)(intptr_t arg0,
-                                                     intptr_t arg1, void* arg2);
+// This signature supports direct call to accessor/interceptor getter callback.
+using SimulatorRuntimeDirectGetterCall = intptr_t (*)(intptr_t arg0,
+                                                      intptr_t arg1);
+// This signature supports direct call to accessor/interceptor setter callback.
+using SimulatorRuntimeDirectSetterCall = intptr_t (*)(intptr_t arg0,
+                                                      intptr_t arg1,
+                                                      intptr_t arg2);
 
 // Software interrupt instructions are used by the simulator to call into the
 // C-based V8 runtime.
@@ -1972,10 +2020,9 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
       // Check if stack is aligned. Error if not aligned is reported below to
       // include information on the function called.
       bool stack_aligned =
-          (get_register(sp) & (::v8::internal::FLAG_sim_stack_alignment - 1)) ==
-          0;
+          (get_register(sp) & (v8_flags.sim_stack_alignment - 1)) == 0;
       Redirection* redirection = Redirection::FromInstruction(instr);
-      const int kArgCount = 10;
+      const int kArgCount = 20;
       const int kRegisterArgCount = 5;
       int arg0_regnum = 2;
       intptr_t result_buffer = 0;
@@ -1998,17 +2045,18 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
             stack_pointer[(kCalleeRegisterSaveAreaSize / kSystemPointerSize) +
                           (i - kRegisterArgCount)];
       }
-      STATIC_ASSERT(kArgCount == kRegisterArgCount + 5);
-      STATIC_ASSERT(kMaxCParameters == kArgCount);
+      static_assert(kArgCount == kRegisterArgCount + 15);
+      static_assert(kMaxCParameters == kArgCount);
       bool fp_call =
           (redirection->type() == ExternalReference::BUILTIN_FP_FP_CALL) ||
           (redirection->type() == ExternalReference::BUILTIN_COMPARE_CALL) ||
           (redirection->type() == ExternalReference::BUILTIN_FP_CALL) ||
-          (redirection->type() == ExternalReference::BUILTIN_FP_INT_CALL);
+          (redirection->type() == ExternalReference::BUILTIN_FP_INT_CALL) ||
+          (redirection->type() == ExternalReference::BUILTIN_INT_FP_CALL);
 
       // Place the return address on the stack, making the call GC safe.
-      *bit_cast<intptr_t*>(get_register(sp) +
-                           kStackFrameRASlot * kSystemPointerSize) =
+      *reinterpret_cast<intptr_t*>(get_register(sp) +
+                                   kStackFrameRASlot * kSystemPointerSize) =
           get_register(r14);
 
       intptr_t external =
@@ -2019,7 +2067,7 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
         int iresult = 0;      // integer return value
         double dresult = 0;   // double return value
         GetFpArgs(&dval0, &dval1, &ival);
-        if (::v8::internal::FLAG_trace_sim || !stack_aligned) {
+        if (InstructionTracingEnabled() || !stack_aligned) {
           SimulatorRuntimeCall generic_target =
               reinterpret_cast<SimulatorRuntimeCall>(external);
           switch (redirection->type()) {
@@ -2038,6 +2086,11 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
               PrintF("Call to host function at %p with args %f, %" V8PRIdPTR,
                      reinterpret_cast<void*>(FUNCTION_ADDR(generic_target)),
                      dval0, ival);
+              break;
+            case ExternalReference::BUILTIN_INT_FP_CALL:
+              PrintF("Call to host function at %p with args %f",
+                     reinterpret_cast<void*>(FUNCTION_ADDR(generic_target)),
+                     dval0);
               break;
             default:
               UNREACHABLE();
@@ -2078,12 +2131,23 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
             SetFpResult(dresult);
             break;
           }
+          case ExternalReference::BUILTIN_INT_FP_CALL: {
+            SimulatorRuntimeIntFPCall target =
+                reinterpret_cast<SimulatorRuntimeIntFPCall>(external);
+            iresult = target(dval0);
+#ifdef DEBUG
+            TrashCallerSaveRegisters();
+#endif
+            set_register(r2, static_cast<int32_t>(iresult));
+            break;
+          }
           default:
             UNREACHABLE();
         }
-        if (::v8::internal::FLAG_trace_sim || !stack_aligned) {
+        if (InstructionTracingEnabled()) {
           switch (redirection->type()) {
             case ExternalReference::BUILTIN_COMPARE_CALL:
+            case ExternalReference::BUILTIN_INT_FP_CALL:
               PrintF("Returned %08x\n", iresult);
               break;
             case ExternalReference::BUILTIN_FP_FP_CALL:
@@ -2095,10 +2159,33 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
               UNREACHABLE();
           }
         }
+      } else if (redirection->type() ==
+                 ExternalReference::BUILTIN_FP_POINTER_CALL) {
+        if (InstructionTracingEnabled() || !stack_aligned) {
+          PrintF("Call to host function at %p args %08" V8PRIxPTR,
+                 reinterpret_cast<void*>(external), arg[0]);
+          if (!stack_aligned) {
+            PrintF(" with unaligned stack %08" V8PRIxPTR "\n",
+                   get_register(sp));
+          }
+          PrintF("\n");
+        }
+        CHECK(stack_aligned);
+        SimulatorRuntimeFPTaggedCall target =
+            reinterpret_cast<SimulatorRuntimeFPTaggedCall>(external);
+        double dresult = target(arg[0], arg[1], arg[2], arg[3]);
+#ifdef DEBUG
+        TrashCallerSaveRegisters();
+#endif
+        SetFpResult(dresult);
+        if (InstructionTracingEnabled()) {
+          PrintF("Returned %f\n", dresult);
+        }
       } else if (redirection->type() == ExternalReference::DIRECT_API_CALL) {
         // See callers of MacroAssembler::CallApiFunctionAndReturn for
         // explanation of register usage.
-        if (::v8::internal::FLAG_trace_sim || !stack_aligned) {
+        // void f(v8::FunctionCallbackInfo&)
+        if (InstructionTracingEnabled() || !stack_aligned) {
           PrintF("Call to host function at %p args %08" V8PRIxPTR,
                  reinterpret_cast<void*>(external), arg[0]);
           if (!stack_aligned) {
@@ -2111,27 +2198,12 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
         SimulatorRuntimeDirectApiCall target =
             reinterpret_cast<SimulatorRuntimeDirectApiCall>(external);
         target(arg[0]);
-      } else if (redirection->type() == ExternalReference::PROFILING_API_CALL) {
-        // See callers of MacroAssembler::CallApiFunctionAndReturn for
-        // explanation of register usage.
-        if (::v8::internal::FLAG_trace_sim || !stack_aligned) {
-          PrintF("Call to host function at %p args %08" V8PRIxPTR
-                 " %08" V8PRIxPTR,
-                 reinterpret_cast<void*>(external), arg[0], arg[1]);
-          if (!stack_aligned) {
-            PrintF(" with unaligned stack %08" V8PRIxPTR "\n",
-                   static_cast<intptr_t>(get_register(sp)));
-          }
-          PrintF("\n");
-        }
-        CHECK(stack_aligned);
-        SimulatorRuntimeProfilingApiCall target =
-            reinterpret_cast<SimulatorRuntimeProfilingApiCall>(external);
-        target(arg[0], Redirection::ReverseRedirection(arg[1]));
       } else if (redirection->type() == ExternalReference::DIRECT_GETTER_CALL) {
         // See callers of MacroAssembler::CallApiFunctionAndReturn for
         // explanation of register usage.
-        if (::v8::internal::FLAG_trace_sim || !stack_aligned) {
+        // void f(v8::Local<v8::Name>, v8::PropertyCallbackInfo&)
+        // v8::Intercepted f(v8::Local<v8::Name>, v8::PropertyCallbackInfo&)
+        if (InstructionTracingEnabled() || !stack_aligned) {
           PrintF("Call to host function at %p args %08" V8PRIxPTR
                  " %08" V8PRIxPTR,
                  reinterpret_cast<void*>(external), arg[0], arg[1]);
@@ -2145,31 +2217,42 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
         SimulatorRuntimeDirectGetterCall target =
             reinterpret_cast<SimulatorRuntimeDirectGetterCall>(external);
         if (!ABI_PASSES_HANDLES_IN_REGS) {
-          arg[0] = bit_cast<intptr_t>(arg[0]);
+          arg[0] = base::bit_cast<intptr_t>(arg[0]);
         }
-        target(arg[0], arg[1]);
-      } else if (redirection->type() ==
-                 ExternalReference::PROFILING_GETTER_CALL) {
-        if (::v8::internal::FLAG_trace_sim || !stack_aligned) {
+        intptr_t iresult = target(arg[0], arg[1]);
+        if (InstructionTracingEnabled()) {
+          PrintF("Returned %08" V8PRIxPTR "\n", iresult);
+        }
+        set_register(r2, iresult);
+      } else if (redirection->type() == ExternalReference::DIRECT_SETTER_CALL) {
+        // void f(v8::Local<Name>, v8::Local<v8::Value>,
+        //        v8::PropertyCallbackInfo&)
+        // v8::Intercepted f(v8::Local<Name>, v8::Local<v8::Value>,
+        //                   v8::PropertyCallbackInfo&)
+        if (InstructionTracingEnabled() || !stack_aligned) {
           PrintF("Call to host function at %p args %08" V8PRIxPTR
                  " %08" V8PRIxPTR " %08" V8PRIxPTR,
                  reinterpret_cast<void*>(external), arg[0], arg[1], arg[2]);
           if (!stack_aligned) {
             PrintF(" with unaligned stack %08" V8PRIxPTR "\n",
-                   static_cast<intptr_t>(get_register(sp)));
+                   get_register(sp));
           }
           PrintF("\n");
         }
         CHECK(stack_aligned);
-        SimulatorRuntimeProfilingGetterCall target =
-            reinterpret_cast<SimulatorRuntimeProfilingGetterCall>(external);
-        if (!ABI_PASSES_HANDLES_IN_REGS) {
-          arg[0] = bit_cast<intptr_t>(arg[0]);
+        SimulatorRuntimeDirectSetterCall target =
+            reinterpret_cast<SimulatorRuntimeDirectSetterCall>(external);
+        intptr_t iresult = target(arg[0], arg[1], arg[2]);
+#ifdef DEBUG
+        TrashCallerSaveRegisters();
+#endif
+        if (InstructionTracingEnabled()) {
+          PrintF("Returned %08" V8PRIxPTR "\n", iresult);
         }
-        target(arg[0], arg[1], Redirection::ReverseRedirection(arg[2]));
+        set_register(r2, iresult);
       } else {
         // builtin call.
-        if (::v8::internal::FLAG_trace_sim || !stack_aligned) {
+        if (InstructionTracingEnabled() || !stack_aligned) {
           SimulatorRuntimeCall target =
               reinterpret_cast<SimulatorRuntimeCall>(external);
           PrintF(
@@ -2177,9 +2260,14 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
               "\t\t\t\targs %08" V8PRIxPTR ", %08" V8PRIxPTR ", %08" V8PRIxPTR
               ", %08" V8PRIxPTR ", %08" V8PRIxPTR ", %08" V8PRIxPTR
               ", %08" V8PRIxPTR ", %08" V8PRIxPTR ", %08" V8PRIxPTR
-              ", %08" V8PRIxPTR,
+              ", %08" V8PRIxPTR ", %08" V8PRIxPTR ", %08" V8PRIxPTR
+              ", %08" V8PRIxPTR ", %08" V8PRIxPTR ", %08" V8PRIxPTR
+              ", %08" V8PRIxPTR ", %08" V8PRIxPTR ", %08" V8PRIxPTR
+              ", %08" V8PRIxPTR ", %08" V8PRIxPTR,
               reinterpret_cast<void*>(FUNCTION_ADDR(target)), arg[0], arg[1],
-              arg[2], arg[3], arg[4], arg[5], arg[6], arg[7], arg[8], arg[9]);
+              arg[2], arg[3], arg[4], arg[5], arg[6], arg[7], arg[8], arg[9],
+              arg[10], arg[11], arg[12], arg[13], arg[14], arg[15], arg[16],
+              arg[17], arg[18], arg[19]);
           if (!stack_aligned) {
             PrintF(" with unaligned stack %08" V8PRIxPTR "\n",
                    static_cast<intptr_t>(get_register(sp)));
@@ -2190,12 +2278,14 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
         if (redirection->type() == ExternalReference::BUILTIN_CALL_PAIR) {
           SimulatorRuntimePairCall target =
               reinterpret_cast<SimulatorRuntimePairCall>(external);
-          ObjectPair result = target(arg[0], arg[1], arg[2], arg[3], arg[4],
-                                     arg[5], arg[6], arg[7], arg[8], arg[9]);
+          ObjectPair result =
+              target(arg[0], arg[1], arg[2], arg[3], arg[4], arg[5], arg[6],
+                     arg[7], arg[8], arg[9], arg[10], arg[11], arg[12], arg[13],
+                     arg[14], arg[15], arg[16], arg[17], arg[18], arg[19]);
           intptr_t x;
           intptr_t y;
           decodeObjectPair(&result, &x, &y);
-          if (::v8::internal::FLAG_trace_sim) {
+          if (InstructionTracingEnabled()) {
             PrintF("Returned {%08" V8PRIxPTR ", %08" V8PRIxPTR "}\n", x, y);
           }
           if (ABI_RETURNS_OBJECTPAIR_IN_REGS) {
@@ -2207,47 +2297,36 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
             set_register(r2, result_buffer);
           }
         } else {
-          DCHECK(redirection->type() == ExternalReference::BUILTIN_CALL);
+          // FAST_C_CALL is temporarily handled here as well, because we lack
+          // proper support for direct C calls with FP params in the simulator.
+          // The generic BUILTIN_CALL path assumes all parameters are passed in
+          // the GP registers, thus supporting calling the slow callback without
+          // crashing. The reason for that is that in the mjsunit tests we check
+          // the `fast_c_api.supports_fp_params` (which is false on
+          // non-simulator builds for arm/arm64), thus we expect that the slow
+          // path will be called. And since the slow path passes the arguments
+          // as a `const FunctionCallbackInfo<Value>&` (which is a GP argument),
+          // the call is made correctly.
+          DCHECK(redirection->type() == ExternalReference::BUILTIN_CALL ||
+                 redirection->type() == ExternalReference::FAST_C_CALL);
           SimulatorRuntimeCall target =
               reinterpret_cast<SimulatorRuntimeCall>(external);
-          intptr_t result = target(arg[0], arg[1], arg[2], arg[3], arg[4],
-                                   arg[5], arg[6], arg[7], arg[8], arg[9]);
-          if (::v8::internal::FLAG_trace_sim) {
+          intptr_t result =
+              target(arg[0], arg[1], arg[2], arg[3], arg[4], arg[5], arg[6],
+                     arg[7], arg[8], arg[9], arg[10], arg[11], arg[12], arg[13],
+                     arg[14], arg[15], arg[16], arg[17], arg[18], arg[19]);
+          if (InstructionTracingEnabled()) {
             PrintF("Returned %08" V8PRIxPTR "\n", result);
           }
           set_register(r2, result);
         }
-        // #if !V8_TARGET_ARCH_S390X
-        //         DCHECK(redirection->type() ==
-        //         ExternalReference::BUILTIN_CALL);
-        //         SimulatorRuntimeCall target =
-        //             reinterpret_cast<SimulatorRuntimeCall>(external);
-        //         int64_t result = target(arg[0], arg[1], arg[2], arg[3],
-        //         arg[4],
-        //                                 arg[5]);
-        //         int32_t lo_res = static_cast<int32_t>(result);
-        //         int32_t hi_res = static_cast<int32_t>(result >> 32);
-        // #if !V8_TARGET_LITTLE_ENDIAN
-        //         if (::v8::internal::FLAG_trace_sim) {
-        //           PrintF("Returned %08x\n", hi_res);
-        //         }
-        //         set_register(r2, hi_res);
-        //         set_register(r3, lo_res);
-        // #else
-        //         if (::v8::internal::FLAG_trace_sim) {
-        //           PrintF("Returned %08x\n", lo_res);
-        //         }
-        //         set_register(r2, lo_res);
-        //         set_register(r3, hi_res);
-        // #endif
-        // #else
         //         if (redirection->type() == ExternalReference::BUILTIN_CALL) {
         //           SimulatorRuntimeCall target =
         //             reinterpret_cast<SimulatorRuntimeCall>(external);
         //           intptr_t result = target(arg[0], arg[1], arg[2], arg[3],
         //           arg[4],
         //               arg[5]);
-        //           if (::v8::internal::FLAG_trace_sim) {
+        //           if (v8_flags.trace_sim) {
         //             PrintF("Returned %08" V8PRIxPTR "\n", result);
         //           }
         //           set_register(r2, result);
@@ -2258,7 +2337,7 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
         //             reinterpret_cast<SimulatorRuntimePairCall>(external);
         //           ObjectPair result = target(arg[0], arg[1], arg[2], arg[3],
         //               arg[4], arg[5]);
-        //           if (::v8::internal::FLAG_trace_sim) {
+        //           if (v8_flags.trace_sim) {
         //             PrintF("Returned %08" V8PRIxPTR ", %08" V8PRIxPTR "\n",
         //                 result.x, result.y);
         //           }
@@ -2270,15 +2349,9 @@ void Simulator::SoftwareInterrupt(Instruction* instr) {
         //                sizeof(ObjectPair));
         // #endif
         //         }
-        // #endif
       }
-      int64_t saved_lr = *bit_cast<intptr_t*>(
+      int64_t saved_lr = *reinterpret_cast<intptr_t*>(
           get_register(sp) + kStackFrameRASlot * kSystemPointerSize);
-#if (!V8_TARGET_ARCH_S390X && V8_HOST_ARCH_S390)
-      // On zLinux-31, the saved_lr might be tagged with a high bit of 1.
-      // Cleanse it before proceeding with simulation.
-      saved_lr &= 0x7FFFFFFF;
-#endif
       set_pc(saved_lr);
       break;
     }
@@ -2418,18 +2491,18 @@ int Simulator::DecodeInstruction(Instruction* instr) {
 void Simulator::ExecuteInstruction(Instruction* instr, bool auto_incr_pc) {
   icount_++;
 
-  if (v8::internal::FLAG_check_icache) {
+  if (v8_flags.check_icache) {
     CheckICache(i_cache(), instr);
   }
 
   pc_modified_ = false;
 
-  if (::v8::internal::FLAG_trace_sim) {
+  if (InstructionTracingEnabled()) {
     disasm::NameConverter converter;
     disasm::Disassembler dasm(converter);
     // use a reasonably large buffer
     v8::base::EmbeddedVector<char, 256> buffer;
-    dasm.InstructionDecode(buffer, reinterpret_cast<byte*>(instr));
+    dasm.InstructionDecode(buffer, reinterpret_cast<uint8_t*>(instr));
     PrintF("%05" PRId64 "  %08" V8PRIxPTR "  %s\n", icount_,
            reinterpret_cast<intptr_t>(instr), buffer.begin());
 
@@ -2458,7 +2531,7 @@ void Simulator::Execute() {
   // raw PC value and not the one used as input to arithmetic instructions.
   intptr_t program_counter = get_pc();
 
-  if (::v8::internal::FLAG_stop_sim_at == 0) {
+  if (v8_flags.stop_sim_at == 0) {
     // Fast version of the dispatch loop without checking whether the simulator
     // should be stopping at a particular executed instruction.
     while (program_counter != end_sim_pc) {
@@ -2467,11 +2540,11 @@ void Simulator::Execute() {
       program_counter = get_pc();
     }
   } else {
-    // FLAG_stop_sim_at is at the non-default value. Stop in the debugger when
-    // we reach the particular instruction count.
+    // v8_flags.stop_sim_at is at the non-default value. Stop in the debugger
+    // when we reach the particular instruction count.
     while (program_counter != end_sim_pc) {
       Instruction* instr = reinterpret_cast<Instruction*>(program_counter);
-      if (icount_ == ::v8::internal::FLAG_stop_sim_at) {
+      if (icount_ == v8_flags.stop_sim_at) {
         S390Debugger dbg(this);
         dbg.Debug();
       } else {
@@ -2489,7 +2562,7 @@ void Simulator::CallInternal(Address entry, int reg_arg_count) {
   // Prepare to execute the code at entry
   if (ABI_USES_FUNCTION_DESCRIPTORS) {
     // entry is the function descriptor
-    set_pc(*(bit_cast<intptr_t*>(entry)));
+    set_pc(*(reinterpret_cast<intptr_t*>(entry)));
   } else {
     // entry is the instruction address
     set_pc(static_cast<intptr_t>(entry));
@@ -2532,18 +2605,6 @@ void Simulator::CallInternal(Address entry, int reg_arg_count) {
   Execute();
 
 // Check that the non-volatile registers have been preserved.
-#ifndef V8_TARGET_ARCH_S390X
-  if (reg_arg_count < 5) {
-    DCHECK_EQ(callee_saved_value + 6, get_low_register<uint32_t>(r6));
-  }
-  DCHECK_EQ(callee_saved_value + 7, get_low_register<uint32_t>(r7));
-  DCHECK_EQ(callee_saved_value + 8, get_low_register<uint32_t>(r8));
-  DCHECK_EQ(callee_saved_value + 9, get_low_register<uint32_t>(r9));
-  DCHECK_EQ(callee_saved_value + 10, get_low_register<uint32_t>(r10));
-  DCHECK_EQ(callee_saved_value + 11, get_low_register<uint32_t>(r11));
-  DCHECK_EQ(callee_saved_value + 12, get_low_register<uint32_t>(r12));
-  DCHECK_EQ(callee_saved_value + 13, get_low_register<uint32_t>(r13));
-#else
   if (reg_arg_count < 5) {
     DCHECK_EQ(callee_saved_value + 6, get_register(r6));
   }
@@ -2554,7 +2615,6 @@ void Simulator::CallInternal(Address entry, int reg_arg_count) {
   DCHECK_EQ(callee_saved_value + 11, get_register(r11));
   DCHECK_EQ(callee_saved_value + 12, get_register(r12));
   DCHECK_EQ(callee_saved_value + 13, get_register(r13));
-#endif
 
   // Restore non-volatile registers with the original value.
   set_register(r6, r6_val);
@@ -2611,7 +2671,7 @@ intptr_t Simulator::CallImpl(Address entry, int argument_count,
 // Prepare to execute the code at entry
 #if ABI_USES_FUNCTION_DESCRIPTORS
   // entry is the function descriptor
-  set_pc(*(bit_cast<intptr_t*>(entry)));
+  set_pc(*(reinterpret_cast<intptr_t*>(entry)));
 #else
   // entry is the instruction address
   set_pc(static_cast<intptr_t>(entry));
@@ -2643,18 +2703,6 @@ intptr_t Simulator::CallImpl(Address entry, int argument_count,
   Execute();
 
 // Check that the non-volatile registers have been preserved.
-#ifndef V8_TARGET_ARCH_S390X
-  if (reg_arg_count < 5) {
-    DCHECK_EQ(callee_saved_value + 6, get_low_register<uint32_t>(r6));
-  }
-  DCHECK_EQ(callee_saved_value + 7, get_low_register<uint32_t>(r7));
-  DCHECK_EQ(callee_saved_value + 8, get_low_register<uint32_t>(r8));
-  DCHECK_EQ(callee_saved_value + 9, get_low_register<uint32_t>(r9));
-  DCHECK_EQ(callee_saved_value + 10, get_low_register<uint32_t>(r10));
-  DCHECK_EQ(callee_saved_value + 11, get_low_register<uint32_t>(r11));
-  DCHECK_EQ(callee_saved_value + 12, get_low_register<uint32_t>(r12));
-  DCHECK_EQ(callee_saved_value + 13, get_low_register<uint32_t>(r13));
-#else
   if (reg_arg_count < 5) {
     DCHECK_EQ(callee_saved_value + 6, get_register(r6));
   }
@@ -2665,7 +2713,6 @@ intptr_t Simulator::CallImpl(Address entry, int argument_count,
   DCHECK_EQ(callee_saved_value + 11, get_register(r11));
   DCHECK_EQ(callee_saved_value + 12, get_register(r12));
   DCHECK_EQ(callee_saved_value + 13, get_register(r13));
-#endif
 
   // Restore non-volatile registers with the original value.
   set_register(r6, r6_val);
@@ -2678,11 +2725,7 @@ intptr_t Simulator::CallImpl(Address entry, int argument_count,
   set_register(r13, r13_val);
   // Pop stack passed arguments.
 
-#ifndef V8_TARGET_ARCH_S390X
-  DCHECK_EQ(entry_stack, get_low_register<uint32_t>(sp));
-#else
   DCHECK_EQ(entry_stack, get_register(sp));
-#endif
   set_register(sp, original_stack);
 
   // Return value register
@@ -3138,12 +3181,12 @@ EVALUATE(VLREP) {
   DCHECK_OPCODE(VLREP);
   DECODE_VRX_INSTRUCTION(r1, x2, b2, d2, m3);
   intptr_t addr = GET_ADDRESS(x2, b2, d2);
-#define CASE(i, type)                                                 \
-  case i: {                                                           \
-    FOR_EACH_LANE(j, type) {                                          \
-      set_simd_register_by_lane<type>(r1, j, *bit_cast<type*>(addr)); \
-    }                                                                 \
-    break;                                                            \
+#define CASE(i, type)                                                         \
+  case i: {                                                                   \
+    FOR_EACH_LANE(j, type) {                                                  \
+      set_simd_register_by_lane<type>(r1, j, *reinterpret_cast<type*>(addr)); \
+    }                                                                         \
+    break;                                                                    \
   }
   switch (m3) {
     CASE(0, uint8_t);
@@ -3455,14 +3498,17 @@ EVALUATE(VSUMG) {
 }
 #undef CASE
 
-#define VECTOR_MERGE(type, is_low_side)                                      \
-  constexpr size_t index_limit = (kSimd128Size / sizeof(type)) / 2;          \
-  for (size_t i = 0, source_index = is_low_side ? i + index_limit : i;       \
-       i < index_limit; i++, source_index++) {                               \
-    set_simd_register_by_lane<type>(                                         \
-        r1, 2 * i, get_simd_register_by_lane<type>(r2, source_index));       \
-    set_simd_register_by_lane<type>(                                         \
-        r1, (2 * i) + 1, get_simd_register_by_lane<type>(r3, source_index)); \
+#define VECTOR_MERGE(type, is_low_side)                                     \
+  constexpr size_t kItemCount = kSimd128Size / sizeof(type);                \
+  type temps[kItemCount] = {0};                                             \
+  constexpr size_t index_limit = kItemCount / 2;                            \
+  for (size_t i = 0, source_index = is_low_side ? i + index_limit : i;      \
+       i < index_limit; i++, source_index++) {                              \
+    temps[2 * i] = get_simd_register_by_lane<type>(r2, source_index);       \
+    temps[(2 * i) + 1] = get_simd_register_by_lane<type>(r3, source_index); \
+  }                                                                         \
+  for (size_t i = 0; i < kItemCount; i++) {                                 \
+    set_simd_register_by_lane<type>(r1, i, temps[i]);                       \
   }
 #define CASE(i, type, is_low_side)  \
   case i: {                         \
@@ -4008,7 +4054,8 @@ EVALUATE(VBPERM) {
   USE(m5);
   USE(m6);
   uint16_t result_bits = 0;
-  unsigned __int128 src_bits = bit_cast<__int128>(get_simd_register(r2).int8);
+  unsigned __int128 src_bits =
+      base::bit_cast<__int128>(get_simd_register(r2).int8);
   for (int i = 0; i < kSimd128Size; i++) {
     result_bits <<= 1;
     uint8_t selected_bit_index = get_simd_register_by_lane<uint8_t>(r3, i);
@@ -4033,15 +4080,15 @@ EVALUATE(VSEL) {
   DECODE_VRR_E_INSTRUCTION(r1, r2, r3, r4, m6, m5);
   USE(m5);
   USE(m6);
-  fpr_t scratch = get_simd_register(r2);
-  fpr_t mask = get_simd_register(r4);
-  scratch.int64[0] ^= get_simd_register_by_lane<int64_t>(r3, 0);
-  scratch.int64[1] ^= get_simd_register_by_lane<int64_t>(r3, 1);
-  mask.int64[0] &= scratch.int64[0];
-  mask.int64[1] &= scratch.int64[1];
-  mask.int64[0] ^= get_simd_register_by_lane<int64_t>(r3, 0);
-  mask.int64[1] ^= get_simd_register_by_lane<int64_t>(r3, 1);
-  set_simd_register(r1, mask);
+  unsigned __int128 src_1 =
+      base::bit_cast<__int128>(get_simd_register(r2).int8);
+  unsigned __int128 src_2 =
+      base::bit_cast<__int128>(get_simd_register(r3).int8);
+  unsigned __int128 src_3 =
+      base::bit_cast<__int128>(get_simd_register(r4).int8);
+  unsigned __int128 tmp = (src_1 & src_3) | (src_2 & ~src_3);
+  fpr_t result = base::bit_cast<fpr_t>(tmp);
+  set_simd_register(r1, result);
   return length;
 }
 
@@ -4243,12 +4290,13 @@ EVALUATE(VFD) {
   return length;
 }
 
-#define VECTOR_FP_MULTIPLY_QFMS_OPERATION(type, op, sign, first_lane_only) \
+#define VECTOR_FP_MULTIPLY_QFMS_OPERATION(type, op, sign, first_lane_only, \
+                                          function)                        \
   for (size_t i = 0, j = 0; j < kSimd128Size; i++, j += sizeof(type)) {    \
     type src0 = get_simd_register_by_lane<type>(r2, i);                    \
     type src1 = get_simd_register_by_lane<type>(r3, i);                    \
     type src2 = get_simd_register_by_lane<type>(r4, i);                    \
-    type result = sign * (src0 * src1 op src2);                            \
+    type result = sign * function(src0, src1, op src2);                    \
     if (isinf(src0)) result = src0;                                        \
     if (isinf(src1)) result = src1;                                        \
     if (isinf(src2)) result = src2;                                        \
@@ -4256,28 +4304,28 @@ EVALUATE(VFD) {
     if (first_lane_only) break;                                            \
   }
 
-#define VECTOR_FP_MULTIPLY_QFMS(op, sign)                          \
-  switch (m6) {                                                    \
-    case 2:                                                        \
-      DCHECK(CpuFeatures::IsSupported(VECTOR_ENHANCE_FACILITY_1)); \
-      if (m5 == 8) {                                               \
-        VECTOR_FP_MULTIPLY_QFMS_OPERATION(float, op, sign, true)   \
-      } else {                                                     \
-        DCHECK_EQ(m5, 0);                                          \
-        VECTOR_FP_MULTIPLY_QFMS_OPERATION(float, op, sign, false)  \
-      }                                                            \
-      break;                                                       \
-    case 3:                                                        \
-      if (m5 == 8) {                                               \
-        VECTOR_FP_MULTIPLY_QFMS_OPERATION(double, op, sign, true)  \
-      } else {                                                     \
-        DCHECK_EQ(m5, 0);                                          \
-        VECTOR_FP_MULTIPLY_QFMS_OPERATION(double, op, sign, false) \
-      }                                                            \
-      break;                                                       \
-    default:                                                       \
-      UNREACHABLE();                                               \
-      break;                                                       \
+#define VECTOR_FP_MULTIPLY_QFMS(op, sign)                               \
+  switch (m6) {                                                         \
+    case 2:                                                             \
+      DCHECK(CpuFeatures::IsSupported(VECTOR_ENHANCE_FACILITY_1));      \
+      if (m5 == 8) {                                                    \
+        VECTOR_FP_MULTIPLY_QFMS_OPERATION(float, op, sign, true, fmaf)  \
+      } else {                                                          \
+        DCHECK_EQ(m5, 0);                                               \
+        VECTOR_FP_MULTIPLY_QFMS_OPERATION(float, op, sign, false, fmaf) \
+      }                                                                 \
+      break;                                                            \
+    case 3:                                                             \
+      if (m5 == 8) {                                                    \
+        VECTOR_FP_MULTIPLY_QFMS_OPERATION(double, op, sign, true, fma)  \
+      } else {                                                          \
+        DCHECK_EQ(m5, 0);                                               \
+        VECTOR_FP_MULTIPLY_QFMS_OPERATION(double, op, sign, false, fma) \
+      }                                                                 \
+      break;                                                            \
+    default:                                                            \
+      UNREACHABLE();                                                    \
+      break;                                                            \
   }
 
 EVALUATE(VFMA) {
@@ -4585,14 +4633,14 @@ EVALUATE(VFI) {
       DCHECK(CpuFeatures::IsSupported(VECTOR_ENHANCE_FACILITY_1));
       for (int i = 0; i < 4; i++) {
         float value = get_simd_register_by_lane<float>(r2, i);
-        float n = ComputeRounding<float>(value, m5);
+        float n = std::isnan(value) ? NAN : ComputeRounding<float>(value, m5);
         set_simd_register_by_lane<float>(r1, i, n);
       }
       break;
     case 3:
       for (int i = 0; i < 2; i++) {
         double value = get_simd_register_by_lane<double>(r2, i);
-        double n = ComputeRounding<double>(value, m5);
+        double n = std::isnan(value) ? NAN : ComputeRounding<double>(value, m5);
         set_simd_register_by_lane<double>(r1, i, n);
       }
       break;
@@ -4967,12 +5015,6 @@ EVALUATE(BCR) {
   DECODE_RR_INSTRUCTION(r1, r2);
   if (TestConditionCode(Condition(r1))) {
     intptr_t r2_val = get_register(r2);
-#if (!V8_TARGET_ARCH_S390X && V8_HOST_ARCH_S390)
-    // On 31-bit, the top most bit may be 0 or 1, but is ignored by the
-    // hardware.  Cleanse the top bit before jumping to it, unless it's one
-    // of the special PCs
-    if (r2_val != bad_lr && r2_val != end_sim_pc) r2_val &= 0x7FFFFFFF;
-#endif
     set_pc(r2_val);
   }
 
@@ -5003,14 +5045,6 @@ EVALUATE(BASR) {
   intptr_t link_addr = get_pc() + 2;
   // If R2 is zero, the BASR does not branch.
   int64_t r2_val = (r2 == 0) ? link_addr : get_register(r2);
-#if (!V8_TARGET_ARCH_S390X && V8_HOST_ARCH_S390)
-  // On 31-bit, the top most bit may be 0 or 1, which can cause issues
-  // for stackwalker.  The top bit should either be cleanse before being
-  // pushed onto the stack, or during stack walking when dereferenced.
-  // For simulator, we'll take the worst case scenario and always tag
-  // the high bit, to flush out more problems.
-  link_addr |= 0x80000000;
-#endif
   set_register(r1, link_addr);
   set_pc(r2_val);
   return length;
@@ -5277,16 +5311,16 @@ EVALUATE(EX) {
   int32_t r1_val = get_low_register<int32_t>(r1);
 
   SixByteInstr the_instr = Instruction::InstructionBits(
-      reinterpret_cast<const byte*>(b2_val + x2_val + d2_val));
+      reinterpret_cast<const uint8_t*>(b2_val + x2_val + d2_val));
   int inst_length = Instruction::InstructionLength(
-      reinterpret_cast<const byte*>(b2_val + x2_val + d2_val));
+      reinterpret_cast<const uint8_t*>(b2_val + x2_val + d2_val));
 
   char new_instr_buf[8];
   char* addr = reinterpret_cast<char*>(&new_instr_buf[0]);
   the_instr |= static_cast<SixByteInstr>(r1_val & 0xFF)
                << (8 * inst_length - 16);
   Instruction::SetInstructionBits<SixByteInstr>(
-      reinterpret_cast<byte*>(addr), static_cast<SixByteInstr>(the_instr));
+      reinterpret_cast<uint8_t*>(addr), static_cast<SixByteInstr>(the_instr));
   ExecuteInstruction(reinterpret_cast<Instruction*>(addr), false);
   return length;
 }
@@ -5563,7 +5597,7 @@ EVALUATE(LD) {
   int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
   int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
   intptr_t addr = b2_val + x2_val + d2_val;
-  int64_t dbl_val = *bit_cast<int64_t*>(addr);
+  int64_t dbl_val = *reinterpret_cast<int64_t*>(addr);
   set_fpr(r1, dbl_val);
   return length;
 }
@@ -5602,7 +5636,7 @@ EVALUATE(LE) {
   int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
   int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
   intptr_t addr = b2_val + x2_val + d2_val;
-  float float_val = *bit_cast<float*>(addr);
+  float float_val = *reinterpret_cast<float*>(addr);
   set_fpr(r1, float_val);
   return length;
 }
@@ -6557,10 +6591,6 @@ EVALUATE(MSFI) {
 
 EVALUATE(SLGFI) {
   DCHECK_OPCODE(SLGFI);
-#ifndef V8_TARGET_ARCH_S390X
-  // should only be called on 64bit
-  DCHECK(false);
-#endif
   DECODE_RIL_A_INSTRUCTION(r1, i2);
   uint64_t r1_val = (uint64_t)(get_register(r1));
   uint64_t alu_out;
@@ -6613,10 +6643,6 @@ EVALUATE(AFI) {
 
 EVALUATE(ALGFI) {
   DCHECK_OPCODE(ALGFI);
-#ifndef V8_TARGET_ARCH_S390X
-  // should only be called on 64bit
-  DCHECK(false);
-#endif
   DECODE_RIL_A_INSTRUCTION(r1, i2);
   uint64_t r1_val = (uint64_t)(get_register(r1));
   uint64_t alu_out;
@@ -6702,9 +6728,12 @@ EVALUATE(STHRL) {
 }
 
 EVALUATE(LGRL) {
-  UNIMPLEMENTED();
-  USE(instr);
-  return 0;
+  DCHECK_OPCODE(LGRL);
+  DECODE_RIL_B_INSTRUCTION(r1, i2);
+  intptr_t offset = i2 * 2;
+  int64_t mem_val = ReadDW(get_pc() + offset);
+  set_register(r1, mem_val);
+  return length;
 }
 
 EVALUATE(STGRL) {
@@ -7207,7 +7236,12 @@ EVALUATE(AEBR) {
   DECODE_RRE_INSTRUCTION(r1, r2);
   float fr1_val = get_fpr<float>(r1);
   float fr2_val = get_fpr<float>(r2);
-  fr1_val += fr2_val;
+  fr1_val = FPProcessNaNBinop<float, Float32, uint32_t>(
+      fr1_val, fr2_val, [](float lhs, float rhs) {
+        if (std::isinf(lhs) && std::isinf(rhs))
+          return lhs != rhs ? std::numeric_limits<float>::quiet_NaN() : lhs;
+        return lhs + rhs;
+      });
   set_fpr(r1, fr1_val);
   SetS390ConditionCode<float>(fr1_val, 0);
 
@@ -7219,7 +7253,12 @@ EVALUATE(SEBR) {
   DECODE_RRE_INSTRUCTION(r1, r2);
   float fr1_val = get_fpr<float>(r1);
   float fr2_val = get_fpr<float>(r2);
-  fr1_val -= fr2_val;
+  fr1_val = FPProcessNaNBinop<float, Float32, uint32_t>(
+      fr1_val, fr2_val, [](float lhs, float rhs) {
+        if (std::isinf(lhs) && std::isinf(rhs) && (lhs == rhs))
+          return std::numeric_limits<float>::quiet_NaN();
+        return lhs - rhs;
+      });
   set_fpr(r1, fr1_val);
   SetS390ConditionCode<float>(fr1_val, 0);
 
@@ -7237,7 +7276,18 @@ EVALUATE(DEBR) {
   DECODE_RRE_INSTRUCTION(r1, r2);
   float fr1_val = get_fpr<float>(r1);
   float fr2_val = get_fpr<float>(r2);
-  fr1_val /= fr2_val;
+  fr1_val = FPProcessNaNBinop<float, Float32, uint32_t>(
+      fr1_val, fr2_val, [](float lhs, float rhs) {
+        if (std::isinf(lhs) && std::isinf(rhs))
+          return std::numeric_limits<float>::quiet_NaN();
+        if (rhs == 0) {
+          if (lhs == 0) return std::numeric_limits<float>::quiet_NaN();
+          bool is_negative = signbit(lhs) ^ signbit(rhs);
+          float inf = std::numeric_limits<float>::infinity();
+          return is_negative ? -inf : inf;
+        }
+        return lhs / rhs;
+      });
   set_fpr(r1, fr1_val);
   return length;
 }
@@ -7281,7 +7331,7 @@ EVALUATE(LTDBR) {
   DCHECK_OPCODE(LTDBR);
   DECODE_RRE_INSTRUCTION(r1, r2);
   int64_t r2_val = get_fpr<int64_t>(r2);
-  SetS390ConditionCode<double>(bit_cast<double, int64_t>(r2_val), 0.0);
+  SetS390ConditionCode<double>(base::bit_cast<double, int64_t>(r2_val), 0.0);
   set_fpr(r1, r2_val);
   return length;
 }
@@ -7336,7 +7386,14 @@ EVALUATE(MEEBR) {
   DECODE_RRE_INSTRUCTION(r1, r2);
   float fr1_val = get_fpr<float>(r1);
   float fr2_val = get_fpr<float>(r2);
-  fr1_val *= fr2_val;
+  fr1_val = FPProcessNaNBinop<float, Float32, uint32_t>(
+      fr1_val, fr2_val, [](float lhs, float rhs) {
+        if (lhs == 0 && std::isinf(rhs))
+          return std::numeric_limits<float>::quiet_NaN();
+        if (rhs == 0 && std::isinf(lhs))
+          return std::numeric_limits<float>::quiet_NaN();
+        return lhs * rhs;
+      });
   set_fpr(r1, fr1_val);
   return length;
 }
@@ -7669,7 +7726,9 @@ EVALUATE(FIEBRA) {
   DCHECK_EQ(m4, 0);
   USE(m4);
   float a = get_fpr<float>(r2);
-  float n = ComputeRounding<float>(a, m3);
+  float n = FPProcessNaNUnop<float, Float32, uint32_t>(
+      a, m3,
+      [](float input, int m3) { return ComputeRounding<float>(input, m3); });
   set_fpr(r1, n);
   return length;
 }
@@ -8260,11 +8319,7 @@ EVALUATE(LCGR) {
   int64_t r2_val = get_register(r2);
   int64_t result = 0;
   bool isOF = false;
-#ifdef V8_TARGET_ARCH_S390X
   isOF = __builtin_ssubl_overflow(0L, r2_val, &result);
-#else
-  isOF = __builtin_ssubll_overflow(0L, r2_val, &result);
-#endif
   set_register(r1, result);
   SetS390ConditionCode<int64_t>(result, 0);
   if (isOF) {
@@ -8288,9 +8343,16 @@ EVALUATE(SGR) {
 }
 
 EVALUATE(ALGR) {
-  UNIMPLEMENTED();
-  USE(instr);
-  return 0;
+  DCHECK_OPCODE(ALGR);
+  DECODE_RRE_INSTRUCTION(r1, r2);
+  // 64-bit Non-clobbering unsigned arithmetics
+  uint64_t r1_val = get_register(r1);
+  uint64_t r2_val = get_register(r2);
+  bool isOF = CheckOverflowForUIntAdd(r1_val, r2_val);
+  SetS390ConditionCode<uint64_t>(r1_val + r2_val, 0);
+  SetS390OverflowCode(isOF);
+  set_register(r1, r1_val + r2_val);
+  return length;
 }
 
 EVALUATE(SLGR) {
@@ -8339,7 +8401,7 @@ EVALUATE(LRVGR) {
   DCHECK_OPCODE(LRVGR);
   DECODE_RRE_INSTRUCTION(r1, r2);
   int64_t r2_val = get_register(r2);
-  int64_t r1_val = ByteReverse(r2_val);
+  int64_t r1_val = ByteReverse<int64_t>(r2_val);
 
   set_register(r1, r1_val);
   return length;
@@ -8475,7 +8537,7 @@ EVALUATE(LRVR) {
   DCHECK_OPCODE(LRVR);
   DECODE_RRE_INSTRUCTION(r1, r2);
   int32_t r2_val = get_low_register<int32_t>(r2);
-  int32_t r1_val = ByteReverse(r2_val);
+  int32_t r1_val = ByteReverse<int32_t>(r2_val);
 
   set_low_register(r1, r1_val);
   return length;
@@ -8692,6 +8754,20 @@ EVALUATE(FLOGR) {
   return length;
 }
 
+EVALUATE(CLZG) {
+  DCHECK_OPCODE(CLZG);
+  DECODE_RRE_INSTRUCTION(r1, r2);
+  set_register(r1, base::bits::CountLeadingZeros64(get_register(r2)));
+  return length;
+}
+
+EVALUATE(CTZG) {
+  DCHECK_OPCODE(CTZG);
+  DECODE_RRE_INSTRUCTION(r1, r2);
+  set_register(r1, base::bits::CountTrailingZeros64(get_register(r2)));
+  return length;
+}
+
 EVALUATE(LLGCR) {
   DCHECK_OPCODE(LLGCR);
   DECODE_RRE_INSTRUCTION(r1, r2);
@@ -8712,7 +8788,37 @@ EVALUATE(LLGHR) {
   return length;
 }
 
+EVALUATE(MG) {
+  UNIMPLEMENTED();
+  USE(instr);
+  return 0;
+}
+
+EVALUATE(MGRK) {
+  DCHECK_OPCODE(MGRK);
+  DECODE_RRF_A_INSTRUCTION(r1, r2, r3);
+  // 64-bit Non-clobbering arithmetics / bitwise ops.
+  int64_t r2_val = get_register(r2);
+  int64_t r3_val = get_register(r3);
+  set_register(r1, base::bits::SignedMulHigh64(r2_val, r3_val));
+  set_register(r1 + 1, r2_val * r3_val);
+  return length;
+}
+
 EVALUATE(MLGR) {
+  DCHECK_OPCODE(MLGR);
+  DECODE_RRE_INSTRUCTION(r1, r2);
+  // 64-bit Non-clobbering unsigned arithmetics
+  CHECK_EQ(r1 % 2, 0);
+  uint64_t r1_plus_1_val = get_register(r1 + 1);
+  uint64_t r2_val = get_register(r2);
+
+  set_register(r1, base::bits::UnsignedMulHigh64(r2_val, r1_plus_1_val));
+  set_register(r1 + 1, r2_val * r1_plus_1_val);
+  return length;
+}
+
+EVALUATE(MLG) {
   UNIMPLEMENTED();
   USE(instr);
   return 0;
@@ -8720,7 +8826,6 @@ EVALUATE(MLGR) {
 
 EVALUATE(DLGR) {
   DCHECK_OPCODE(DLGR);
-#ifdef V8_TARGET_ARCH_S390X
   DECODE_RRE_INSTRUCTION(r1, r2);
   uint64_t r1_val = get_register(r1);
   uint64_t r2_val = get_register(r2);
@@ -8732,11 +8837,6 @@ EVALUATE(DLGR) {
   set_register(r1, remainder);
   set_register(r1 + 1, quotient);
   return length;
-#else
-  // 32 bit arch doesn't support __int128 type
-  USE(instr);
-  UNREACHABLE();
-#endif
 }
 
 EVALUATE(ALCGR) {
@@ -9250,9 +9350,6 @@ EVALUATE(SG) {
 
 EVALUATE(ALG) {
   DCHECK_OPCODE(ALG);
-#ifndef V8_TARGET_ARCH_S390X
-  DCHECK(false);
-#endif
   DECODE_RXY_A_INSTRUCTION(r1, x2, b2, d2);
   uint64_t r1_val = get_register(r1);
   int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
@@ -9268,9 +9365,6 @@ EVALUATE(ALG) {
 
 EVALUATE(SLG) {
   DCHECK_OPCODE(SLG);
-#ifndef V8_TARGET_ARCH_S390X
-  DCHECK(false);
-#endif
   DECODE_RXY_A_INSTRUCTION(r1, x2, b2, d2);
   uint64_t r1_val = get_register(r1);
   int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
@@ -9438,7 +9532,7 @@ EVALUATE(LRVG) {
   int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
   intptr_t mem_addr = b2_val + x2_val + d2;
   int64_t mem_val = ReadW64(mem_addr);
-  set_register(r1, ByteReverse(mem_val));
+  set_register(r1, ByteReverse<int64_t>(mem_val));
   return length;
 }
 
@@ -9449,7 +9543,7 @@ EVALUATE(LRV) {
   int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
   intptr_t mem_addr = b2_val + x2_val + d2;
   int32_t mem_val = ReadW(mem_addr);
-  set_low_register(r1, ByteReverse(mem_val));
+  set_low_register(r1, ByteReverse<int32_t>(mem_val));
   return length;
 }
 
@@ -9461,7 +9555,7 @@ EVALUATE(LRVH) {
   int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
   intptr_t mem_addr = b2_val + x2_val + d2;
   int16_t mem_val = ReadH(mem_addr);
-  int32_t result = ByteReverse(mem_val) & 0x0000FFFF;
+  int32_t result = ByteReverse<int16_t>(mem_val) & 0x0000FFFF;
   result |= r1_val & 0xFFFF0000;
   set_low_register(r1, result);
   return length;
@@ -9546,7 +9640,7 @@ EVALUATE(STRV) {
   int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
   int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
   intptr_t mem_addr = b2_val + x2_val + d2;
-  WriteW(mem_addr, ByteReverse(r1_val));
+  WriteW(mem_addr, ByteReverse<int32_t>(r1_val));
   return length;
 }
 
@@ -9557,7 +9651,7 @@ EVALUATE(STRVG) {
   int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
   int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
   intptr_t mem_addr = b2_val + x2_val + d2;
-  WriteDW(mem_addr, ByteReverse(r1_val));
+  WriteDW(mem_addr, ByteReverse<int64_t>(r1_val));
   return length;
 }
 
@@ -9569,7 +9663,7 @@ EVALUATE(STRVH) {
   int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
   intptr_t mem_addr = b2_val + x2_val + d2;
   int16_t result = static_cast<int16_t>(r1_val >> 16);
-  WriteH(mem_addr, ByteReverse(result));
+  WriteH(mem_addr, ByteReverse<int16_t>(result));
   return length;
 }
 
@@ -9925,15 +10019,8 @@ EVALUATE(LGAT) {
   return 0;
 }
 
-EVALUATE(MLG) {
-  UNIMPLEMENTED();
-  USE(instr);
-  return 0;
-}
-
 EVALUATE(DLG) {
   DCHECK_OPCODE(DLG);
-#ifdef V8_TARGET_ARCH_S390X
   DECODE_RXY_A_INSTRUCTION(r1, x2, b2, d2);
   uint64_t r1_val = get_register(r1);
   int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
@@ -9947,11 +10034,6 @@ EVALUATE(DLG) {
   set_register(r1, remainder);
   set_register(r1 + 1, quotient);
   return length;
-#else
-  // 32 bit arch doesn't support __int128 type
-  USE(instr);
-  UNREACHABLE();
-#endif
 }
 
 EVALUATE(ALCG) {
@@ -11053,7 +11135,18 @@ EVALUATE(DEB) {
   intptr_t d2_val = d2;
   float r1_val = get_fpr<float>(r1);
   float fval = ReadFloat(b2_val + x2_val + d2_val);
-  r1_val /= fval;
+  r1_val = FPProcessNaNBinop<float, Float32, uint32_t>(
+      r1_val, fval, [](float lhs, float rhs) {
+        if (std::isinf(lhs) && std::isinf(rhs))
+          return std::numeric_limits<float>::quiet_NaN();
+        if (rhs == 0) {
+          if (lhs == 0) return std::numeric_limits<float>::quiet_NaN();
+          bool is_negative = signbit(lhs) ^ signbit(rhs);
+          float inf = std::numeric_limits<float>::infinity();
+          return is_negative ? -inf : inf;
+        }
+        return lhs / rhs;
+      });
   set_fpr(r1, r1_val);
   return length;
 }
@@ -11273,7 +11366,7 @@ EVALUATE(LEY) {
   int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
   int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
   intptr_t addr = x2_val + b2_val + d2;
-  float float_val = *bit_cast<float*>(addr);
+  float float_val = *reinterpret_cast<float*>(addr);
   set_fpr(r1, float_val);
   return length;
 }
@@ -11285,7 +11378,7 @@ EVALUATE(LDY) {
   int64_t x2_val = (x2 == 0) ? 0 : get_register(x2);
   int64_t b2_val = (b2 == 0) ? 0 : get_register(b2);
   intptr_t addr = x2_val + b2_val + d2;
-  uint64_t dbl_val = *bit_cast<uint64_t*>(addr);
+  uint64_t dbl_val = *reinterpret_cast<uint64_t*>(addr);
   set_fpr(r1, dbl_val);
   return length;
 }

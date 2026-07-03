@@ -1,36 +1,31 @@
 'use strict';
 require('../common');
-const ArrayStream = require('../common/arraystream');
 const fixtures = require('../common/fixtures');
 const assert = require('assert');
-const repl = require('repl');
+const { startNewREPLServer } = require('../common/repl');
 
 const stackRegExp = /(at .*REPL\d+:)[0-9]+:[0-9]+/g;
 
 function run({ command, expected, ...extraREPLOptions }, i) {
-  let accum = '';
-
-  const inputStream = new ArrayStream();
-  const outputStream = new ArrayStream();
-
-  outputStream.write = (data) => accum += data.replace('\r', '');
-
-  const r = repl.start({
-    prompt: '',
-    input: inputStream,
-    output: outputStream,
+  const { replServer, output } = startNewREPLServer({
     terminal: false,
     useColors: false,
     ...extraREPLOptions
   });
 
-  r.write(`${command}\n`);
-  console.log(i);
-  assert.strictEqual(
-    accum.replace(stackRegExp, '$1*:*'),
-    expected.replace(stackRegExp, '$1*:*')
-  );
-  r.close();
+  replServer.write(`${command}\n`);
+  if (typeof expected === 'string') {
+    assert.strictEqual(
+      output.accumulator.replace(stackRegExp, '$1*:*'),
+      expected.replace(stackRegExp, '$1*:*')
+    );
+  } else {
+    assert.match(
+      output.accumulator.replace(stackRegExp, '$1*:*'),
+      expected
+    );
+  }
+  replServer.close();
 }
 
 const tests = [
@@ -43,8 +38,7 @@ const tests = [
   },
   {
     command: 'let x y;',
-    expected: 'let x y;\n      ^\n\n' +
-              'Uncaught SyntaxError: Unexpected identifier\n'
+    expected: /^let x y;\n {6}\^\n\nUncaught SyntaxError: Unexpected identifier.*\n/
   },
   {
     command: 'throw new Error(\'Whoops!\')',

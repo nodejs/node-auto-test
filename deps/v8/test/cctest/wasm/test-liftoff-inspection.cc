@@ -3,9 +3,10 @@
 // found in the LICENSE file.
 
 #include "src/wasm/baseline/liftoff-compiler.h"
+#include "src/wasm/compilation-environment-inl.h"
 #include "src/wasm/wasm-debug.h"
 #include "test/cctest/cctest.h"
-#include "test/cctest/wasm/wasm-run-utils.h"
+#include "test/cctest/wasm/wasm-runner.h"
 #include "test/common/wasm/test-signatures.h"
 #include "test/common/wasm/wasm-macro-gen.h"
 
@@ -21,12 +22,12 @@ class LiftoffCompileEnvironment {
       : isolate_(CcTest::InitIsolateOnce()),
         handle_scope_(isolate_),
         zone_(isolate_->allocator(), ZONE_NAME),
-        wasm_runner_(nullptr, TestExecutionTier::kLiftoff, 0,
-                     kRuntimeExceptionSupport) {
+        wasm_runner_(nullptr, kWasmOrigin, TestExecutionTier::kLiftoff, 0,
+                     isolate_) {
     // Add a table of length 1, for indirect calls.
     wasm_runner_.builder().AddIndirectFunctionTable(nullptr, 1);
     // Set tiered down such that we generate debugging code.
-    wasm_runner_.builder().SetTieredDown();
+    wasm_runner_.builder().SetDebugState();
   }
 
   struct TestFunction {
@@ -41,15 +42,21 @@ class LiftoffCompileEnvironment {
     auto test_func = AddFunction(return_types, param_types, raw_function_bytes);
 
     // Now compile the function with Liftoff two times.
-    CompilationEnv env = wasm_runner_.builder().CreateCompilationEnv();
-    WasmFeatures detected1;
-    WasmFeatures detected2;
+    NativeModule* native_module =
+        wasm_runner_.builder().trusted_instance_data()->native_module();
+    CompilationEnv env = CompilationEnv::ForModule(native_module);
+    WasmDetectedFeatures detected1;
+    WasmDetectedFeatures detected2;
     WasmCompilationResult result1 = ExecuteLiftoffCompilation(
-        &env, test_func.body, test_func.code->index(), kNoDebugging,
-        LiftoffOptions{}.set_detected_features(&detected1));
+        &env, test_func.body,
+        LiftoffOptions{.func_index = test_func.code->index(),
+                       .counter_updates = native_module->counter_updates(),
+                       .detected_features = &detected1});
     WasmCompilationResult result2 = ExecuteLiftoffCompilation(
-        &env, test_func.body, test_func.code->index(), kNoDebugging,
-        LiftoffOptions{}.set_detected_features(&detected2));
+        &env, test_func.body,
+        LiftoffOptions{.func_index = test_func.code->index(),
+                       .counter_updates = native_module->counter_updates(),
+                       .detected_features = &detected2});
 
     CHECK(result1.succeeded());
     CHECK(result2.succeeded());
@@ -70,13 +77,17 @@ class LiftoffCompileEnvironment {
       std::vector<int> breakpoints = {}) {
     auto test_func = AddFunction(return_types, param_types, raw_function_bytes);
 
-    CompilationEnv env = wasm_runner_.builder().CreateCompilationEnv();
+    NativeModule* native_module =
+        wasm_runner_.builder().trusted_instance_data()->native_module();
+    CompilationEnv env = CompilationEnv::ForModule(native_module);
     std::unique_ptr<DebugSideTable> debug_side_table_via_compilation;
     auto result = ExecuteLiftoffCompilation(
-        &env, test_func.body, 0, kForDebugging,
-        LiftoffOptions{}
-            .set_breakpoints(base::VectorOf(breakpoints))
-            .set_debug_sidetable(&debug_side_table_via_compilation));
+        &env, test_func.body,
+        LiftoffOptions{.func_index = 0,
+                       .for_debugging = kForDebugging,
+                       .counter_updates = native_module->counter_updates(),
+                       .breakpoints = base::VectorOf(breakpoints),
+                       .debug_sidetable = &debug_side_table_via_compilation});
     CHECK(result.succeeded());
 
     // If there are no breakpoint, then {ExecuteLiftoffCompilation} should
@@ -112,8 +123,8 @@ class LiftoffCompileEnvironment {
 
   FunctionSig* AddSig(std::initializer_list<ValueType> return_types,
                       std::initializer_list<ValueType> param_types) {
-    ValueType* storage =
-        zone_.NewArray<ValueType>(return_types.size() + param_types.size());
+    ValueType* storage = zone_.AllocateArray<ValueType>(return_types.size() +
+                                                        param_types.size());
     std::copy(return_types.begin(), return_types.end(), storage);
     std::copy(param_types.begin(), param_types.end(),
               storage + return_types.size());
@@ -129,7 +140,7 @@ class LiftoffCompileEnvironment {
     // Compile the function so we can get the WasmCode* which is later used to
     // generate the debug side table lazily.
     auto& func_compiler = wasm_runner_.NewFunction(sig, "f");
-    func_compiler.Build(function_bytes.begin(), function_bytes.end());
+    func_compiler.Build(base::VectorOf(function_bytes));
 
     WasmCode* code =
         wasm_runner_.builder().GetFunctionCode(func_compiler.function_index());
@@ -142,8 +153,10 @@ class LiftoffCompileEnvironment {
         native_module->wire_bytes().SubVector(function->code.offset(),
                                               function->code.end_offset());
 
+    bool is_shared =
+        native_module->module()->type(function->sig_index).is_shared;
     FunctionBody body{sig, 0, function_wire_bytes.begin(),
-                      function_wire_bytes.end()};
+                      function_wire_bytes.end(), is_shared};
     return {code, body};
   }
 
@@ -349,8 +362,9 @@ TEST(Liftoff_debug_side_table_indirect_call) {
   constexpr int kConst = 47;
   auto debug_side_table = env.GenerateDebugSideTable(
       {kWasmI32}, {kWasmI32},
-      {WASM_I32_ADD(WASM_CALL_INDIRECT(0, WASM_I32V_1(47), WASM_LOCAL_GET(0)),
-                    WASM_LOCAL_GET(0))});
+      {WASM_I32_ADD(
+          WASM_CALL_INDIRECT(0, WASM_I32V_1(kConst), WASM_LOCAL_GET(0)),
+          WASM_LOCAL_GET(0))});
   CheckDebugSideTable(
       {
           // function entry, local in register.
@@ -359,10 +373,13 @@ TEST(Liftoff_debug_side_table_indirect_call) {
           {1, {Stack(0, kWasmI32)}},
           // OOL stack check, local still spilled.
           {1, {}},
-          // OOL trap (invalid index), local still spilled, stack has {kConst}.
-          {2, {Constant(1, kWasmI32, kConst)}},
+          // OOL trap (invalid index), local still spilled, stack has {kConst,
+          // kStack}.
+          {3, {Constant(1, kWasmI32, kConst), Stack(2, kWasmI32)}},
+          // OOL trap (null func), stack unmodified.
+          {3, {}},
           // OOL trap (sig mismatch), stack unmodified.
-          {2, {}},
+          {3, {}},
       },
       debug_side_table.get());
 }
@@ -427,11 +444,10 @@ TEST(Liftoff_breakpoint_simple) {
 }
 
 TEST(Liftoff_debug_side_table_catch_all) {
-  EXPERIMENTAL_FLAG_SCOPE(eh);
   LiftoffCompileEnvironment env;
   TestSignatures sigs;
   int ex = env.builder()->AddException(sigs.v_v());
-  ValueType exception_type = ValueType::Ref(HeapType::kExtern, kNonNullable);
+  ValueType exception_type = kWasmAnyRef.AsNonNull();
   auto debug_side_table = env.GenerateDebugSideTable(
       {}, {kWasmI32},
       {WASM_TRY_CATCH_ALL_T(kWasmI32, WASM_STMTS(WASM_I32V(0), WASM_THROW(ex)),
@@ -444,19 +460,18 @@ TEST(Liftoff_debug_side_table_catch_all) {
       {
           // function entry.
           {1, {Register(0, kWasmI32)}},
+          // throw.
+          {2, {Stack(0, kWasmI32), Constant(1, kWasmI32, 0)}},
           // breakpoint.
-          {3,
-           {Stack(0, kWasmI32), Register(1, exception_type),
-            Constant(2, kWasmI32, 1)}},
+          {3, {Register(1, exception_type), Constant(2, kWasmI32, 1)}},
           {1, {}},
       },
       debug_side_table.get());
 }
 
 TEST(Regress1199526) {
-  EXPERIMENTAL_FLAG_SCOPE(eh);
   LiftoffCompileEnvironment env;
-  ValueType exception_type = ValueType::Ref(HeapType::kExtern, kNonNullable);
+  ValueType exception_type = kWasmAnyRef.AsNonNull();
   auto debug_side_table = env.GenerateDebugSideTable(
       {}, {},
       {kExprTry, kVoidCode, kExprCallFunction, 0, kExprCatchAll, kExprLoop,

@@ -10,22 +10,21 @@
 #include <cstring>
 #include <vector>
 
-#include "src/base/functional.h"
+#include "src/base/hashing.h"
 #include "src/base/logging.h"
 #include "src/base/platform/platform.h"
 #include "src/base/platform/wrappers.h"
-#include "src/base/strings.h"
+#include "src/utils/allocation.h"
+
+#ifdef V8_CC_MSVC
+#include <intrin.h>  // _AddressOfReturnAddress()
+#endif
 
 namespace v8 {
 namespace internal {
 
 std::ostream& operator<<(std::ostream& os, FeedbackSlot slot) {
   return os << "#" << slot.id_;
-}
-
-size_t hash_value(BytecodeOffset id) {
-  base::hash<int> h;
-  return h(id.id_);
 }
 
 std::ostream& operator<<(std::ostream& os, BytecodeOffset id) {
@@ -194,7 +193,7 @@ int WriteChars(const char* filename, const char* str, int size, bool verbose) {
   return written;
 }
 
-int WriteBytes(const char* filename, const byte* bytes, int size,
+int WriteBytes(const char* filename, const uint8_t* bytes, int size,
                bool verbose) {
   const char* str = reinterpret_cast<const char*>(bytes);
   return WriteChars(filename, str, size, verbose);
@@ -202,15 +201,14 @@ int WriteBytes(const char* filename, const byte* bytes, int size,
 
 // Returns false iff d is NaN, +0, or -0.
 bool DoubleToBoolean(double d) {
-  IeeeDoubleArchType u;
-  u.d = d;
-  if (u.bits.exp == 2047) {
+  IeeeDoubleArchType u{d};
+  if (u.exp() == 2047) {
     // Detect NaN for IEEE double precision floating point.
-    if ((u.bits.man_low | u.bits.man_high) != 0) return false;
+    if ((u.man_low() | u.man_high()) != 0) return false;
   }
-  if (u.bits.exp == 0) {
+  if (u.exp() == 0) {
     // Detect +0, and -0 for IEEE double precision floating point.
-    if ((u.bits.man_low | u.bits.man_high) == 0) return false;
+    if ((u.man_low() | u.man_high()) == 0) return false;
   }
   return true;
 }
@@ -233,14 +231,14 @@ uintptr_t GetCurrentStackPosition() {
 //   "~"      none; the tilde is not an identifier
 bool PassesFilter(base::Vector<const char> name,
                   base::Vector<const char> filter) {
-  if (filter.size() == 0) return name.size() == 0;
+  if (filter.empty()) return name.empty();
   auto filter_it = filter.begin();
   bool positive_filter = true;
   if (*filter_it == '-') {
     ++filter_it;
     positive_filter = false;
   }
-  if (filter_it == filter.end()) return name.size() != 0;
+  if (filter_it == filter.end()) return !name.empty();
   if (*filter_it == '*') return positive_filter;
   if (*filter_it == '~') return !positive_filter;
 

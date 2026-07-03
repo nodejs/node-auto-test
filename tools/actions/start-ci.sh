@@ -10,17 +10,20 @@ for pr in "$@"; do
 
   ci_started=yes
   rm -f output;
-  ncu-ci run "$pr" >output 2>&1 || ci_started=no
+  ncu-ci run --check-for-duplicates "$pr" >output 2>&1 || ci_started=no
   cat output
 
   if [ "$ci_started" = "no" ]; then
     # Do we need to reset?
     gh pr edit "$pr" --add-label "$REQUEST_CI_FAILED_LABEL"
 
-    jq -n --arg content "<details><summary>Couldn't start CI</summary><pre>$(cat output)</pre></details>" > output.json
+    # shellcheck disable=SC2154
+    cqurl="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+    body="<details><summary>Failed to start CI</summary><pre>$(cat output)</pre><a href='$cqurl'>$cqurl</a></details>"
+    echo "$body"
 
-    gh pr comment "$pr" --body-file output.json
+    gh pr comment "$pr" --body "$body"
 
-    rm output.json;
+    rm output
   fi
 done;

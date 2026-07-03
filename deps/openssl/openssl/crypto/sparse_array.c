@@ -1,5 +1,5 @@
 /*
- * Copyright 2019-2021 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2019-2024 The OpenSSL Project Authors. All Rights Reserved.
  * Copyright (c) 2019, Oracle and/or its affiliates.  All rights reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
@@ -19,26 +19,21 @@
  * depth of the tree but potentially wastes more memory.  That is, this is a
  * direct space versus time tradeoff.
  *
- * The large memory model uses twelve bits which means that the are 4096
- * pointers in each tree node.  This is more than sufficient to hold the
- * largest defined NID (as of Feb 2019).  This means that using a NID to
- * index a sparse array becomes a constant time single array look up.
- *
- * The small memory model uses four bits which means the tree nodes contain
- * sixteen pointers.  This reduces the amount of unused space significantly
- * at a cost in time.
+ * The default is to use four bits which means that there are 16
+ * pointers in each tree node.
  *
  * The library builder is also permitted to define other sizes in the closed
- * interval [2, sizeof(ossl_uintmax_t) * 8].
+ * interval [2, sizeof(ossl_uintmax_t) * 8].  Space use generally scales
+ * exponentially with the block size, although the implementation only
+ * creates enough blocks to support the largest used index.  The depth is:
+ *      ceil(log_2(largest index) / 2^{block size})
+ * E.g. with a block size of 4, and a largest index of 1000, the depth
+ * will be three.
  */
 #ifndef OPENSSL_SA_BLOCK_BITS
-# ifdef OPENSSL_SMALL_FOOTPRINT
-#  define OPENSSL_SA_BLOCK_BITS           4
-# else
-#  define OPENSSL_SA_BLOCK_BITS           12
-# endif
+#define OPENSSL_SA_BLOCK_BITS 4
 #elif OPENSSL_SA_BLOCK_BITS < 2 || OPENSSL_SA_BLOCK_BITS > (BN_BITS2 - 1)
-# error OPENSSL_SA_BLOCK_BITS is out of range
+#error OPENSSL_SA_BLOCK_BITS is out of range
 #endif
 
 /*
@@ -46,12 +41,12 @@
  *    the number of pointers in a tree node;
  *    a bit mask to quickly extract an index and
  *    the maximum depth of the tree structure.
-  */
-#define SA_BLOCK_MAX            (1 << OPENSSL_SA_BLOCK_BITS)
-#define SA_BLOCK_MASK           (SA_BLOCK_MAX - 1)
-#define SA_BLOCK_MAX_LEVELS     (((int)sizeof(ossl_uintmax_t) * 8 \
-                                  + OPENSSL_SA_BLOCK_BITS - 1) \
-                                 / OPENSSL_SA_BLOCK_BITS)
+ */
+#define SA_BLOCK_MAX (1 << OPENSSL_SA_BLOCK_BITS)
+#define SA_BLOCK_MASK (SA_BLOCK_MAX - 1)
+#define SA_BLOCK_MAX_LEVELS (((int)sizeof(ossl_uintmax_t) * 8 \
+                                 + OPENSSL_SA_BLOCK_BITS - 1) \
+    / OPENSSL_SA_BLOCK_BITS)
 
 struct sparse_array_st {
     int levels;
@@ -68,7 +63,7 @@ OPENSSL_SA *ossl_sa_new(void)
 }
 
 static void sa_doall(const OPENSSL_SA *sa, void (*node)(void **),
-                     void (*leaf)(ossl_uintmax_t, void *, void *), void *arg)
+    void (*leaf)(ossl_uintmax_t, void *, void *), void *arg)
 {
     int i[SA_BLOCK_MAX_LEVELS];
     void *nodes[SA_BLOCK_MAX_LEVELS];
@@ -79,7 +74,7 @@ static void sa_doall(const OPENSSL_SA *sa, void (*node)(void **),
     nodes[0] = sa->nodes;
     while (l >= 0) {
         const int n = i[l];
-        void ** const p = nodes[l];
+        void **const p = nodes[l];
 
         if (n >= SA_BLOCK_MAX) {
             if (p != NULL && node != NULL)
@@ -114,8 +109,10 @@ static void sa_free_leaf(ossl_uintmax_t n, void *p, void *arg)
 
 void ossl_sa_free(OPENSSL_SA *sa)
 {
-    sa_doall(sa, &sa_free_node, NULL, NULL);
-    OPENSSL_free(sa);
+    if (sa != NULL) {
+        sa_doall(sa, &sa_free_node, NULL, NULL);
+        OPENSSL_free(sa);
+    }
 }
 
 void ossl_sa_free_leaves(OPENSSL_SA *sa)
@@ -144,8 +141,8 @@ void ossl_sa_doall(const OPENSSL_SA *sa, void (*leaf)(ossl_uintmax_t, void *))
 }
 
 void ossl_sa_doall_arg(const OPENSSL_SA *sa,
-                          void (*leaf)(ossl_uintmax_t, void *, void *),
-                          void *arg)
+    void (*leaf)(ossl_uintmax_t, void *, void *),
+    void *arg)
 {
     if (sa != NULL)
         sa_doall(sa, NULL, leaf, arg);
@@ -168,7 +165,7 @@ void *ossl_sa_get(const OPENSSL_SA *sa, ossl_uintmax_t n)
         p = sa->nodes;
         for (level = sa->levels - 1; p != NULL && level > 0; level--)
             p = (void **)p[(n >> (OPENSSL_SA_BLOCK_BITS * level))
-                           & SA_BLOCK_MASK];
+                & SA_BLOCK_MASK];
         r = p == NULL ? NULL : p[n & SA_BLOCK_MASK];
     }
     return r;
@@ -192,7 +189,7 @@ int ossl_sa_set(OPENSSL_SA *sa, ossl_uintmax_t posn, void *val)
         if ((n >>= OPENSSL_SA_BLOCK_BITS) == 0)
             break;
 
-    for (;sa->levels < level; sa->levels++) {
+    for (; sa->levels < level; sa->levels++) {
         p = alloc_node();
         if (p == NULL)
             return 0;

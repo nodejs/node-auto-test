@@ -20,7 +20,7 @@
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 'use strict';
-require('../common');
+const common = require('../common');
 const assert = require('assert');
 const http = require('http');
 const net = require('net');
@@ -50,9 +50,13 @@ const getCountdownIndex = () => SERVER_RESPONSES.length - countdown.remaining;
 
 const server = net.createServer(function(socket) {
   socket.write(SERVER_RESPONSES[getCountdownIndex()]);
-}).listen(0, function() {
+
+  if (SHOULD_KEEP_ALIVE[getCountdownIndex()]) {
+    socket.end();
+  }
+}).listen(0, common.mustCall(() => {
   function makeRequest() {
-    const req = http.get({ port: server.address().port }, function(res) {
+    const req = http.get({ port: server.address().port }, common.mustCall((res) => {
       assert.strictEqual(
         req.shouldKeepAlive, SHOULD_KEEP_ALIVE[getCountdownIndex()],
         `${SERVER_RESPONSES[getCountdownIndex()]} should ${
@@ -62,7 +66,7 @@ const server = net.createServer(function(socket) {
         makeRequest();
       }
       res.resume();
-    });
+    }));
   }
   makeRequest();
-});
+}));

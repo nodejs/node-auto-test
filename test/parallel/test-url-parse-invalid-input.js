@@ -37,6 +37,10 @@ assert.throws(() => { url.parse('http://%E0%A4%A@fail'); },
                 return e.code === undefined;
               });
 
+assert.throws(() => { url.parse('http://[127.0.0.1\x00c8763]:8000/'); },
+              { code: 'ERR_INVALID_URL', input: 'http://[127.0.0.1\x00c8763]:8000/' }
+);
+
 if (common.hasIntl) {
   // An array of Unicode code points whose Unicode NFKD contains a "bad
   // character".
@@ -69,4 +73,23 @@ if (common.hasIntl) {
   assert.throws(() => { url.parse('http://\u00AD/bad.com/'); },
                 (e) => e.code === 'ERR_INVALID_URL',
                 'parsing http://\u00AD/bad.com/');
+}
+
+{
+  const badURLs = [
+    'https://evil.com:.example.com',
+    'git+ssh://git@github.com:npm/npm',
+  ];
+  badURLs.forEach((badURL) => {
+    common.spawnPromisified(process.execPath, ['-e', `url.parse(${JSON.stringify(badURL)})`])
+      .then(common.mustCall(({ code, stdout, stderr }) => {
+        assert.strictEqual(code, 1);
+      }));
+  });
+
+  badURLs.forEach((badURL) => {
+    assert.throws(() => url.parse(badURL), {
+      code: 'ERR_INVALID_ARG_VALUE',
+    });
+  });
 }

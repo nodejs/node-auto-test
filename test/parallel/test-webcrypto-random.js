@@ -7,22 +7,23 @@ if (!common.hasCrypto)
 
 const { Buffer } = require('buffer');
 const assert = require('assert');
-const { getRandomValues } = require('crypto').webcrypto;
+const { crypto } = globalThis;
 
 [
   undefined, null, '', 1, {}, [],
   new Float32Array(1),
   new Float64Array(1),
+  new DataView(new ArrayBuffer(1)),
 ].forEach((i) => {
   assert.throws(
-    () => getRandomValues(i),
+    () => crypto.getRandomValues(i),
     { name: 'TypeMismatchError', code: 17 },
   );
 });
 
 {
   const buf = new Uint8Array(0);
-  getRandomValues(buf);
+  crypto.getRandomValues(buf);
 }
 
 const intTypedConstructors = [
@@ -32,6 +33,7 @@ const intTypedConstructors = [
   Uint8Array,
   Uint16Array,
   Uint32Array,
+  Uint8ClampedArray,
   BigInt64Array,
   BigUint64Array,
 ];
@@ -39,16 +41,16 @@ const intTypedConstructors = [
 for (const ctor of intTypedConstructors) {
   const buf = new ctor(10);
   const before = Buffer.from(buf.buffer).toString('hex');
-  getRandomValues(buf);
+  crypto.getRandomValues(buf);
   const after = Buffer.from(buf.buffer).toString('hex');
   assert.notStrictEqual(before, after);
 }
 
 {
-  const buf = new Uint16Array(10);
-  const before = Buffer.from(buf).toString('hex');
-  getRandomValues(new DataView(buf.buffer));
-  const after = Buffer.from(buf).toString('hex');
+  const buf = Buffer.alloc(10);
+  const before = buf.toString('hex');
+  crypto.getRandomValues(buf);
+  const after = buf.toString('hex');
   assert.notStrictEqual(before, after);
 }
 
@@ -61,8 +63,22 @@ for (const ctor of intTypedConstructors) {
   }
 
   if (kData !== undefined) {
-    assert.throws(() => getRandomValues(kData), {
-      code: 22
-    });
+    assert.throws(
+      () => crypto.getRandomValues(kData),
+      (err) => {
+        assert.strictEqual(err.name, 'QuotaExceededError');
+        assert.strictEqual(err.code, 22);
+        assert(err instanceof DOMException);
+        assert(err instanceof QuotaExceededError);
+        assert.strictEqual(err.quota, null);
+        assert.strictEqual(err.requested, null);
+        return true;
+      },
+    );
   }
+}
+
+{
+  const typedArray = new Uint8Array(32);
+  assert.strictEqual(crypto.getRandomValues(typedArray), typedArray);
 }

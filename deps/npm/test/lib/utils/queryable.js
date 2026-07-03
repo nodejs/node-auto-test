@@ -1,4 +1,4 @@
-const { inspect } = require('util')
+const { inspect } = require('node:util')
 const t = require('tap')
 const Queryable = require('../../../lib/utils/queryable.js')
 
@@ -829,7 +829,7 @@ t.test('set arrays', async t => {
   t.throws(
     () => qqqqq.set('lorem[]', 4),
     { code: 'ENOAPPEND' },
-    'should throw error if using empty square bracket in an non-array item'
+    'should throw error if using empty square bracket in a non-array item'
   )
   qqqqq.set('lorem[0]', 3)
   t.strictSame(
@@ -960,6 +960,45 @@ t.test('bracket lovers', async t => {
       '[iLoveBrackets]': 'seriously?',
       '[0]': '-.-',
     },
-    'any top-level item can not be parsed with square bracket notation'
+    'any top-level item cannot be parsed with square bracket notation'
+  )
+})
+
+t.test('forbidden keys', async t => {
+  // defensive cleanup in case any assertion below unexpectedly mutates the prototype
+  t.teardown(() => {
+    delete Object.prototype.scripts
+    delete Object.prototype.polluted
+  })
+
+  for (const key of ['__proto__', 'constructor', 'prototype']) {
+    t.throws(
+      () => new Queryable({ name: 'demo' }).set(`${key}.scripts.postinstall`, 'cmd'),
+      { code: 'EFORBIDDENKEY' },
+      `should throw EFORBIDDENKEY when '${key}' is used as a top-level key`
+    )
+  }
+
+  t.throws(
+    () => new Queryable({}).set('a.__proto__.scripts.postinstall', 'cmd'),
+    { code: 'EFORBIDDENKEY' },
+    'should throw when __proto__ appears nested in a dotted path'
+  )
+
+  t.throws(
+    () => new Queryable({}).set('foo[__proto__].scripts.postinstall', 'cmd'),
+    { code: 'EFORBIDDENKEY' },
+    'should throw when __proto__ is used via square bracket notation'
+  )
+
+  t.throws(
+    () => new Queryable({ scripts: { postinstall: 'x' } }).delete('__proto__.scripts'),
+    { code: 'EFORBIDDENKEY' },
+    'should block forbidden keys via delete() as well as set()'
+  )
+
+  t.notOk(
+    Object.prototype.scripts,
+    'Object.prototype must not be polluted by any forbidden-key attempt'
   )
 })

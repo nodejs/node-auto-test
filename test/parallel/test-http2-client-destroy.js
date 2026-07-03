@@ -9,7 +9,7 @@ const assert = require('assert');
 const h2 = require('http2');
 const { kSocket } = require('internal/http2/util');
 const Countdown = require('../common/countdown');
-const { getEventListeners } = require('events');
+const { listenerCount } = require('events');
 {
   const server = h2.createServer();
   server.listen(0, common.mustCall(() => {
@@ -22,7 +22,7 @@ const { getEventListeners } = require('events');
       server.close();
     });
 
-    destroyCallbacks.forEach((destroyCallback) => {
+    for (const destroyCallback of destroyCallbacks) {
       const client = h2.connect(`http://localhost:${server.address().port}`);
       client.on('connect', common.mustCall(() => {
         const socket = client[kSocket];
@@ -45,7 +45,7 @@ const { getEventListeners } = require('events');
 
         countdown.dec();
       }));
-    });
+    }
   }));
 }
 
@@ -81,20 +81,31 @@ const { getEventListeners } = require('events');
     assert.throws(() => client.ping(), sessionError);
     assert.throws(() => client.settings({}), sessionError);
     assert.throws(() => client.goaway(), sessionError);
-    assert.throws(() => client.request(), sessionError);
+
+    const pendingReq = client.request();
+    pendingReq.on('response', common.mustNotCall());
+    pendingReq.on('error', common.expectsError(sessionError));
+    pendingReq.on('close', common.mustCall());
+
+    client.on('close', common.mustCall(() => {
+      const postCloseReq = client.request();
+      postCloseReq.on('response', common.mustNotCall());
+      postCloseReq.on('error', common.expectsError(sessionError));
+      postCloseReq.on('close', common.mustCall());
+    }));
+
     client.close();  // Should be a non-op at this point
 
     // Wait for setImmediate call from destroy() to complete
     // so that state.destroyed is set to true
-    setImmediate(() => {
+    setImmediate(common.mustCall(() => {
       assert.throws(() => client.setNextStreamID(), sessionError);
       assert.throws(() => client.setLocalWindowSize(), sessionError);
       assert.throws(() => client.ping(), sessionError);
       assert.throws(() => client.settings({}), sessionError);
       assert.throws(() => client.goaway(), sessionError);
-      assert.throws(() => client.request(), sessionError);
       client.close();  // Should be a non-op at this point
-    });
+    }));
 
     req.resume();
     req.on('end', common.mustNotCall());
@@ -179,11 +190,11 @@ const { getEventListeners } = require('events');
     client.on('close', common.mustCall());
 
     const { signal } = controller;
-    assert.strictEqual(getEventListeners(signal, 'abort').length, 0);
+    assert.strictEqual(listenerCount(signal, 'abort'), 0);
 
     client.on('error', common.mustCall(() => {
       // After underlying stream dies, signal listener detached
-      assert.strictEqual(getEventListeners(signal, 'abort').length, 0);
+      assert.strictEqual(listenerCount(signal, 'abort'), 0);
     }));
 
     const req = client.request({}, { signal });
@@ -197,7 +208,7 @@ const { getEventListeners } = require('events');
     assert.strictEqual(req.aborted, false);
     assert.strictEqual(req.destroyed, false);
     // Signal listener attached
-    assert.strictEqual(getEventListeners(signal, 'abort').length, 1);
+    assert.strictEqual(listenerCount(signal, 'abort'), 1);
 
     controller.abort();
 
@@ -218,16 +229,16 @@ const { getEventListeners } = require('events');
     const { signal } = controller;
     controller.abort();
 
-    assert.strictEqual(getEventListeners(signal, 'abort').length, 0);
+    assert.strictEqual(listenerCount(signal, 'abort'), 0);
 
     client.on('error', common.mustCall(() => {
       // After underlying stream dies, signal listener detached
-      assert.strictEqual(getEventListeners(signal, 'abort').length, 0);
+      assert.strictEqual(listenerCount(signal, 'abort'), 0);
     }));
 
     const req = client.request({}, { signal });
     // Signal already aborted, so no event listener attached.
-    assert.strictEqual(getEventListeners(signal, 'abort').length, 0);
+    assert.strictEqual(listenerCount(signal, 'abort'), 0);
 
     assert.strictEqual(req.aborted, false);
     // Destroyed on same tick as request made
@@ -256,7 +267,7 @@ const { getEventListeners } = require('events');
         signal,
       });
       client.on('close', common.mustCall());
-      assert.strictEqual(getEventListeners(signal, 'abort').length, 1);
+      assert.strictEqual(listenerCount(signal, 'abort'), 1);
 
       client.on('error', common.mustCall(common.mustCall((err) => {
         assert.strictEqual(err.code, 'ABORT_ERR');
@@ -264,7 +275,7 @@ const { getEventListeners } = require('events');
       })));
 
       const req = client.request({}, {});
-      assert.strictEqual(getEventListeners(signal, 'abort').length, 1);
+      assert.strictEqual(listenerCount(signal, 'abort'), 1);
 
       req.on('error', common.mustCall((err) => {
         assert.strictEqual(err.code, 'ERR_HTTP2_STREAM_CANCEL');
@@ -277,11 +288,40 @@ const { getEventListeners } = require('events');
       assert.strictEqual(req.aborted, false);
       assert.strictEqual(req.destroyed, false);
       // Signal listener attached
-      assert.strictEqual(getEventListeners(signal, 'abort').length, 1);
+      assert.strictEqual(listenerCount(signal, 'abort'), 1);
 
       controller.abort();
     }));
   }
   testH2ConnectAbort(false);
   testH2ConnectAbort(true);
+}
+
+// Destroy ClientHttp2Stream with AbortSignal
+{
+  const server = h2.createServer();
+  const controller = new AbortController();
+
+  server.on('stream', common.mustCall((stream) => {
+    stream.on('error', common.mustNotCall());
+    stream.on('close', common.mustCall(() => {
+      assert.strictEqual(stream.rstCode, h2.constants.NGHTTP2_CANCEL);
+      server.close();
+    }));
+    controller.abort();
+  }));
+  server.listen(0, common.mustCall(() => {
+    const client = h2.connect(`http://localhost:${server.address().port}`);
+    client.on('close', common.mustCall());
+
+    const { signal } = controller;
+    const req = client.request({}, { signal });
+    assert.strictEqual(listenerCount(signal, 'abort'), 1);
+    req.on('error', common.mustCall((err) => {
+      assert.strictEqual(err.code, 'ABORT_ERR');
+      assert.strictEqual(err.name, 'AbortError');
+      client.close();
+    }));
+    req.on('close', common.mustCall());
+  }));
 }

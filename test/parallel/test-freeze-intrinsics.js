@@ -1,4 +1,4 @@
-// Flags: --frozen-intrinsics
+// Flags: --frozen-intrinsics --jitless
 'use strict';
 require('../common');
 const assert = require('assert');
@@ -36,4 +36,13 @@ assert.throws(
   assert.throws(() => { globalThis.globalThis = null; },
                 { name: 'TypeError' });
   assert.strictEqual(globalThis.globalThis, globalThis);
+}
+
+// Ensure that we cannot override console properties.
+{
+  const { log } = console;
+
+  assert.throws(() => { console.log = null; },
+                { name: 'TypeError' });
+  assert.strictEqual(console.log, log);
 }

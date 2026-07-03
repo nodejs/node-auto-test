@@ -27,8 +27,7 @@ std::vector<PropertyDetails> MakeDistinctDetails() {
             if (!configurable) {
               attrs |= PropertyAttributes::DONT_DELETE;
             }
-            PropertyAttributes attributes =
-                static_cast<PropertyAttributes>(attrs);
+            auto attributes = PropertyAttributesFromInt(attrs);
             PropertyDetails details(kind, attributes,
                                     PropertyCellType::kNoCell);
             details = details.CopyWithConstness(constness);
@@ -46,13 +45,13 @@ std::vector<PropertyDetails> MakeDistinctDetails() {
 // To enable more specific testing, we allow overriding the H1 and H2 hashes for
 // a key before adding it to the SwissNameDictionary. The necessary overriding
 // of the stored hash happens here. Symbols are compared by identity, we cache
-// the Symbol associcated with each std::string key. This means that using
+// the Symbol associated with each std::string key. This means that using
 // "my_key" twice in the same TestSequence will return the same Symbol
-// associcated with "my_key" both times. This also means that within a given
+// associated with "my_key" both times. This also means that within a given
 // TestSequence, we cannot use the same (std::string) key with different faked
 // hashes.
-Handle<Name> CreateKeyWithHash(Isolate* isolate, KeyCache& keys,
-                               const Key& key) {
+DirectHandle<Name> CreateKeyWithHash(Isolate* isolate, KeyCache& keys,
+                                     const Key& key) {
   Handle<Symbol> key_symbol;
   auto iter = keys.find(key.str);
 
@@ -64,7 +63,7 @@ Handle<Name> CreateKeyWithHash(Isolate* isolate, KeyCache& keys,
 
     // We use the description field to store the original string key for
     // debugging.
-    Handle<String> description =
+    DirectHandle<String> description =
         isolate->factory()->NewStringFromAsciiChecked(key.str.c_str());
     key_symbol->set_description(*description);
 
@@ -79,7 +78,7 @@ Handle<Name> CreateKeyWithHash(Isolate* isolate, KeyCache& keys,
 
         // We cannot override h1 with 0 unless we also override h2 with a
         // non-zero value. Otherwise, the overall hash may become 0 (which is
-        // forbidden) based on the (nondeterminstic) choice of h2.
+        // forbidden) based on the (nondeterministic) choice of h2.
         CHECK_IMPLIES(override_with == 0,
                       key.h2_override && key.h2_override.value().value != 0);
 
@@ -100,15 +99,9 @@ Handle<Name> CreateKeyWithHash(Isolate* isolate, KeyCache& keys,
         fake_hash |= swiss_table::H2(override_with);
       }
 
-      // Ensure that just doing a shift below is correct.
-      static_assert(Name::kNofHashBitFields == 2, "This test needs updating");
-      static_assert(Name::kHashNotComputedMask == 1,
-                    "This test needs updating");
-      static_assert(Name::kIsNotIntegerIndexMask == 2,
-                    "This test needs updating");
-
       // Prepare what to put into the hash field.
-      uint32_t hash_field = fake_hash << Name::kHashShift;
+      uint32_t hash_field =
+          Name::CreateHashFieldValue(fake_hash, Name::HashFieldType::kHash);
       CHECK_NE(hash_field, 0);
 
       key_symbol->set_raw_hash_field(hash_field);

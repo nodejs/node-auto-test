@@ -1,5 +1,5 @@
 /*
- * Copyright 1995-2020 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 1995-2022 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -11,14 +11,13 @@
 #include "internal/cryptlib.h"
 #include "bn_local.h"
 
-#define TABLE_SIZE      32
+#define TABLE_SIZE 32
 
 int BN_mod_exp2_mont(BIGNUM *rr, const BIGNUM *a1, const BIGNUM *p1,
-                     const BIGNUM *a2, const BIGNUM *p2, const BIGNUM *m,
-                     BN_CTX *ctx, BN_MONT_CTX *in_mont)
+    const BIGNUM *a2, const BIGNUM *p2, const BIGNUM *m,
+    BN_CTX *ctx, BN_MONT_CTX *in_mont)
 {
-    int i, j, bits, b, bits1, bits2, ret =
-        0, wpos1, wpos2, window1, window2, wvalue1, wvalue2;
+    int i, j, bits, b, bits1, bits2, ret = 0, wpos1, wpos2, window1, window2, wvalue1, wvalue2;
     int r_is_one = 1;
     BIGNUM *d, *r;
     const BIGNUM *a_mod_m;
@@ -32,7 +31,7 @@ int BN_mod_exp2_mont(BIGNUM *rr, const BIGNUM *a1, const BIGNUM *p1,
     bn_check_top(p2);
     bn_check_top(m);
 
-    if (!(m->d[0] & 1)) {
+    if (!BN_is_odd(m)) {
         ERR_raise(ERR_LIB_BN, BN_R_CALLED_WITH_EVEN_MODULUS);
         return 0;
     }
@@ -88,8 +87,7 @@ int BN_mod_exp2_mont(BIGNUM *rr, const BIGNUM *a1, const BIGNUM *p1,
 
         j = 1 << (window1 - 1);
         for (i = 1; i < j; i++) {
-            if (((val1[i] = BN_CTX_get(ctx)) == NULL) ||
-                !BN_mod_mul_montgomery(val1[i], val1[i - 1], d, mont, ctx))
+            if (((val1[i] = BN_CTX_get(ctx)) == NULL) || !BN_mod_mul_montgomery(val1[i], val1[i - 1], d, mont, ctx))
                 goto err;
         }
     }
@@ -116,20 +114,19 @@ int BN_mod_exp2_mont(BIGNUM *rr, const BIGNUM *a1, const BIGNUM *p1,
 
         j = 1 << (window2 - 1);
         for (i = 1; i < j; i++) {
-            if (((val2[i] = BN_CTX_get(ctx)) == NULL) ||
-                !BN_mod_mul_montgomery(val2[i], val2[i - 1], d, mont, ctx))
+            if (((val2[i] = BN_CTX_get(ctx)) == NULL) || !BN_mod_mul_montgomery(val2[i], val2[i - 1], d, mont, ctx))
                 goto err;
         }
     }
 
     /* Now compute the power product, using independent windows. */
     r_is_one = 1;
-    wvalue1 = 0;                /* The 'value' of the first window */
-    wvalue2 = 0;                /* The 'value' of the second window */
-    wpos1 = 0;                  /* If wvalue1 > 0, the bottom bit of the
-                                 * first window */
-    wpos2 = 0;                  /* If wvalue2 > 0, the bottom bit of the
-                                 * second window */
+    wvalue1 = 0; /* The 'value' of the first window */
+    wvalue2 = 0; /* The 'value' of the second window */
+    wpos1 = 0; /* If wvalue1 > 0, the bottom bit of the
+                * first window */
+    wpos2 = 0; /* If wvalue2 > 0, the bottom bit of the
+                * second window */
 
     if (!BN_to_montgomery(r, BN_value_one(), mont, ctx))
         goto err;
@@ -192,7 +189,7 @@ int BN_mod_exp2_mont(BIGNUM *rr, const BIGNUM *a1, const BIGNUM *p1,
     if (!BN_from_montgomery(rr, r, mont, ctx))
         goto err;
     ret = 1;
- err:
+err:
     if (in_mont == NULL)
         BN_MONT_CTX_free(mont);
     BN_CTX_end(ctx);

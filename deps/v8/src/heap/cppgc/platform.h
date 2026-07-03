@@ -7,24 +7,24 @@
 
 #include <string>
 
+#include "include/cppgc/platform.h"
 #include "include/cppgc/source-location.h"
 #include "src/base/macros.h"
 
-namespace cppgc {
-namespace internal {
+namespace cppgc::internal {
 
 class HeapBase;
 
 class V8_EXPORT_PRIVATE FatalOutOfMemoryHandler final {
  public:
-  using Callback = void(const std::string&, const SourceLocation&, HeapBase*);
+  using Callback = void(const std::string&, SourceLocation, HeapBase*);
 
   FatalOutOfMemoryHandler() = default;
   explicit FatalOutOfMemoryHandler(HeapBase* heap) : heap_(heap) {}
 
   [[noreturn]] void operator()(
       const std::string& reason = std::string(),
-      const SourceLocation& = SourceLocation::Current()) const;
+      SourceLocation = SourceLocation::Current()) const;
 
   void SetCustomHandler(Callback*);
 
@@ -37,7 +37,12 @@ class V8_EXPORT_PRIVATE FatalOutOfMemoryHandler final {
   Callback* custom_handler_ = nullptr;
 };
 
-}  // namespace internal
-}  // namespace cppgc
+// Gets the global OOM handler that is not bound to any specific Heap instance.
+FatalOutOfMemoryHandler& GetGlobalOOMHandler();
+
+// Gets the gobal PageAllocator that is not bound to any specific Heap instance.
+PageAllocator& GetGlobalPageAllocator();
+
+}  // namespace cppgc::internal
 
 #endif  // V8_HEAP_CPPGC_PLATFORM_H_

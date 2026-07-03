@@ -45,13 +45,13 @@ function define_tests() {
                             });
                         }, testName);
 
-                        // 0 length (OperationError)
+                        // 0 length
                         subsetTest(promise_test, function(test) {
                             return subtle.deriveBits(algorithm, baseKeys[derivedKeySize], 0)
                             .then(function(derivation) {
                                 assert_equals(derivation.byteLength, 0, "Derived correctly empty key");
                             }, function(err) {
-                                assert_equals(err.name, "OperationError", "deriveBits with 0 length correctly threw OperationError: " + err.message);
+                                assert_unreached("deriveBits failed with error " + err.name + ": " + err.message);
                             });
                         }, testName + " with 0 length");
 
@@ -138,16 +138,6 @@ function define_tests() {
                                 assert_equals(err.name, "TypeError", "deriveBits missing info correctly threw OperationError: " + err.message);
                             });
                         }, testName + " with missing info");
-
-                        // length null (OperationError)
-                        subsetTest(promise_test, function(test) {
-                            return subtle.deriveBits(algorithm, baseKeys[derivedKeySize], null)
-                            .then(function(derivation) {
-                                assert_unreached("null length should have thrown an OperationError");
-                            }, function(err) {
-                                assert_equals(err.name, "OperationError", "deriveBits with null length correctly threw OperationError: " + err.message);
-                            });
-                        }, testName + " with null length");
 
                         // length not multiple of 8 (OperationError)
                         subsetTest(promise_test, function(test) {
@@ -283,23 +273,6 @@ function define_tests() {
         return Promise.all(promises).then(function() {
             return {baseKeys: baseKeys, noBits: noBits, noKey: noKey, wrongKey: wrongKey};
         });
-    }
-
-    function equalBuffers(a, b) {
-        if (a.byteLength !== b.byteLength) {
-            return false;
-        }
-
-        var aBytes = new Uint8Array(a);
-        var bBytes = new Uint8Array(b);
-
-        for (var i=0; i<a.byteLength; i++) {
-            if (aBytes[i] !== bBytes[i]) {
-                return false;
-            }
-        }
-
-        return true;
     }
 
 }

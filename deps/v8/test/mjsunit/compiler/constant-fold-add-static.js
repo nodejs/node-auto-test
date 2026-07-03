@@ -3,6 +3,7 @@
 // found in the LICENSE file.
 
 // Flags: --allow-natives-syntax --no-assert-types
+// Flags: --turboshaft-enable-debug-features
 
 // Check that constant-folding of arithmetic results in identical nodes.
 (function() {
@@ -12,6 +13,6 @@ function foo(x) {
 %PrepareFunctionForOptimization(foo);
 foo(121);
 foo(122);
-%OptimizeFunctionForTopTier(foo);
+%OptimizeFunctionOnNextCall(foo);
 foo(123);
 })();

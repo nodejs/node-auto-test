@@ -5,16 +5,17 @@ const common = require('../common');
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
+const { hasOpenSSL3 } = require('../common/crypto');
 
 const rootDir = path.resolve(__dirname, '..', '..');
 const cliMd = path.join(rootDir, 'doc', 'api', 'cli.md');
 const cliText = fs.readFileSync(cliMd, { encoding: 'utf8' });
 
 const parseSection = (text, startMarker, endMarker) => {
-  const regExp = new RegExp(`${startMarker}\r?\n([^]*)\r?\n${endMarker}`);
+  const regExp = new RegExp(`${RegExp.escape(startMarker)}\r?\n([^]*)\r?\n${RegExp.escape(endMarker)}`);
   const match = text.match(regExp);
-  assert(match,
-         `Unable to locate text between '${startMarker}' and '${endMarker}'.`);
+  if (!match)
+    assert.fail(`Unable to locate text between '${startMarker}' and '${endMarker}'.`);
   return match[1]
          .split(/\r?\n/)
          .filter((val) => val.trim() !== '');
@@ -43,9 +44,17 @@ for (const line of [...nodeOptionsLines, ...v8OptionsLines]) {
   }
 }
 
-if (!common.hasOpenSSL3) {
+if (!hasOpenSSL3) {
   documented.delete('--openssl-legacy-provider');
+  documented.delete('--openssl-shared-config');
 }
+
+if (!common.hasFFI) {
+  documented.delete('--allow-ffi');
+  documented.delete('--experimental-ffi');
+}
+
+const isV8Sandboxed = process.config.variables.v8_enable_sandbox;
 
 // Filter out options that are conditionally present.
 const conditionalOpts = [
@@ -54,10 +63,12 @@ const conditionalOpts = [
     filter: (opt) => {
       return [
         '--openssl-config',
-        common.hasOpenSSL3 ? '--openssl-legacy-provider' : '',
+        hasOpenSSL3 ? '--openssl-legacy-provider' : '',
+        hasOpenSSL3 ? '--openssl-shared-config' : '',
         '--tls-cipher-list',
         '--use-bundled-ca',
         '--use-openssl-ca',
+        common.isMacOS ? '--use-system-ca' : '',
         '--secure-heap',
         '--secure-heap-min',
         '--enable-fips',
@@ -70,6 +81,9 @@ const conditionalOpts = [
   }, {
     include: process.features.inspector,
     filter: (opt) => opt.startsWith('--inspect') || opt === '--debug-port'
+  }, {
+    include: !isV8Sandboxed,
+    filter: (opt) => ['--secure-heap', '--secure-heap-min'].includes(opt)
   },
 ];
 documented.forEach((opt) => {
@@ -84,6 +98,22 @@ const difference = (setA, setB) => {
   return new Set([...setA].filter((x) => !setB.has(x)));
 };
 
+// Remove heap prof options if the inspector is not enabled.
+// NOTE: this is for ubuntuXXXX_sharedlibs_withoutssl_x64, no SSL, no inspector
+// Refs: https://github.com/nodejs/node/pull/54259#issuecomment-2308256647
+if (!process.features.inspector) {
+  [
+    '--cpu-prof-dir',
+    '--cpu-prof-interval',
+    '--cpu-prof-name',
+    '--cpu-prof',
+    '--heap-prof-dir',
+    '--heap-prof-interval',
+    '--heap-prof-name',
+    '--heap-prof',
+  ].forEach((opt) => documented.delete(opt));
+}
+
 const overdocumented = difference(documented,
                                   process.allowedNodeEnvironmentFlags);
 assert.strictEqual(overdocumented.size, 0,
@@ -97,6 +127,10 @@ const undocumented = difference(process.allowedNodeEnvironmentFlags,
 assert(undocumented.delete('--debug-arraybuffer-allocations'));
 assert(undocumented.delete('--no-debug-arraybuffer-allocations'));
 assert(undocumented.delete('--es-module-specifier-resolution'));
+assert(undocumented.delete('--experimental-fetch'));
+assert(undocumented.delete('--experimental-wasm-modules'));
+assert(undocumented.delete('--experimental-global-customevent'));
+assert(undocumented.delete('--experimental-global-webcrypto'));
 assert(undocumented.delete('--experimental-report'));
 assert(undocumented.delete('--experimental-worker'));
 assert(undocumented.delete('--node-snapshot'));
@@ -104,6 +138,8 @@ assert(undocumented.delete('--no-node-snapshot'));
 assert(undocumented.delete('--loader'));
 assert(undocumented.delete('--verify-base-objects'));
 assert(undocumented.delete('--no-verify-base-objects'));
+assert(undocumented.delete('--trace-promises'));
+assert(undocumented.delete('--no-trace-promises'));
 
 // Remove negated versions of the flags.
 for (const flag of undocumented) {

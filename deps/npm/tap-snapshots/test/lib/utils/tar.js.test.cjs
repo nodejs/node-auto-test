@@ -9,28 +9,78 @@ exports[`test/lib/utils/tar.js TAP should log tarball contents > must match snap
 
 
 package: my-cool-pkg@1.0.0
-=== Tarball Contents ===
+Tarball Contents
 
-4B  cat         
-4B  chai        
-4B  dog         
-97B package.json
-=== Bundled Dependencies ===
+4B cat
+4B chai
+4B dog
+114B package.json
+Bundled Dependencies
 
 bundle-dep
-=== Tarball Details ===
+Tarball Details
 
-name:          my-cool-pkg                             
-version:       1.0.0                                   
-filename:      my-cool-pkg-1.0.0.tgz                   
-package size:  274 B                                   
-unpacked size: 113 B                                   
-shasum:        cd0dfccff77dff944eb761854bc0b0497d974f67
-integrity:     sha512-qeFip1jH05vkW[...]zHSdMdPpYogMA==
-bundled deps:  1                                       
-bundled files: 0                                       
-own files:     5                                       
-total files:   5                                       
+name: my-cool-pkg
+
+version: 1.0.0
+
+filename: my-cool-pkg-1.0.0.tgz
+
+package size: {size}
+
+unpacked size: 126 B
+
+shasum: {sha}
+
+integrity: {integrity}
+
+bundled deps: 1
+
+bundled files: 0
+
+own files: 5
+
+total files: 5
+
+
+`
+
+exports[`test/lib/utils/tar.js TAP should log tarball contents of a scoped package > must match snapshot 1`] = `
+
+
+package: @myscope/my-cool-pkg@1.0.0
+Tarball Contents
+
+4B cat
+4B chai
+4B dog
+123B package.json
+Bundled Dependencies
+
+bundle-dep
+Tarball Details
+
+name: @myscope/my-cool-pkg
+
+version: 1.0.0
+
+filename: myscope-my-cool-pkg-1.0.0.tgz
+
+package size: {size}
+
+unpacked size: 135 B
+
+shasum: {sha}
+
+integrity: {integrity}
+
+bundled deps: 1
+
+bundled files: 0
+
+own files: 5
+
+total files: 5
 
 
 `

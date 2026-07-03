@@ -25,3 +25,28 @@ const net = require('net');
     });
   });
 }
+
+{
+  assert.throws(() => {
+    net.createConnection({
+      host: ['192.168.0.1'],
+      port: 8080,
+    });
+  }, {
+    code: 'ERR_INVALID_ARG_TYPE',
+    name: 'TypeError',
+  });
+}
+
+{
+  assert.throws(() => {
+    net.createConnection({
+      host: '127.0.0.1\u0000.allowed.example',
+      port: 8080,
+    });
+  }, {
+    code: 'ERR_INVALID_ARG_VALUE',
+    name: 'TypeError',
+    message: /The property 'options\.host' must be a string without null bytes\./,
+  });
+}

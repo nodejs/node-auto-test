@@ -2,21 +2,18 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
+#ifndef V8_WASM_CODE_SPACE_ACCESS_H_
+#define V8_WASM_CODE_SPACE_ACCESS_H_
+
 #if !V8_ENABLE_WEBASSEMBLY
 #error This header should only be included if WebAssembly is enabled.
 #endif  // !V8_ENABLE_WEBASSEMBLY
 
-#ifndef V8_WASM_CODE_SPACE_ACCESS_H_
-#define V8_WASM_CODE_SPACE_ACCESS_H_
-
 #include "src/base/build_config.h"
 #include "src/base/macros.h"
-#include "src/common/globals.h"
+#include "src/common/code-memory-access.h"
 
-namespace v8 {
-namespace internal {
-
-namespace wasm {
+namespace v8::internal::wasm {
 
 class NativeModule;
 
@@ -45,8 +42,7 @@ class NativeModule;
 // permissions for all code pages.
 class V8_NODISCARD CodeSpaceWriteScope final {
  public:
-  explicit V8_EXPORT_PRIVATE CodeSpaceWriteScope(NativeModule* native_module);
-  V8_EXPORT_PRIVATE ~CodeSpaceWriteScope();
+  explicit V8_EXPORT_PRIVATE CodeSpaceWriteScope();
 
   // Disable copy constructor and copy-assignment operator, since this manages
   // a resource and implicit copying of the scope can yield surprising errors.
@@ -54,25 +50,9 @@ class V8_NODISCARD CodeSpaceWriteScope final {
   CodeSpaceWriteScope& operator=(const CodeSpaceWriteScope&) = delete;
 
  private:
-  static thread_local int code_space_write_nesting_level_;
-#if defined(DEBUG) && !V8_HAS_PTHREAD_JIT_WRITE_PROTECT
-  static thread_local NativeModule* current_native_module_;
-#endif
-
-  void SetWritable() const;
-  void SetExecutable() const;
-
-  // The M1 implementation knows implicitly from the {MAP_JIT} flag during
-  // allocation which region to switch permissions for. On non-M1 hardware
-  // without memory protection key support, we need the code space from the
-  // {native_module_}.
-#if !V8_HAS_PTHREAD_JIT_WRITE_PROTECT
-  NativeModule* const native_module_;
-#endif
+  RwxMemoryWriteScope rwx_write_scope_;
 };
 
-}  // namespace wasm
-}  // namespace internal
-}  // namespace v8
+}  // namespace v8::internal::wasm
 
 #endif  // V8_WASM_CODE_SPACE_ACCESS_H_

@@ -33,7 +33,7 @@ static void FloodWithInc(Isolate* isolate, TestingAssemblerBuffer* buffer) {
     __ add(eax, Immediate(1));
   }
 #elif V8_TARGET_ARCH_X64
-  __ movl(rax, arg_reg_1);
+  __ movl(rax, kCArgRegs[0]);
   for (int i = 0; i < kNumInstr; ++i) {
     __ addl(rax, Immediate(1));
   }
@@ -46,11 +46,6 @@ static void FloodWithInc(Isolate* isolate, TestingAssemblerBuffer* buffer) {
   for (int i = 0; i < kNumInstr; ++i) {
     __ add(r0, r0, Operand(1));
   }
-#elif V8_TARGET_ARCH_MIPS
-  __ mov(v0, a0);
-  for (int i = 0; i < kNumInstr; ++i) {
-    __ Addu(v0, v0, Operand(1));
-  }
 #elif V8_TARGET_ARCH_MIPS64
   __ mov(v0, a0);
   for (int i = 0; i < kNumInstr; ++i) {
@@ -60,13 +55,17 @@ static void FloodWithInc(Isolate* isolate, TestingAssemblerBuffer* buffer) {
   for (int i = 0; i < kNumInstr; ++i) {
     __ Add_w(a0, a0, Operand(1));
   }
-#elif V8_TARGET_ARCH_PPC || V8_TARGET_ARCH_PPC64
+#elif V8_TARGET_ARCH_PPC64
   for (int i = 0; i < kNumInstr; ++i) {
     __ addi(r3, r3, Operand(1));
   }
-#elif V8_TARGET_ARCH_S390
+#elif V8_TARGET_ARCH_S390X
   for (int i = 0; i < kNumInstr; ++i) {
     __ agfi(r2, Operand(1));
+  }
+#elif V8_TARGET_ARCH_RISCV32
+  for (int i = 0; i < kNumInstr; ++i) {
+    __ Add32(a0, a0, Operand(1));
   }
 #elif V8_TARGET_ARCH_RISCV64
   for (int i = 0; i < kNumInstr; ++i) {
@@ -85,11 +84,9 @@ static void FloodWithNop(Isolate* isolate, TestingAssemblerBuffer* buffer) {
 #if V8_TARGET_ARCH_IA32
   __ mov(eax, Operand(esp, kSystemPointerSize));
 #elif V8_TARGET_ARCH_X64
-  __ movl(rax, arg_reg_1);
+  __ movl(rax, kCArgRegs[0]);
 #elif V8_TARGET_ARCH_ARM64
   __ CodeEntry();
-#elif V8_TARGET_ARCH_MIPS
-  __ mov(v0, a0);
 #elif V8_TARGET_ARCH_MIPS64
   __ mov(v0, a0);
 #endif
@@ -113,19 +110,18 @@ TEST(TestFlushICacheOfWritable) {
     // Allow calling the function from C++.
     auto f = GeneratedCode<F0>::FromBuffer(isolate, buffer->start());
 
-    CHECK(SetPermissions(GetPlatformPageAllocator(), buffer->start(),
-                         buffer->size(), v8::PageAllocator::kReadWrite));
-    FloodWithInc(isolate, buffer.get());
-    FlushInstructionCache(buffer->start(), buffer->size());
-    CHECK(SetPermissions(GetPlatformPageAllocator(), buffer->start(),
-                         buffer->size(), v8::PageAllocator::kReadExecute));
+    {
+      AssemblerBufferWriteScope rw_buffer_scope(*buffer);
+      FloodWithInc(isolate, buffer.get());
+      FlushInstructionCache(buffer->start(), buffer->size());
+    }
     CHECK_EQ(23 + kNumInstr, f.Call(23));  // Call into generated code.
-    CHECK(SetPermissions(GetPlatformPageAllocator(), buffer->start(),
-                         buffer->size(), v8::PageAllocator::kReadWrite));
-    FloodWithNop(isolate, buffer.get());
-    FlushInstructionCache(buffer->start(), buffer->size());
-    CHECK(SetPermissions(GetPlatformPageAllocator(), buffer->start(),
-                         buffer->size(), v8::PageAllocator::kReadExecute));
+
+    {
+      AssemblerBufferWriteScope rw_buffer_scope(*buffer);
+      FloodWithNop(isolate, buffer.get());
+      FlushInstructionCache(buffer->start(), buffer->size());
+    }
     CHECK_EQ(23, f.Call(23));  // Call into generated code.
   }
 }
@@ -186,27 +182,21 @@ TEST(TestFlushICacheOfWritableAndExecutable) {
 
   for (int i = 0; i < kNumIterations; ++i) {
     auto buffer = AllocateAssemblerBuffer(kBufferSize, nullptr,
-                                          VirtualMemory::kMapAsJittable);
+                                          JitPermission::kMapAsJittable);
 
     // Allow calling the function from C++.
     auto f = GeneratedCode<F0>::FromBuffer(isolate, buffer->start());
 
-    CHECK(SetPermissions(GetPlatformPageAllocator(), buffer->start(),
-                         buffer->size(), v8::PageAllocator::kReadWriteExecute));
+    buffer->MakeWritableAndExecutable();
+
     {
-#if defined(V8_OS_MACOSX) && defined(V8_HOST_ARCH_ARM64)
-      // Make sure to switch memory to writable on M1 hardware.
-      wasm::CodeSpaceWriteScope code_space_write_scope(nullptr);
-#endif
+      RwxMemoryWriteScopeForTesting rw_scope;
       FloodWithInc(isolate, buffer.get());
       FlushInstructionCache(buffer->start(), buffer->size());
     }
     CHECK_EQ(23 + kNumInstr, f.Call(23));  // Call into generated code.
     {
-#if defined(V8_OS_MACOSX) && defined(V8_HOST_ARCH_ARM64)
-      // Make sure to switch memory to writable on M1 hardware.
-      wasm::CodeSpaceWriteScope code_space_write_scope(nullptr);
-#endif
+      RwxMemoryWriteScopeForTesting rw_scope;
       FloodWithNop(isolate, buffer.get());
       FlushInstructionCache(buffer->start(), buffer->size());
     }

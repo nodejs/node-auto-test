@@ -19,17 +19,22 @@ const consistentResolve = (resolved, fromPath, toPath, relPaths = false) => {
       rawSpec,
       raw,
     } = npa(resolved, fromPath)
-    const isPath = type === 'file' || type === 'directory'
-    return isPath && !relPaths ? `file:${fetchSpec}`
-      : isPath ? 'file:' + (toPath ? relpath(toPath, fetchSpec) : fetchSpec)
-      : hosted ? `git+${
-        hosted.auth ? hosted.https(hostedOpt) : hosted.sshurl(hostedOpt)
-      }`
-      : type === 'git' ? saveSpec
-      // always return something.  'foo' is interpreted as 'foo@' otherwise.
-      : rawSpec === '' && raw.slice(-1) !== '@' ? raw
-      // just strip off the name, but otherwise return as-is
-      : rawSpec
+    if (type === 'file' || type === 'directory') {
+      if (relPaths && toPath) {
+        return `file:${relpath(toPath, fetchSpec)}`
+      }
+      return `file:${fetchSpec}`
+    }
+    if (hosted) {
+      return `git+${hosted.auth ? hosted.https(hostedOpt) : hosted.sshurl(hostedOpt)}`
+    }
+    if (type === 'git') {
+      return saveSpec
+    }
+    if (rawSpec === '*') {
+      return raw
+    }
+    return rawSpec
   } catch (_) {
     // whatever we passed in was not acceptable to npa.
     // leave it 100% untouched.

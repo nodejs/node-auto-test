@@ -136,7 +136,7 @@ void SendProtocolJson(InspectorSocket* socket) {
   strm.next_in = const_cast<uint8_t*>(PROTOCOL_JSON + 3);
   strm.avail_in = sizeof(PROTOCOL_JSON) - 3;
   std::string data(kDecompressedSize, '\0');
-  strm.next_out = reinterpret_cast<Byte*>(&data[0]);
+  strm.next_out = reinterpret_cast<Byte*>(data.data());
   strm.avail_out = data.size();
   CHECK_EQ(Z_STREAM_END, inflate(&strm, Z_FINISH));
   CHECK_EQ(0, strm.avail_out);
@@ -247,8 +247,9 @@ void PrintDebuggerReadyMessage(
               FormatWsAddress(host, server_socket->port(), id, true).c_str());
     }
   }
-  fprintf(out, "For help, see: %s\n",
-          "https://nodejs.org/en/docs/inspector");
+  fprintf(out,
+          "For help, see: %s\n",
+          "https://nodejs.org/learn/getting-started/debugging");
   fflush(out);
 }
 
@@ -451,7 +452,7 @@ void InspectorSocketServer::TerminateConnections() {
 
 bool InspectorSocketServer::TargetExists(const std::string& id) {
   const std::vector<std::string>& target_ids = delegate_->GetTargetIds();
-  const auto& found = std::find(target_ids.begin(), target_ids.end(), id);
+  const auto& found = std::ranges::find(target_ids, id);
   return found != target_ids.end();
 }
 

@@ -1,36 +1,49 @@
 const t = require('tap')
+const procLog = require('proc-log')
+const tmock = require('../../fixtures/tmock')
 
 let readOpts = null
 let readResult = null
-const read = (opts, cb) => {
-  readOpts = opts
-  return cb(null, readResult)
-}
+let logMsg = null
 
-const npmlog = {
-  clearProgress: () => {},
-  showProgress: () => {},
-}
-
-const npmUserValidate = {
-  username: (username) => {
-    if (username === 'invalid')
-      return new Error('invalid username')
-
-    return null
+const readUserInfo = tmock(t, '{LIB}/utils/read-user-info.js', {
+  read: {
+    read: async (opts) => {
+      readOpts = opts
+      return readResult
+    },
   },
-  email: (email) => {
-    if (email.startsWith('invalid'))
-      return new Error('invalid email')
-
-    return null
+  'proc-log': {
+    ...procLog,
+    log: {
+      ...procLog.log,
+      warn: (msg) => logMsg = msg,
+    },
+    input: {
+      ...procLog.input,
+      read: (fn) => fn(),
+    },
   },
-}
+  'npm-user-validate': {
+    username: (username) => {
+      if (username === 'invalid') {
+        return new Error('invalid username')
+      }
 
-const readUserInfo = t.mock('../../../lib/utils/read-user-info.js', {
-  read,
-  npmlog,
-  'npm-user-validate': npmUserValidate,
+      return null
+    },
+    email: (email) => {
+      if (email.startsWith('invalid')) {
+        return new Error('invalid email')
+      }
+
+      return null
+    },
+  },
+})
+
+t.beforeEach(() => {
+  logMsg = null
 })
 
 t.test('otp', async (t) => {
@@ -73,11 +86,7 @@ t.test('username - invalid warns and retries', async (t) => {
     readOpts = null
   })
 
-  let logMsg
-  const log = {
-    warn: (msg) => logMsg = msg,
-  }
-  const pResult = readUserInfo.username(null, null, { log })
+  const pResult = readUserInfo.username(null, null)
   // have to swap it to a valid username after execution starts
   // or it will loop forever
   readResult = 'valid'
@@ -103,13 +112,41 @@ t.test('email - invalid warns and retries', async (t) => {
     readOpts = null
   })
 
-  let logMsg
-  const log = {
-    warn: (msg) => logMsg = msg,
-  }
-  const pResult = readUserInfo.email(null, null, { log })
+  const pResult = readUserInfo.email(null, null)
   readResult = 'foo@bar.baz'
   const result = await pResult
   t.equal(result, 'foo@bar.baz', 'received the email')
   t.equal(logMsg, 'invalid email')
+})
+
+t.test('read-user-info integration works', async (t) => {
+  t.teardown(() => {
+    readResult = null
+    readOpts = null
+  })
+
+  readResult = 'regular-input'
+  const username = await readUserInfo.username('Username: ')
+  t.equal(username, 'regular-input', 'should return username from regular prompt')
+  t.notOk(readOpts.silent, 'username prompt should not set silent')
+
+  readResult = 'secret-password'
+  const password = await readUserInfo.password('Password: ')
+  t.equal(password, 'secret-password', 'should return password from silent prompt')
+  t.match(readOpts, { silent: true }, 'password prompt should set silent: true')
+})
+
+t.test('silent metadata is passed correctly by read-user-info', async (t) => {
+  t.teardown(() => {
+    readResult = null
+    readOpts = null
+  })
+
+  readResult = 'username'
+  await readUserInfo.username('Username: ')
+  t.notOk(readOpts?.silent, 'username prompt should not set silent')
+
+  readResult = 'password'
+  await readUserInfo.password('Password: ')
+  t.equal(readOpts?.silent, true, 'password prompt should set silent: true')
 })

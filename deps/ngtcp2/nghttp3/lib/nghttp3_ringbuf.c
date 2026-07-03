@@ -29,28 +29,19 @@
 #include <string.h>
 #ifdef WIN32
 #  include <intrin.h>
-#endif
+#endif /* defined(WIN32) */
 
 #include "nghttp3_macro.h"
 
-#if defined(_MSC_VER) && defined(_M_ARM64)
-unsigned int __popcnt(unsigned int x) {
-  unsigned int c = 0;
-  for (; x; ++c) {
-    x &= x - 1;
-  }
-  return c;
-}
-#endif
+#ifndef NDEBUG
+/* Power-of-two test; simple portable bit trick. */
+static int ispow2(size_t n) { return n && !(n & (n - 1)); }
+#endif /* !defined(NDEBUG) */
 
 int nghttp3_ringbuf_init(nghttp3_ringbuf *rb, size_t nmemb, size_t size,
                          const nghttp3_mem *mem) {
   if (nmemb) {
-#ifdef WIN32
-    assert(1 == __popcnt((unsigned int)nmemb));
-#else
-    assert(1 == __builtin_popcount((unsigned int)nmemb));
-#endif
+    assert(ispow2(nmemb));
 
     rb->buf = nghttp3_mem_malloc(mem, nmemb * size);
     if (rb->buf == NULL) {
@@ -117,7 +108,9 @@ void *nghttp3_ringbuf_get(nghttp3_ringbuf *rb, size_t offset) {
   return &rb->buf[offset * rb->size];
 }
 
-int nghttp3_ringbuf_full(nghttp3_ringbuf *rb) { return rb->len == rb->nmemb; }
+int nghttp3_ringbuf_full(const nghttp3_ringbuf *rb) {
+  return rb->len == rb->nmemb;
+}
 
 int nghttp3_ringbuf_reserve(nghttp3_ringbuf *rb, size_t nmemb) {
   uint8_t *buf;
@@ -126,11 +119,7 @@ int nghttp3_ringbuf_reserve(nghttp3_ringbuf *rb, size_t nmemb) {
     return 0;
   }
 
-#ifdef WIN32
-  assert(1 == __popcnt((unsigned int)nmemb));
-#else
-  assert(1 == __builtin_popcount((unsigned int)nmemb));
-#endif
+  assert(ispow2(nmemb));
 
   buf = nghttp3_mem_malloc(rb->mem, nmemb * rb->size);
   if (buf == NULL) {

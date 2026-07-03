@@ -11,6 +11,7 @@ namespace compiler {
 
 // IA32-specific opcodes that specify which assembly sequence to emit.
 // Most opcodes specify a single instruction.
+
 #define TARGET_ARCH_OPCODE_LIST(V) \
   V(IA32Add)                       \
   V(IA32And)                       \
@@ -47,33 +48,34 @@ namespace compiler {
   V(IA32Bswap)                     \
   V(IA32MFence)                    \
   V(IA32LFence)                    \
-  V(SSEFloat32Cmp)                 \
-  V(SSEFloat32Sqrt)                \
-  V(SSEFloat32Round)               \
-  V(SSEFloat64Cmp)                 \
-  V(SSEFloat64Mod)                 \
-  V(SSEFloat32Max)                 \
-  V(SSEFloat64Max)                 \
-  V(SSEFloat32Min)                 \
-  V(SSEFloat64Min)                 \
-  V(SSEFloat64Sqrt)                \
-  V(SSEFloat64Round)               \
-  V(SSEFloat32ToFloat64)           \
-  V(SSEFloat64ToFloat32)           \
-  V(SSEFloat32ToInt32)             \
-  V(SSEFloat32ToUint32)            \
-  V(SSEFloat64ToInt32)             \
-  V(SSEFloat64ToUint32)            \
+  V(IA32Float32Cmp)                \
+  V(IA32Float32Sqrt)               \
+  V(IA32Float32Round)              \
+  V(IA32Float64Cmp)                \
+  V(IA32Float64Mod)                \
+  V(IA32Float32Max)                \
+  V(IA32Float64Max)                \
+  V(IA32Float32Min)                \
+  V(IA32Float64Min)                \
+  V(IA32Float64Sqrt)               \
+  V(IA32Float64Round)              \
+  V(IA32Float32ToFloat64)          \
+  V(IA32Float64ToFloat32)          \
+  V(IA32Float32ToInt32)            \
+  V(IA32Float32ToUint32)           \
+  V(IA32Float64ToInt32)            \
+  V(IA32Float64ToUint32)           \
   V(SSEInt32ToFloat32)             \
-  V(SSEUint32ToFloat32)            \
+  V(IA32Uint32ToFloat32)           \
   V(SSEInt32ToFloat64)             \
-  V(SSEUint32ToFloat64)            \
-  V(SSEFloat64ExtractLowWord32)    \
-  V(SSEFloat64ExtractHighWord32)   \
-  V(SSEFloat64InsertLowWord32)     \
-  V(SSEFloat64InsertHighWord32)    \
-  V(SSEFloat64LoadLowWord32)       \
-  V(SSEFloat64SilenceNaN)          \
+  V(IA32Uint32ToFloat64)           \
+  V(IA32Float64ExtractLowWord32)   \
+  V(IA32Float64ExtractHighWord32)  \
+  V(IA32Float64InsertLowWord32)    \
+  V(IA32Float64InsertHighWord32)   \
+  V(IA32Float64FromWord32Pair)     \
+  V(IA32Float64LoadLowWord32)      \
+  V(IA32Float64SilenceNaN)         \
   V(Float32Add)                    \
   V(Float32Sub)                    \
   V(Float64Add)                    \
@@ -100,13 +102,20 @@ namespace compiler {
   V(IA32Movhps)                    \
   V(IA32BitcastFI)                 \
   V(IA32BitcastIF)                 \
+  V(IA32Blendvpd)                  \
+  V(IA32Blendvps)                  \
   V(IA32Lea)                       \
+  V(IA32Pblendvb)                  \
   V(IA32Push)                      \
   V(IA32Poke)                      \
   V(IA32Peek)                      \
+  V(IA32Cvttps2dq)                 \
+  V(IA32Cvttpd2dq)                 \
+  V(IA32I32x4TruncF32x4U)          \
+  V(IA32I32x4TruncF64x2UZero)      \
   V(IA32F64x2Splat)                \
-  V(F64x2ExtractLane)              \
-  V(F64x2ReplaceLane)              \
+  V(IA32F64x2ExtractLane)          \
+  V(IA32F64x2ReplaceLane)          \
   V(IA32F64x2Sqrt)                 \
   V(IA32F64x2Add)                  \
   V(IA32F64x2Sub)                  \
@@ -118,8 +127,10 @@ namespace compiler {
   V(IA32F64x2Ne)                   \
   V(IA32F64x2Lt)                   \
   V(IA32F64x2Le)                   \
-  V(IA32F64x2Pmin)                 \
-  V(IA32F64x2Pmax)                 \
+  V(IA32F64x2Qfma)                 \
+  V(IA32F64x2Qfms)                 \
+  V(IA32Minpd)                     \
+  V(IA32Maxpd)                     \
   V(IA32F64x2Round)                \
   V(IA32F64x2ConvertLowI32x4S)     \
   V(IA32F64x2ConvertLowI32x4U)     \
@@ -152,25 +163,21 @@ namespace compiler {
   V(IA32Insertps)                  \
   V(IA32F32x4SConvertI32x4)        \
   V(IA32F32x4UConvertI32x4)        \
-  V(IA32F32x4Abs)                  \
-  V(IA32F32x4Neg)                  \
   V(IA32F32x4Sqrt)                 \
-  V(IA32F32x4RecipApprox)          \
-  V(IA32F32x4RecipSqrtApprox)      \
   V(IA32F32x4Add)                  \
   V(IA32F32x4Sub)                  \
   V(IA32F32x4Mul)                  \
   V(IA32F32x4Div)                  \
-  V(SSEF32x4Min)                   \
-  V(AVXF32x4Min)                   \
-  V(SSEF32x4Max)                   \
-  V(AVXF32x4Max)                   \
+  V(IA32F32x4Min)                  \
+  V(IA32F32x4Max)                  \
   V(IA32F32x4Eq)                   \
   V(IA32F32x4Ne)                   \
   V(IA32F32x4Lt)                   \
   V(IA32F32x4Le)                   \
-  V(IA32F32x4Pmin)                 \
-  V(IA32F32x4Pmax)                 \
+  V(IA32F32x4Qfma)                 \
+  V(IA32F32x4Qfms)                 \
+  V(IA32Minps)                     \
+  V(IA32Maxps)                     \
   V(IA32F32x4Round)                \
   V(IA32F32x4DemoteF64x2Zero)      \
   V(IA32I32x4Splat)                \
@@ -204,6 +211,7 @@ namespace compiler {
   V(IA32I32x4Abs)                  \
   V(IA32I32x4BitMask)              \
   V(IA32I32x4DotI16x8S)            \
+  V(IA32I32x4DotI8x16I7x16AddS)    \
   V(IA32I32x4ExtMulLowI16x8S)      \
   V(IA32I32x4ExtMulHighI16x8S)     \
   V(IA32I32x4ExtMulLowI16x8U)      \
@@ -255,6 +263,7 @@ namespace compiler {
   V(IA32I16x8ExtAddPairwiseI8x16S) \
   V(IA32I16x8ExtAddPairwiseI8x16U) \
   V(IA32I16x8Q15MulRSatS)          \
+  V(IA32I16x8RelaxedQ15MulRS)      \
   V(IA32I8x16Splat)                \
   V(IA32I8x16ExtractLaneS)         \
   V(IA32Pinsrb)                    \
@@ -354,6 +363,7 @@ namespace compiler {
   V(IA32I32x4AllTrue)              \
   V(IA32I16x8AllTrue)              \
   V(IA32I8x16AllTrue)              \
+  V(IA32I16x8DotI8x16I7x16S)       \
   V(IA32Word32AtomicPairLoad)      \
   V(IA32Word32ReleasePairStore)    \
   V(IA32Word32SeqCstPairStore)     \
@@ -386,8 +396,8 @@ namespace compiler {
   V(MR8)  /* [%r1 + %r2*8    ] */      \
   V(MR1I) /* [%r1 + %r2*1 + K] */      \
   V(MR2I) /* [%r1 + %r2*2 + K] */      \
-  V(MR4I) /* [%r1 + %r2*3 + K] */      \
-  V(MR8I) /* [%r1 + %r2*4 + K] */      \
+  V(MR4I) /* [%r1 + %r2*4 + K] */      \
+  V(MR8I) /* [%r1 + %r2*8 + K] */      \
   V(M1)   /* [      %r2*1    ] */      \
   V(M2)   /* [      %r2*2    ] */      \
   V(M4)   /* [      %r2*4    ] */      \

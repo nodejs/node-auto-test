@@ -9,15 +9,22 @@
 
 #include "include/cppgc/cross-thread-persistent.h"
 #include "include/cppgc/persistent.h"
+#include "src/base/platform/platform.h"
+#include "src/heap/cppgc/heap-base.h"
+#include "src/heap/cppgc/platform.h"
 #include "src/heap/cppgc/process-heap.h"
 
 namespace cppgc {
 namespace internal {
 
-PersistentRegion::~PersistentRegion() { ClearAllUsedNodes(); }
+PersistentRegionBase::PersistentRegionBase(
+    const FatalOutOfMemoryHandler& oom_handler)
+    : oom_handler_(oom_handler) {}
+
+PersistentRegionBase::~PersistentRegionBase() { ClearAllUsedNodes(); }
 
 template <typename PersistentBaseClass>
-void PersistentRegion::ClearAllUsedNodes() {
+void PersistentRegionBase::ClearAllUsedNodes() {
   for (auto& slots : nodes_) {
     for (auto& node : *slots) {
       if (!node.IsUsed()) continue;
@@ -35,14 +42,15 @@ void PersistentRegion::ClearAllUsedNodes() {
   CPPGC_DCHECK(0u == nodes_in_use_);
 }
 
-template void PersistentRegion::ClearAllUsedNodes<CrossThreadPersistentBase>();
-template void PersistentRegion::ClearAllUsedNodes<PersistentBase>();
+template void
+PersistentRegionBase::ClearAllUsedNodes<CrossThreadPersistentBase>();
+template void PersistentRegionBase::ClearAllUsedNodes<PersistentBase>();
 
-void PersistentRegion::ClearAllUsedNodes() {
+void PersistentRegionBase::ClearAllUsedNodes() {
   ClearAllUsedNodes<PersistentBase>();
 }
 
-size_t PersistentRegion::NodesInUse() const {
+size_t PersistentRegionBase::NodesInUse() const {
 #ifdef DEBUG
   const size_t accumulated_nodes_in_use_ = std::accumulate(
       nodes_.cbegin(), nodes_.cend(), 0u, [](size_t acc, const auto& slots) {
@@ -56,21 +64,33 @@ size_t PersistentRegion::NodesInUse() const {
   return nodes_in_use_;
 }
 
-void PersistentRegion::EnsureNodeSlots() {
-  nodes_.push_back(std::make_unique<PersistentNodeSlots>());
+void PersistentRegionBase::RefillFreeList() {
+  auto node_slots = std::make_unique<PersistentNodeSlots>();
+  if (!node_slots.get()) {
+    oom_handler_("Oilpan: PersistentRegionBase::RefillFreeList()");
+  }
+  nodes_.push_back(std::move(node_slots));
   for (auto& node : *nodes_.back()) {
     node.InitializeAsFreeNode(free_list_head_);
     free_list_head_ = &node;
   }
 }
 
-void PersistentRegion::Trace(Visitor* visitor) {
+PersistentNode* PersistentRegionBase::RefillFreeListAndAllocateNode(
+    void* owner, TraceRootCallback trace) {
+  RefillFreeList();
+  auto* node = TryAllocateNodeFromFreeList(owner, trace);
+  CPPGC_DCHECK(node);
+  return node;
+}
+
+void PersistentRegionBase::Iterate(RootVisitor& root_visitor) {
   free_list_head_ = nullptr;
   for (auto& slots : nodes_) {
     bool is_empty = true;
     for (auto& node : *slots) {
       if (node.IsUsed()) {
-        node.Trace(visitor);
+        node.Trace(root_visitor);
         is_empty = false;
       } else {
         node.InitializeAsFreeNode(free_list_head_);
@@ -92,39 +112,47 @@ void PersistentRegion::Trace(Visitor* visitor) {
                nodes_.end());
 }
 
+bool PersistentRegion::IsCreationThread() {
+  return heap_.CurrentThreadIsHeapThread();
+}
+
 PersistentRegionLock::PersistentRegionLock() {
-  g_process_mutex.Pointer()->Lock();
+  ProcessGlobalLock::Lock<
+      ProcessGlobalLock::Reason::kForCrossThreadHandleCreation>();
 }
 
 PersistentRegionLock::~PersistentRegionLock() {
-  g_process_mutex.Pointer()->Unlock();
+  ProcessGlobalLock::Unlock<
+      ProcessGlobalLock::Reason::kForCrossThreadHandleCreation>();
 }
 
 // static
-void PersistentRegionLock::AssertLocked() {
-  return g_process_mutex.Pointer()->AssertHeld();
-}
+void PersistentRegionLock::AssertLocked() { ProcessGlobalLock::AssertHeld(); }
+
+CrossThreadPersistentRegion::CrossThreadPersistentRegion(
+    const FatalOutOfMemoryHandler& oom_handler)
+    : PersistentRegionBase(oom_handler) {}
 
 CrossThreadPersistentRegion::~CrossThreadPersistentRegion() {
   PersistentRegionLock guard;
-  PersistentRegion::ClearAllUsedNodes<CrossThreadPersistentBase>();
+  PersistentRegionBase::ClearAllUsedNodes<CrossThreadPersistentBase>();
   nodes_.clear();
-  // PersistentRegion destructor will be a noop.
+  // PersistentRegionBase destructor will be a noop.
 }
 
-void CrossThreadPersistentRegion::Trace(Visitor* visitor) {
+void CrossThreadPersistentRegion::Iterate(RootVisitor& root_visitor) {
   PersistentRegionLock::AssertLocked();
-  PersistentRegion::Trace(visitor);
+  PersistentRegionBase::Iterate(root_visitor);
 }
 
 size_t CrossThreadPersistentRegion::NodesInUse() const {
   // This method does not require a lock.
-  return PersistentRegion::NodesInUse();
+  return PersistentRegionBase::NodesInUse();
 }
 
 void CrossThreadPersistentRegion::ClearAllUsedNodes() {
   PersistentRegionLock::AssertLocked();
-  PersistentRegion::ClearAllUsedNodes<CrossThreadPersistentBase>();
+  PersistentRegionBase::ClearAllUsedNodes<CrossThreadPersistentBase>();
 }
 
 }  // namespace internal

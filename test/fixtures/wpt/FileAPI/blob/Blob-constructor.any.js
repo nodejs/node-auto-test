@@ -104,6 +104,59 @@ test_blob(function() {
   desc: "A Uint8Array object should be treated as a sequence for the blobParts argument."
 });
 
+test(function() {
+  assert_throws_js(TypeError, function() { new Blob(true) });
+}, "blobParts not an object: boolean");
+
+test(function() {
+  Boolean.prototype[Symbol.iterator] = () => ["FAIL"][Symbol.iterator]()
+  this.add_cleanup(function() { delete Boolean.prototype[Symbol.iterator] });
+  assert_throws_js(TypeError, function() { new Blob(true) });
+}, "blobParts not an object: boolean with Boolean.prototype[Symbol.iterator]");
+
+test(function() {
+  assert_throws_js(TypeError, function() { new Blob("fail") });
+}, "blobParts not an object: string");
+
+test(function() {
+  const original = String.prototype[Symbol.iterator];
+  String.prototype[Symbol.iterator] = () => ["FAIL"][Symbol.iterator]()
+  this.add_cleanup(function() { String.prototype[Symbol.iterator] = original });
+  assert_throws_js(TypeError, function() { new Blob("fail") });
+}, "blobParts not an object: string with String.prototype[Symbol.iterator]");
+
+test(function() {
+  assert_throws_js(TypeError, function() { new Blob(7) });
+}, "blobParts not an object: number");
+
+test(function() {
+  Number.prototype[Symbol.iterator] = () => ["FAIL"][Symbol.iterator]()
+  this.add_cleanup(function() { delete Number.prototype[Symbol.iterator] });
+  assert_throws_js(TypeError, function() { new Blob(7) });
+}, "blobParts not an object: number with Number.prototype[Symbol.iterator]");
+
+test(function() {
+  assert_throws_js(TypeError, function() { new Blob(7n) });
+}, "blobParts not an object: BigInt");
+
+test(function() {
+  BigInt.prototype[Symbol.iterator] = () => ["FAIL"][Symbol.iterator]()
+  this.add_cleanup(function() { delete BigInt.prototype[Symbol.iterator] });
+  assert_throws_js(TypeError, function() { new Blob(7n) });
+}, "blobParts not an object: BigInt with BigInt.prototype[Symbol.iterator]");
+
+test(function() {
+  const symbol = Symbol();
+  assert_throws_js(TypeError, function() { new Blob(symbol) });
+}, "blobParts not an object: Symbol");
+
+test(function() {
+  const symbol = Symbol();
+  Symbol.prototype[Symbol.iterator] = () => ["FAIL"][Symbol.iterator]()
+  this.add_cleanup(function() { delete Symbol.prototype[Symbol.iterator] });
+  assert_throws_js(TypeError, function() { new Blob(symbol) });
+}, "blobParts not an object: Symbol with Symbol.prototype[Symbol.iterator]");
+
 var test_error = {
   name: "test",
   message: "test error",
@@ -299,6 +352,15 @@ test_blob(function() {
 });
 test_blob(function() {
   return new Blob([
+    new Float16Array([2.65625, 58.59375])
+  ]);
+}, {
+  expected: "PASS",
+  type: "",
+  desc: "Passing a Float16Array as element of the blobParts array should work."
+});
+test_blob(function() {
+  return new Blob([
     // 0x535 3415053534150
     // 0x535 = 0b010100110101 -> Sign = +, Exponent = 1333 - 1023 = 310
     // 0x13415053534150 * 2**(-52)
@@ -311,7 +373,16 @@ test_blob(function() {
   desc: "Passing a Float64Array as element of the blobParts array should work."
 });
 
-
+test_blob(function() {
+  return new Blob([
+    new BigInt64Array([BigInt("0x5353415053534150")]),
+    new BigUint64Array([BigInt("0x5353415053534150")])
+  ]);
+}, {
+  expected: "PASSPASSPASSPASS",
+  type: "",
+  desc: "Passing BigInt typed arrays as elements of the blobParts array should work."
+});
 
 var t_ports = async_test("Passing a FrozenArray as the blobParts array should work (FrozenArray<MessagePort>).");
 t_ports.step(function() {

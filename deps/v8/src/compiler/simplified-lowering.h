@@ -30,8 +30,8 @@ class V8_EXPORT_PRIVATE SimplifiedLowering final {
  public:
   SimplifiedLowering(JSGraph* jsgraph, JSHeapBroker* broker, Zone* zone,
                      SourcePositionTable* source_position,
-                     NodeOriginTable* node_origins,
-                     TickCounter* tick_counter, Linkage* linkage,
+                     NodeOriginTable* node_origins, TickCounter* tick_counter,
+                     Linkage* linkage, OptimizedCompilationInfo* info,
                      ObserveNodeManager* observe_node_manager = nullptr);
   ~SimplifiedLowering() = default;
 
@@ -84,6 +84,7 @@ class V8_EXPORT_PRIVATE SimplifiedLowering final {
 
   TickCounter* const tick_counter_;
   Linkage* const linkage_;
+  OptimizedCompilationInfo* info_;
 
   ObserveNodeManager* const observe_node_manager_;
 
@@ -99,16 +100,18 @@ class V8_EXPORT_PRIVATE SimplifiedLowering final {
   Node* ToNumberCode();
   Node* ToNumberConvertBigIntCode();
   Node* ToNumericCode();
+  Node* Ieee754Fp64ToFp16RawBitsCode();
   Operator const* ToNumberOperator();
   Operator const* ToNumberConvertBigIntOperator();
   Operator const* ToNumericOperator();
+  Operator const* Ieee754Fp64ToFp16RawBitsOperator();
 
   friend class RepresentationSelector;
 
   Isolate* isolate() { return jsgraph_->isolate(); }
   Zone* zone() { return jsgraph_->zone(); }
   JSGraph* jsgraph() { return jsgraph_; }
-  Graph* graph() { return jsgraph()->graph(); }
+  TFGraph* graph() { return jsgraph()->graph(); }
   CommonOperatorBuilder* common() { return jsgraph()->common(); }
   MachineOperatorBuilder* machine() { return jsgraph()->machine(); }
   SimplifiedOperatorBuilder* simplified() { return jsgraph()->simplified(); }

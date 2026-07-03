@@ -5,6 +5,7 @@
 #ifndef V8_HEAP_CPPGC_PREFINALIZER_HANDLER_H_
 #define V8_HEAP_CPPGC_PREFINALIZER_HANDLER_H_
 
+#include <utility>
 #include <vector>
 
 #include "include/cppgc/prefinalizer.h"
@@ -14,11 +15,17 @@ namespace internal {
 
 class HeapBase;
 
+struct PreFinalizer final {
+  using Callback = PrefinalizerRegistration::Callback;
+
+  void* object;
+  Callback callback;
+
+  bool operator==(const PreFinalizer& other) const;
+};
+
 class PreFinalizerHandler final {
  public:
-  using PreFinalizer =
-      cppgc::internal::PreFinalizerRegistrationDispatcher::PreFinalizer;
-
   explicit PreFinalizerHandler(HeapBase& heap);
 
   void RegisterPrefinalizer(PreFinalizer pre_finalizer);
@@ -45,9 +52,6 @@ class PreFinalizerHandler final {
 
   HeapBase& heap_;
   bool is_invoking_ = false;
-#ifdef DEBUG
-  int creation_thread_id_;
-#endif
 
   // Counter of bytes allocated during prefinalizers.
   size_t bytes_allocated_in_prefinalizers = 0u;

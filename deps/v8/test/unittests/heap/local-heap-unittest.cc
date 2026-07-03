@@ -4,11 +4,15 @@
 
 #include "src/heap/local-heap.h"
 
+#include <optional>
+
 #include "src/base/platform/condition-variable.h"
 #include "src/base/platform/mutex.h"
+#include "src/heap/gc-callbacks-inl.h"
 #include "src/heap/heap.h"
 #include "src/heap/parked-scope.h"
 #include "src/heap/safepoint.h"
+#include "test/unittests/heap/heap-utils.h"
 #include "test/unittests/test-utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -19,27 +23,12 @@ using LocalHeapTest = TestWithIsolate;
 
 TEST_F(LocalHeapTest, Initialize) {
   Heap* heap = i_isolate()->heap();
-  CHECK(heap->safepoint()->ContainsAnyLocalHeap());
+  heap->safepoint()->AssertMainThreadIsOnlyThread();
 }
 
 TEST_F(LocalHeapTest, Current) {
-  Heap* heap = i_isolate()->heap();
-
-  CHECK_NULL(LocalHeap::Current());
-
-  {
-    LocalHeap lh(heap, ThreadKind::kMain);
-    CHECK_NULL(LocalHeap::Current());
-  }
-
-  CHECK_NULL(LocalHeap::Current());
-
-  {
-    LocalHeap lh(heap, ThreadKind::kMain);
-    CHECK_NULL(LocalHeap::Current());
-  }
-
-  CHECK_NULL(LocalHeap::Current());
+  CHECK_EQ(LocalHeap::Current(), i_isolate()->main_thread_local_heap());
+  CHECK(LocalHeap::Current()->is_main_thread());
 }
 
 namespace {
@@ -50,12 +39,12 @@ class BackgroundThread final : public v8::base::Thread {
         heap_(heap) {}
 
   void Run() override {
-    CHECK_NULL(LocalHeap::Current());
+    CHECK_NULL(LocalHeap::TryGetCurrent());
     {
       LocalHeap lh(heap_, ThreadKind::kBackground);
       CHECK_EQ(&lh, LocalHeap::Current());
     }
-    CHECK_NULL(LocalHeap::Current());
+    CHECK_NULL(LocalHeap::TryGetCurrent());
   }
 
   Heap* heap_;
@@ -64,16 +53,9 @@ class BackgroundThread final : public v8::base::Thread {
 
 TEST_F(LocalHeapTest, CurrentBackground) {
   Heap* heap = i_isolate()->heap();
-  CHECK_NULL(LocalHeap::Current());
-  {
-    LocalHeap lh(heap, ThreadKind::kMain);
-    auto thread = std::make_unique<BackgroundThread>(heap);
-    CHECK(thread->Start());
-    CHECK_NULL(LocalHeap::Current());
-    thread->Join();
-    CHECK_NULL(LocalHeap::Current());
-  }
-  CHECK_NULL(LocalHeap::Current());
+  auto thread = std::make_unique<BackgroundThread>(heap);
+  CHECK(thread->Start());
+  thread->Join();
 }
 
 namespace {
@@ -127,13 +109,13 @@ class BackgroundThreadForGCEpilogue final : public v8::base::Thread {
 
   void Run() override {
     LocalHeap lh(heap_, ThreadKind::kBackground);
-    base::Optional<UnparkedScope> unparked_scope;
+    std::optional<UnparkedScope> unparked_scope;
     if (!parked_) {
       unparked_scope.emplace(&lh);
     }
     {
-      base::Optional<UnparkedScope> unparked_scope;
-      if (parked_) unparked_scope.emplace(&lh);
+      std::optional<UnparkedScope> nested_unparked_scope;
+      if (parked_) nested_unparked_scope.emplace(&lh);
       lh.AddGCEpilogueCallback(&GCEpilogue::Callback, epilogue_);
     }
     epilogue_->NotifyStarted();
@@ -141,8 +123,8 @@ class BackgroundThreadForGCEpilogue final : public v8::base::Thread {
       lh.Safepoint();
     }
     {
-      base::Optional<UnparkedScope> unparked_scope;
-      if (parked_) unparked_scope.emplace(&lh);
+      std::optional<UnparkedScope> nested_unparked_scope;
+      if (parked_) nested_unparked_scope.emplace(&lh);
       lh.RemoveGCEpilogueCallback(&GCEpilogue::Callback, epilogue_);
     }
   }
@@ -156,12 +138,9 @@ class BackgroundThreadForGCEpilogue final : public v8::base::Thread {
 
 TEST_F(LocalHeapTest, GCEpilogue) {
   Heap* heap = i_isolate()->heap();
-  LocalHeap lh(heap, ThreadKind::kMain);
+  LocalHeap* lh = heap->main_thread_local_heap();
   std::array<GCEpilogue, 3> epilogue;
-  {
-    UnparkedScope unparked(&lh);
-    lh.AddGCEpilogueCallback(&GCEpilogue::Callback, &epilogue[0]);
-  }
+  lh->AddGCEpilogueCallback(&GCEpilogue::Callback, &epilogue[0]);
   auto thread1 =
       std::make_unique<BackgroundThreadForGCEpilogue>(heap, true, &epilogue[1]);
   auto thread2 = std::make_unique<BackgroundThreadForGCEpilogue>(heap, false,
@@ -170,22 +149,62 @@ TEST_F(LocalHeapTest, GCEpilogue) {
   CHECK(thread2->Start());
   epilogue[1].WaitUntilStarted();
   epilogue[2].WaitUntilStarted();
-  {
-    UnparkedScope scope(&lh);
-    heap->PreciseCollectAllGarbage(Heap::kNoGCFlags,
-                                   GarbageCollectionReason::kTesting);
-  }
+  InvokeAtomicMajorGC(i_isolate());
   epilogue[1].RequestStop();
   epilogue[2].RequestStop();
   thread1->Join();
   thread2->Join();
-  {
-    UnparkedScope unparked(&lh);
-    lh.RemoveGCEpilogueCallback(&GCEpilogue::Callback, &epilogue[0]);
-  }
+  lh->RemoveGCEpilogueCallback(&GCEpilogue::Callback, &epilogue[0]);
   for (auto& e : epilogue) {
     CHECK(e.WasInvoked());
   }
+}
+
+class DirectPointerUser final : public GCRootsProvider {
+ public:
+  DirectPointerUser() = default;
+
+  Tagged<FixedArray> array() const { return array_; }
+  void set_array(Handle<FixedArray> array) { array_ = *array; }
+
+  void Iterate(RootVisitor* v) final {
+    v->VisitRootPointer(Root::kStrongRoots, nullptr, FullObjectSlot(&array_));
+  }
+
+ private:
+  Tagged<FixedArray> array_;
+};
+
+TEST_F(LocalHeapTest, RootsProvider) {
+  Factory* factory = i_isolate()->factory();
+  v8::Isolate::Scope isolate_scope(v8_isolate());
+  HandleScope global_handle_scope(i_isolate());
+  ManualGCScope manual_gc_scope(i_isolate());
+
+  LocalHeap* lh = i_isolate()->heap()->main_thread_local_heap();
+  auto data = std::make_unique<DirectPointerUser>();
+  GCRootsProviderScope roots_provider_scope(lh, data.get());
+
+  {
+    HandleScope handle_scope(i_isolate());
+    DirectHandle<HeapNumber> value = factory->NewHeapNumber(101);
+    Handle<FixedArray> array =
+        Cast<FixedArray>(factory->NewFixedArray(3, AllocationType::kYoung));
+    array->set(2, *value);
+    data->set_array(array);
+  }
+
+  InvokeMinorGC(i_isolate());
+
+  Tagged<Object> value = data->array()->get(2, kRelaxedLoad);
+  Tagged<HeapNumber> number = Tagged<HeapNumber>::cast(value);
+  CHECK_EQ(number->value(), 101);
+
+  InvokeMajorGC(i_isolate());
+
+  value = data->array()->get(2, kRelaxedLoad);
+  number = Tagged<HeapNumber>::cast(value);
+  CHECK_EQ(number->value(), 101);
 }
 
 }  // namespace internal

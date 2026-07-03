@@ -5,23 +5,13 @@
     'nasm_version%': '0.0',
     'openssl-cli': '<(PRODUCT_DIR)/<(EXECUTABLE_PREFIX)openssl-cli<(EXECUTABLE_SUFFIX)',
     'conditions': [
-      ['OS == "win"', {
-        'obj_dir_abs': '<(PRODUCT_DIR_ABS)/obj',
-        'openssl_dir': '<(PRODUCT_DIR_ABS)/obj/lib',
-      }],
       ['GENERATOR == "ninja"', {
-        'obj_dir_abs': '<(PRODUCT_DIR_ABS)/obj',
-        'modules_dir': '<(PRODUCT_DIR_ABS)/obj/lib/openssl-modules',
-        'openssl_dir': '<(PRODUCT_DIR_ABS)/obj/lib',
+        'modules_dir': '<(PRODUCT_DIR_ABS_CSTR)/obj/lib/openssl-modules',
       }, {
-        'obj_dir_abs%': '<(PRODUCT_DIR_ABS)/obj.target',
-        'modules_dir': '<(PRODUCT_DIR_ABS)/obj.target/deps/openssl/lib/openssl-modules',
-        'openssl_dir': '<(PRODUCT_DIR_ABS)/obj.target/deps/openssl',
+        'modules_dir': '<(PRODUCT_DIR_ABS_CSTR)/obj.target/deps/openssl/lib/openssl-modules',
       }],
       ['OS=="mac"', {
-        'obj_dir_abs%': '<(PRODUCT_DIR_ABS)/obj.target',
-        'modules_dir': '<(PRODUCT_DIR_ABS)/obj.target/deps/openssl/lib/openssl-modules',
-        'openssl_dir': '<(PRODUCT_DIR_ABS)/obj.target/deps/openssl',
+        'modules_dir': '<(PRODUCT_DIR_ABS_CSTR)/obj.target/deps/openssl/lib/openssl-modules',
       }],
     ],
   },
@@ -57,8 +47,16 @@
         ['node_shared_openssl=="false"', {
           'defines': [
             'MODULESDIR="<(modules_dir)"',
-            'OPENSSLDIR="<(openssl_dir)"',
           ]
+        }],
+        ['node_shared_zlib=="false"', {
+          'dependencies': [ '../zlib/zlib.gyp:zlib' ],
+        }],
+        ['node_shared_brotli=="false"', {
+          'dependencies': [ '../brotli/brotli.gyp:brotli' ],
+        }],
+        ['node_shared_zstd=="false"', {
+          'dependencies': [ '../zstd/zstd.gyp:zstd' ],
         }],
       ],
       'direct_dependent_settings': {
@@ -83,6 +81,20 @@
           'includes': ['./openssl-cl_no_asm.gypi'],
         }, {
           'includes': ['./openssl-cl_asm.gypi'],
+        }],
+        # Avoid excessive LTO
+        ['enable_lto=="true"', {
+          'ldflags': [ '-fno-lto' ],
+        }],
+        ['node_with_ltcg=="true" or enable_lto=="true" or enable_thin_lto=="true"', {
+          'msvs_settings': {
+            'VCCLCompilerTool': {
+              'AdditionalOptions': ['-fno-lto'],
+            },
+            'VCLinkerTool': {
+              'AdditionalOptions': ['-fno-lto'],
+            },
+          },
         }],
      ]
     }, {

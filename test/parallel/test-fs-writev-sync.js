@@ -2,7 +2,6 @@
 
 require('../common');
 const assert = require('assert');
-const path = require('path');
 const fs = require('fs');
 const tmpdir = require('../common/tmpdir');
 
@@ -10,7 +9,7 @@ tmpdir.refresh();
 
 const expected = 'ümlaut. Лорем 運務ホソモ指及 आपको करने विकास 紙読決多密所 أضف';
 
-const getFileName = (i) => path.join(tmpdir.path, `writev_sync_${i}.txt`);
+const getFileName = (i) => tmpdir.resolve(`writev_sync_${i}.txt`);
 
 /**
  * Testing with a array of buffers input
@@ -56,11 +55,21 @@ const getFileName = (i) => path.join(tmpdir.path, `writev_sync_${i}.txt`);
   assert(Buffer.concat(bufferArr).equals(fs.readFileSync(filename)));
 }
 
+// fs.writevSync with empty array of buffers
+{
+  const filename = getFileName(3);
+  const fd = fs.openSync(filename, 'w');
+  const written = fs.writevSync(fd, []);
+  assert.strictEqual(written, 0);
+  fs.closeSync(fd);
+
+}
+
 /**
  * Testing with wrong input types
  */
 {
-  const filename = getFileName(3);
+  const filename = getFileName(4);
   const fd = fs.openSync(filename, 'w');
 
   [false, 'test', {}, [{}], ['sdf'], null, undefined].forEach((i) => {

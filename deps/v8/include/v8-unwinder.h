@@ -7,7 +7,8 @@
 
 #include <memory>
 
-#include "v8config.h"  // NOLINT(build/include_directory)
+#include "v8-embedder-state-scope.h"  // NOLINT(build/include_directory)
+#include "v8config.h"                 // NOLINT(build/include_directory)
 
 namespace v8 {
 // Holds the callee saved registers needed for the stack unwinder. It is the
@@ -32,7 +33,10 @@ struct V8_EXPORT RegisterState {
 };
 
 // A StateTag represents a possible state of the VM.
-enum StateTag {
+// This enum is append-only to preserve compatibility with historical logs.
+// Add new states only at the end and do not reorder or remove existing values.
+// LINT.IfChange
+enum StateTag : uint16_t {
   JS,
   GC,
   PARSER,
@@ -41,16 +45,29 @@ enum StateTag {
   OTHER,
   EXTERNAL,
   ATOMICS_WAIT,
-  IDLE
+  IDLE,
+  LOGGING,
+  IDLE_EXTERNAL,
 };
+// LINT.ThenChange(../tools/profile.mjs, ../tools/tickprocessor.mjs)
+
+constexpr bool IsExternal(StateTag state) {
+  return state == EXTERNAL || state == IDLE_EXTERNAL;
+}
+
+constexpr bool IsIdle(StateTag state) {
+  return state == IDLE || state == IDLE_EXTERNAL;
+}
 
 // The output structure filled up by GetStackSample API function.
 struct SampleInfo {
-  size_t frames_count;            // Number of frames collected.
-  StateTag vm_state;              // Current VM state.
-  void* external_callback_entry;  // External callback address if VM is
-                                  // executing an external callback.
-  void* context;                  // Incumbent native context address.
+  size_t frames_count;              // Number of frames collected.
+  void* external_callback_entry;    // External callback address if VM is
+                                    // executing an external callback.
+  void* context;                    // Incumbent native context address.
+  void* embedder_context;           // Native context address for embedder state
+  StateTag vm_state;                // Current VM state.
+  EmbedderStateTag embedder_state;  // Current Embedder state
 };
 
 struct MemoryRange {

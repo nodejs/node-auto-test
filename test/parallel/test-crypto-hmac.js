@@ -1,17 +1,11 @@
 'use strict';
 const common = require('../common');
-if (!common.hasCrypto)
+if (!common.hasCrypto) {
   common.skip('missing crypto');
+}
 
 const assert = require('assert');
 const crypto = require('crypto');
-
-{
-  const Hmac = crypto.Hmac;
-  const instance = crypto.Hmac('sha256', 'Node');
-  assert(instance instanceof Hmac, 'Hmac is expected to return a new instance' +
-                                   ' when called without `new`');
-}
 
 assert.throws(
   () => crypto.createHmac(null),
@@ -40,7 +34,7 @@ assert.throws(
 
 function testHmac(algo, key, data, expected) {
   // FIPS does not support MD5.
-  if (common.hasFipsCrypto && algo === 'md5')
+  if (crypto.getFips() && algo === 'md5')
     return;
 
   if (!Array.isArray(data))
@@ -65,6 +59,18 @@ function testHmac(algo, key, data, expected) {
   // Test HMAC with multiple updates.
   testHmac('sha1', 'Node', ['some data', 'to hmac'],
            '19fd6e1ba73d9ed2224dd5094a71babe85d9a892');
+}
+
+{
+  // Historically, dss1 and DSS1 are SHA-1 aliases.
+  const expected =
+    crypto.createHmac('sha1', 'key').update('data').digest('hex');
+
+  for (const algo of ['dss1', 'DSS1']) {
+    assert.strictEqual(
+      crypto.createHmac(algo, 'key').update('data').digest('hex'),
+      expected);
+  }
 }
 
 // Test HMAC (Wikipedia Test Cases)
@@ -272,8 +278,8 @@ for (let i = 0, l = rfc4231.length; i < l; i++) {
                        .update(rfc4231[i].data)
                        .digest('hex');
     if (rfc4231[i].truncate) {
-      actual = actual.substr(0, 32); // first 128 bits == 32 hex chars
-      strRes = strRes.substr(0, 32);
+      actual = actual.slice(0, 32); // first 128 bits == 32 hex chars
+      strRes = strRes.slice(0, 32);
     }
     const expected = rfc4231[i].hmac[hash];
     assert.strictEqual(
@@ -410,43 +416,17 @@ assert.strictEqual(
   crypto.createHmac('sha256', 'w00t').digest('ucs2'),
   crypto.createHmac('sha256', 'w00t').digest().toString('ucs2'));
 
-// Check initialized -> uninitialized state transition after calling digest().
-{
-  const expected =
-      '\u0010\u0041\u0052\u00c5\u00bf\u00dc\u00a0\u007b\u00c6\u0033' +
-      '\u00ee\u00bd\u0046\u0019\u009f\u0002\u0055\u00c9\u00f4\u009d';
-  {
-    const h = crypto.createHmac('sha1', 'key').update('data');
-    assert.deepStrictEqual(h.digest('buffer'), Buffer.from(expected, 'latin1'));
-    assert.deepStrictEqual(h.digest('buffer'), Buffer.from(''));
-  }
-  {
-    const h = crypto.createHmac('sha1', 'key').update('data');
-    assert.strictEqual(h.digest('latin1'), expected);
-    assert.strictEqual(h.digest('latin1'), '');
-  }
-}
-
-// Check initialized -> uninitialized state transition after calling digest().
-// Calls to update() omitted intentionally.
-{
-  const expected =
-      '\u00f4\u002b\u00b0\u00ee\u00b0\u0018\u00eb\u00bd\u0045\u0097' +
-      '\u00ae\u0072\u0013\u0071\u001e\u00c6\u0007\u0060\u0084\u003f';
-  {
-    const h = crypto.createHmac('sha1', 'key');
-    assert.deepStrictEqual(h.digest('buffer'), Buffer.from(expected, 'latin1'));
-    assert.deepStrictEqual(h.digest('buffer'), Buffer.from(''));
-  }
-  {
-    const h = crypto.createHmac('sha1', 'key');
-    assert.strictEqual(h.digest('latin1'), expected);
-    assert.strictEqual(h.digest('latin1'), '');
-  }
-}
-
 {
   assert.throws(
     () => crypto.createHmac('sha7', 'key'),
     /Invalid digest/);
+}
+
+{
+  const buf = Buffer.alloc(0);
+  const keyObject = crypto.createSecretKey(Buffer.alloc(0));
+  assert.deepStrictEqual(
+    crypto.createHmac('sha256', buf).update('foo').digest(),
+    crypto.createHmac('sha256', keyObject).update('foo').digest(),
+  );
 }

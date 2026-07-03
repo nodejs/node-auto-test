@@ -1,14 +1,21 @@
 <!--
-Before submitting a pull request, please read
-https://github.com/nodejs/node/blob/HEAD/CONTRIBUTING.md.
+If you are submitting a pull request for the first time,
+check out the guide for first-time contributors for tips and answers to FAQs:
+https://github.com/nodejs/node/blob/HEAD/doc/contributing/first-contributions.md
 
-Commit message formatting guidelines:
-https://github.com/nodejs/node/blob/HEAD/doc/guides/contributing/pull-requests.md#commit-message-guidelines
+Before submitting a pull request, please read:
+
+- the CONTRIBUTING guide at https://github.com/nodejs/node/blob/HEAD/CONTRIBUTING.md
+- the commit message formatting guidelines at
+  https://github.com/nodejs/node/blob/HEAD/doc/contributing/pull-requests.md#commit-message-guidelines
 
 For code changes:
 1. Include tests for any bug fixes or new features.
 2. Update documentation if relevant.
 3. Ensure that `make -j4 test` (UNIX), or `vcbuild test` (Windows) passes.
+
+If you believe this PR should be highlighted in the Node.js CHANGELOG
+please add the `notable-change` label.
 
 Developer's Certificate of Origin 1.1
 

@@ -52,7 +52,7 @@ class SamplingTestHelper {
     global->Set(isolate_, "CollectSample",
                 v8::FunctionTemplate::New(isolate_, CollectSample));
     LocalContext env(isolate_, nullptr, global);
-    isolate_->SetJitCodeEventHandler(v8::kJitCodeEventDefault,
+    isolate_->SetJitCodeEventHandler(v8::kJitCodeEventEnumExisting,
                                      JitCodeEventHandler);
     CompileRun(v8_str(test_function.c_str()));
   }
@@ -74,7 +74,8 @@ class SamplingTestHelper {
   }
 
  private:
-  static void CollectSample(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  static void CollectSample(const v8::FunctionCallbackInfo<v8::Value>& info) {
+    CHECK(i::ValidateCallbackInfo(info));
     instance_->DoCollectSample();
   }
 
@@ -166,6 +167,34 @@ TEST(StackDepthDoesNotExceedMaxValue) {
   CHECK_EQ(Sample::kFramesLimit, helper.sample().size());
 }
 
+static const char* test_function_call_builtin =
+    "function func(depth) {"
+    "  if (depth == 2) CollectSample();"
+    "  else return [0].forEach(function recurse() { func(depth - 1) });"
+    "}";
+
+TEST(BuiltinsInSamples) {
+  SamplingTestHelper helper(std::string(test_function_call_builtin) +
+                            "func(10);");
+  Sample& sample = helper.sample();
+  CHECK_EQ(26, sample.size());
+  for (int i = 0; i < 20; i++) {
+    const SamplingTestHelper::CodeEventEntry* entry;
+    entry = helper.FindEventEntry(sample.begin()[i]);
+    switch (i % 3) {
+      case 0:
+        CHECK(std::string::npos != entry->name.find("func"));
+        break;
+      case 1:
+        CHECK(std::string::npos != entry->name.find("recurse"));
+        break;
+      case 2:
+        CHECK(std::string::npos != entry->name.find("ArrayForEach"));
+        break;
+    }
+  }
+}
+
 // The captured sample should have three pc values.
 // They should fall in the range where the compiled code resides.
 // The expected stack is:
@@ -173,7 +202,7 @@ TEST(StackDepthDoesNotExceedMaxValue) {
 //                              ^      ^       ^
 // sample.stack indices         2      1       0
 TEST(StackFramesConsistent) {
-  i::FLAG_allow_natives_syntax = true;
+  i::v8_flags.allow_natives_syntax = true;
   const char* test_script =
       "function test_sampler_api_inner() {"
       "  CollectSample();"

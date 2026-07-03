@@ -2,8 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --allow-natives-syntax --opt --noalways-opt
-
+// Flags: --allow-natives-syntax --turbofan
 // Test that JSResolvePromise takes a proper stability dependency
 // on the resolutions map if the infer receiver maps are unreliable
 // (as is the case for HeapConstants).
@@ -21,7 +20,7 @@
   %PrepareFunctionForOptimization(foo);
   assertInstanceof(foo(), Promise);
   assertInstanceof(foo(), Promise);
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertInstanceof(foo(), Promise);
   assertOptimized(foo);
 
@@ -57,7 +56,7 @@
   %PrepareFunctionForOptimization(foo);
   assertInstanceof(foo(), Promise);
   assertInstanceof(foo(), Promise);
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertInstanceof(foo(), Promise);
   assertOptimized(foo);
 

@@ -28,71 +28,44 @@
 
 #ifdef HAVE_CONFIG_H
 #  include <config.h>
-#endif /* HAVE_CONFIG_H */
+#endif /* defined(HAVE_CONFIG_H) */
 
 #include <ngtcp2/ngtcp2.h>
 
 #include "ngtcp2_mem.h"
-#include "ngtcp2_ksl.h"
 
 /* Implementation of unordered map */
 
-typedef uint64_t key_type;
-
-typedef struct ngtcp2_map_entry ngtcp2_map_entry;
-
-struct ngtcp2_map_entry {
-  key_type key;
-};
-
-typedef struct ngtcp2_map_bucket {
-  ngtcp2_map_entry *ptr;
-  ngtcp2_ksl *ksl;
-} ngtcp2_map_bucket;
+typedef uint64_t ngtcp2_map_key_type;
 
 typedef struct ngtcp2_map {
-  ngtcp2_map_bucket *table;
+  ngtcp2_map_key_type *keys;
+  void **data;
+  /* psl is the Probe Sequence Length.  0 has special meaning that the
+     element is not stored at i-th position if psl[i] == 0.  Because
+     of this, the actual psl value is psl[i] - 1 if psl[i] > 0. */
+  uint8_t *psl;
   const ngtcp2_mem *mem;
+  uint64_t seed;
   size_t size;
-  uint32_t tablelen;
+  size_t hashbits;
 } ngtcp2_map;
 
 /*
- * Initializes the map |map|.
- *
- * This function returns 0 if it succeeds, or one of the following
- * negative error codes:
- *
- * NGTCP2_ERR_NOMEM
- *   Out of memory
+ * ngtcp2_map_init initializes the map |map|.
  */
-int ngtcp2_map_init(ngtcp2_map *map, const ngtcp2_mem *mem);
+void ngtcp2_map_init(ngtcp2_map *map, uint64_t seed, const ngtcp2_mem *mem);
 
 /*
- * Deallocates any resources allocated for |map|. The stored entries
- * are not freed by this function. Use ngtcp2_map_each_free() to free
- * each entries.
+ * ngtcp2_map_free deallocates any resources allocated for |map|.  The
+ * stored entries are not freed by this function.  Use
+ * ngtcp2_map_each() to free each entry.
  */
 void ngtcp2_map_free(ngtcp2_map *map);
 
 /*
- * Deallocates each entries using |func| function and any resources
- * allocated for |map|. The |func| function is responsible for freeing
- * given the |entry| object. The |ptr| will be passed to the |func| as
- * send argument. The return value of the |func| will be ignored.
- */
-void ngtcp2_map_each_free(ngtcp2_map *map,
-                          int (*func)(ngtcp2_map_entry *entry, void *ptr),
-                          void *ptr);
-
-/*
- * Initializes the |entry| with the |key|. All entries to be inserted
- * to the map must be initialized with this function.
- */
-void ngtcp2_map_entry_init(ngtcp2_map_entry *entry, key_type key);
-
-/*
- * Inserts the new |entry| with the key |entry->key| to the map |map|.
+ * ngtcp2_map_insert inserts the new |data| with the |key| to the map
+ * |map|.
  *
  * This function returns 0 if it succeeds, or one of the following
  * negative error codes:
@@ -100,19 +73,19 @@ void ngtcp2_map_entry_init(ngtcp2_map_entry *entry, key_type key);
  * NGTCP2_ERR_INVALID_ARGUMENT
  *     The item associated by |key| already exists.
  * NGTCP2_ERR_NOMEM
- *   Out of memory
+ *     Out of memory
  */
-int ngtcp2_map_insert(ngtcp2_map *map, ngtcp2_map_entry *entry);
+int ngtcp2_map_insert(ngtcp2_map *map, ngtcp2_map_key_type key, void *data);
 
 /*
- * Returns the entry associated by the key |key|.  If there is no such
- * entry, this function returns NULL.
+ * ngtcp2_map_find returns the entry associated by the key |key|.  If
+ * there is no such entry, this function returns NULL.
  */
-ngtcp2_map_entry *ngtcp2_map_find(ngtcp2_map *map, key_type key);
+void *ngtcp2_map_find(const ngtcp2_map *map, ngtcp2_map_key_type key);
 
 /*
- * Removes the entry associated by the key |key| from the |map|.  The
- * removed entry is not freed by this function.
+ * ngtcp2_map_remove removes the entry associated by the key |key|
+ * from the |map|.  The removed entry is not freed by this function.
  *
  * This function returns 0 if it succeeds, or one of the following
  * negative error codes:
@@ -120,33 +93,36 @@ ngtcp2_map_entry *ngtcp2_map_find(ngtcp2_map *map, key_type key);
  * NGTCP2_ERR_INVALID_ARGUMENT
  *     The entry associated by |key| does not exist.
  */
-int ngtcp2_map_remove(ngtcp2_map *map, key_type key);
+int ngtcp2_map_remove(ngtcp2_map *map, ngtcp2_map_key_type key);
 
 /*
- * Removes all entries from |map|.
+ * ngtcp2_map_clear removes all entries from |map|.  The removed entry
+ * is not freed by this function.
  */
 void ngtcp2_map_clear(ngtcp2_map *map);
 
 /*
- * Returns the number of items stored in the map |map|.
+ * ngtcp2_map_size returns the number of items stored in the map
+ * |map|.
  */
-size_t ngtcp2_map_size(ngtcp2_map *map);
+size_t ngtcp2_map_size(const ngtcp2_map *map);
 
 /*
- * Applies the function |func| to each entry in the |map| with the
- * optional user supplied pointer |ptr|.
+ * ngtcp2_map_each applies the function |func| to each entry in the
+ * |map| with the optional user supplied pointer |ptr|.
  *
  * If the |func| returns 0, this function calls the |func| with the
- * next entry. If the |func| returns nonzero, it will not call the
+ * next entry.  If the |func| returns nonzero, it will not call the
  * |func| for further entries and return the return value of the
  * |func| immediately.  Thus, this function returns 0 if all the
  * invocations of the |func| return 0, or nonzero value which the last
  * invocation of |func| returns.
- *
- * Don't use this function to free each entry. Use
- * ngtcp2_map_each_free() instead.
  */
-int ngtcp2_map_each(ngtcp2_map *map,
-                    int (*func)(ngtcp2_map_entry *entry, void *ptr), void *ptr);
+int ngtcp2_map_each(const ngtcp2_map *map, int (*func)(void *data, void *ptr),
+                    void *ptr);
 
-#endif /* NGTCP2_MAP_H */
+#ifndef WIN32
+void ngtcp2_map_print_distance(const ngtcp2_map *map);
+#endif /* !defined(WIN32) */
+
+#endif /* !defined(NGTCP2_MAP_H) */

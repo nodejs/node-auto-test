@@ -8,7 +8,9 @@ const assert = require('assert');
 const { EventEmitter } = require('events');
 const { getStringWidth } = require('internal/util/inspect');
 
-common.skipIfDumbTerminal();
+if (process.env.TERM === 'dumb') {
+  common.skip('skipping - dumb terminal');
+}
 
 // This test verifies that the tab completion supports unicode and the writes
 // are limited to the minimum.
@@ -42,11 +44,11 @@ common.skipIfDumbTerminal();
       const width = getStringWidth(char) - 1;
 
       class FakeInput extends EventEmitter {
-        columns = ((width + 1) * 10 + (lineBreak ? 0 : 10)) * 3
+        columns = ((width + 1) * 10 + (lineBreak ? 0 : 10)) * 3;
 
         write = common.mustCall((data) => {
           output += data;
-        }, 6)
+        }, 6);
 
         resume() {}
         pause() {}
@@ -73,12 +75,12 @@ common.skipIfDumbTerminal();
       rli.on('line', common.mustNotCall());
       for (const character of `${char}\t\t`) {
         fi.emit('data', character);
-        queueMicrotask(() => {
+        queueMicrotask(common.mustCall(() => {
           assert.strictEqual(output, expectations.shift());
           output = '';
-        });
+        }));
       }
-      rli.close();
+      fi.end();
     });
   });
 });
@@ -86,11 +88,11 @@ common.skipIfDumbTerminal();
 {
   let output = '';
   class FakeInput extends EventEmitter {
-    columns = 80
+    columns = 80;
 
     write = common.mustCall((data) => {
       output += data;
-    }, 1)
+    }, 1);
 
     resume() {}
     pause() {}
@@ -108,9 +110,9 @@ common.skipIfDumbTerminal();
 
   rli.on('line', common.mustNotCall());
   fi.emit('data', '\t');
-  queueMicrotask(() => {
+  queueMicrotask(common.mustCall(() => {
     assert.match(output, /^Tab completion error: Error: message/);
     output = '';
-  });
-  rli.close();
+  }));
+  fi.end();
 }

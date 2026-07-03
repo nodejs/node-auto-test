@@ -7,8 +7,12 @@
 
 #include <stdio.h>
 
+#include <iosfwd>
+
+#include "v8-callbacks.h"     // NOLINT(build/include_directory)
 #include "v8-local-handle.h"  // NOLINT(build/include_directory)
 #include "v8-maybe.h"         // NOLINT(build/include_directory)
+#include "v8-primitive.h"     // NOLINT(build/include_directory)
 #include "v8config.h"         // NOLINT(build/include_directory)
 
 namespace v8 {
@@ -58,71 +62,43 @@ class ScriptOriginOptions {
  */
 class V8_EXPORT ScriptOrigin {
  public:
-  #if defined(_MSC_VER) && _MSC_VER >= 1910 /* Disable on VS2015 */
-  V8_DEPRECATE_SOON("Use constructor with primitive C++ types")
-  #endif
-  ScriptOrigin(
-      Local<Value> resource_name, Local<Integer> resource_line_offset,
-      Local<Integer> resource_column_offset,
-      Local<Boolean> resource_is_shared_cross_origin = Local<Boolean>(),
-      Local<Integer> script_id = Local<Integer>(),
-      Local<Value> source_map_url = Local<Value>(),
-      Local<Boolean> resource_is_opaque = Local<Boolean>(),
-      Local<Boolean> is_wasm = Local<Boolean>(),
-      Local<Boolean> is_module = Local<Boolean>(),
-      Local<PrimitiveArray> host_defined_options = Local<PrimitiveArray>());
-  #if defined(_MSC_VER) && _MSC_VER >= 1910 /* Disable on VS2015 */
-  V8_DEPRECATE_SOON("Use constructor that takes an isolate")
-  #endif
-  explicit ScriptOrigin(
-      Local<Value> resource_name, int resource_line_offset = 0,
-      int resource_column_offset = 0,
-      bool resource_is_shared_cross_origin = false, int script_id = -1,
-      Local<Value> source_map_url = Local<Value>(),
-      bool resource_is_opaque = false, bool is_wasm = false,
-      bool is_module = false,
-      Local<PrimitiveArray> host_defined_options = Local<PrimitiveArray>());
-  V8_INLINE ScriptOrigin(
-      Isolate* isolate, Local<Value> resource_name,
-      int resource_line_offset = 0, int resource_column_offset = 0,
-      bool resource_is_shared_cross_origin = false, int script_id = -1,
-      Local<Value> source_map_url = Local<Value>(),
-      bool resource_is_opaque = false, bool is_wasm = false,
-      bool is_module = false,
-      Local<PrimitiveArray> host_defined_options = Local<PrimitiveArray>())
-      : isolate_(isolate),
-        resource_name_(resource_name),
+  V8_INLINE ScriptOrigin(Local<Value> resource_name,
+                         int resource_line_offset = 0,
+                         int resource_column_offset = 0,
+                         bool resource_is_shared_cross_origin = false,
+                         int script_id = -1,
+                         Local<Value> source_map_url = Local<Value>(),
+                         bool resource_is_opaque = false, bool is_wasm = false,
+                         bool is_module = false,
+                         Local<Data> host_defined_options = Local<Data>())
+      : resource_name_(resource_name),
         resource_line_offset_(resource_line_offset),
         resource_column_offset_(resource_column_offset),
         options_(resource_is_shared_cross_origin, resource_is_opaque, is_wasm,
                  is_module),
         script_id_(script_id),
         source_map_url_(source_map_url),
-        host_defined_options_(host_defined_options) {}
+        host_defined_options_(host_defined_options) {
+    VerifyHostDefinedOptions();
+  }
 
   V8_INLINE Local<Value> ResourceName() const;
-  V8_DEPRECATE_SOON("Use getter with primitive C++ types.")
-  V8_INLINE Local<Integer> ResourceLineOffset() const;
-  V8_DEPRECATE_SOON("Use getter with primitive C++ types.")
-  V8_INLINE Local<Integer> ResourceColumnOffset() const;
-  V8_DEPRECATE_SOON("Use getter with primitive C++ types.")
-  V8_INLINE Local<Integer> ScriptID() const;
   V8_INLINE int LineOffset() const;
   V8_INLINE int ColumnOffset() const;
   V8_INLINE int ScriptId() const;
   V8_INLINE Local<Value> SourceMapUrl() const;
-  V8_INLINE Local<PrimitiveArray> HostDefinedOptions() const;
+  V8_INLINE Local<Data> GetHostDefinedOptions() const;
   V8_INLINE ScriptOriginOptions Options() const { return options_; }
 
  private:
-  Isolate* isolate_;
+  void VerifyHostDefinedOptions() const;
   Local<Value> resource_name_;
   int resource_line_offset_;
   int resource_column_offset_;
   ScriptOriginOptions options_;
   int script_id_;
   Local<Value> source_map_url_;
-  Local<PrimitiveArray> host_defined_options_;
+  Local<Data> host_defined_options_;
 };
 
 /**
@@ -131,11 +107,6 @@ class V8_EXPORT ScriptOrigin {
 class V8_EXPORT Message {
  public:
   Local<String> Get() const;
-
-  /**
-   * Return the isolate to which the Message belongs.
-   */
-  Isolate* GetIsolate() const;
 
   V8_WARN_UNUSED_RESULT MaybeLocal<String> GetSource(
       Local<Context> context) const;
@@ -210,8 +181,14 @@ class V8_EXPORT Message {
   bool IsSharedCrossOrigin() const;
   bool IsOpaque() const;
 
-  // TODO(1245381): Print to a string instead of on a FILE.
-  static void PrintCurrentStackTrace(Isolate* isolate, FILE* out);
+  /**
+   * If provided, the callback can be used to selectively include
+   * or redact frames based on their script names. (true to include a frame)
+   */
+  static void PrintCurrentStackTrace(
+      Isolate* isolate, std::ostream& out,
+      PrintCurrentStackTraceFilterCallback should_include_frame_callback =
+          nullptr);
 
   static const int kNoLineNumberInfo = 0;
   static const int kNoColumnInfo = 0;
@@ -221,7 +198,7 @@ class V8_EXPORT Message {
 
 Local<Value> ScriptOrigin::ResourceName() const { return resource_name_; }
 
-Local<PrimitiveArray> ScriptOrigin::HostDefinedOptions() const {
+Local<Data> ScriptOrigin::GetHostDefinedOptions() const {
   return host_defined_options_;
 }
 

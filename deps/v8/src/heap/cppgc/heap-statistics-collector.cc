@@ -8,11 +8,11 @@
 #include <unordered_map>
 
 #include "include/cppgc/heap-statistics.h"
-#include "include/cppgc/name-provider.h"
 #include "src/heap/cppgc/free-list.h"
 #include "src/heap/cppgc/globals.h"
 #include "src/heap/cppgc/heap-base.h"
 #include "src/heap/cppgc/heap-object-header.h"
+#include "src/heap/cppgc/page-memory.h"
 #include "src/heap/cppgc/raw-heap.h"
 #include "src/heap/cppgc/stats-collector.h"
 
@@ -73,20 +73,22 @@ void FinalizeSpace(HeapStatistics* stats,
 }
 
 void RecordObjectType(
-    std::unordered_map<const char*, size_t>& type_map,
+    std::unordered_map<const void*, size_t>& type_map,
     std::vector<HeapStatistics::ObjectStatsEntry>& object_statistics,
     HeapObjectHeader* header, size_t object_size) {
-  if (!NameProvider::HideInternalNames()) {
-    // Tries to insert a new entry into the typemap with a running counter. If
-    // the entry is already present, just returns the old one.
-    const auto it = type_map.insert({header->GetName().value, type_map.size()});
-    const size_t type_index = it.first->second;
-    if (object_statistics.size() <= type_index) {
-      object_statistics.resize(type_index + 1);
-    }
-    object_statistics[type_index].allocated_bytes += object_size;
-    object_statistics[type_index].object_count++;
+  // Tries to insert a new entry into the typemap with a running counter. If
+  // the entry is already present, just returns the old one.
+  // Internal cpp objects that do not inherit from NameProvider are recorded
+  // as and merged under "InternalNode". For more detailed statistics Enable
+  // the build flag CPPGC_SUPPORTS_OBJECT_NAMES to instead use the C++ class
+  // name for more detailed statistics.
+  const auto it = type_map.insert({header->GetName().value, type_map.size()});
+  const size_t type_index = it.first->second;
+  if (object_statistics.size() <= type_index) {
+    object_statistics.resize(type_index + 1);
   }
+  object_statistics[type_index].allocated_bytes += object_size;
+  object_statistics[type_index].object_count++;
 }
 
 }  // namespace
@@ -97,24 +99,27 @@ HeapStatistics HeapStatisticsCollector::CollectDetailedStatistics(
   stats.detail_level = HeapStatistics::DetailLevel::kDetailed;
   current_stats_ = &stats;
 
-  if (!NameProvider::HideInternalNames()) {
-    // Add a dummy type so that a type index of zero has a valid mapping but
-    // shows an invalid type.
-    type_name_to_index_map_.insert({"Invalid type", 0});
-  }
+  ClassNameAsHeapObjectNameScope class_names_scope(*heap);
 
   Traverse(heap->raw_heap());
   FinalizeSpace(current_stats_, &current_space_stats_, &current_page_stats_);
 
-  if (!NameProvider::HideInternalNames()) {
-    stats.type_names.resize(type_name_to_index_map_.size());
-    for (auto& it : type_name_to_index_map_) {
-      stats.type_names[it.second] = it.first;
-    }
+  stats.type_names.resize(type_name_to_index_map_.size());
+  for (auto& it : type_name_to_index_map_) {
+    stats.type_names[it.second] = reinterpret_cast<const char*>(it.first);
   }
 
-  DCHECK_EQ(heap->stats_collector()->allocated_memory_size(),
+  // Resident set size may be smaller than the than the recorded size in
+  // `StatsCollector` due to discarded memory that is tracked on page level.
+  // This only holds before we account for pooled memory.
+  DCHECK_GE(heap->stats_collector()->allocated_memory_size(),
             stats.resident_size_bytes);
+
+  size_t pooled_memory = heap->page_backend()->page_pool().PooledMemory();
+  stats.committed_size_bytes += pooled_memory;
+  stats.resident_size_bytes += pooled_memory;
+  stats.pooled_memory_size_bytes = pooled_memory;
+
   return stats;
 }
 

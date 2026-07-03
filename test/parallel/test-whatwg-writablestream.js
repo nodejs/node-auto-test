@@ -4,6 +4,8 @@
 const common = require('../common');
 const assert = require('assert');
 
+const { isErrored, isWritable } = require('stream');
+
 const {
   WritableStream,
   WritableStreamDefaultController,
@@ -60,6 +62,18 @@ class Sink {
   assert.strictEqual(typeof stream.getWriter, 'function');
 }
 
+['a', false, 1, null].forEach((sink) => {
+  assert.throws(() => new WritableStream(sink), {
+    code: 'ERR_INVALID_ARG_TYPE',
+  });
+});
+
+['a', false, 1].forEach((strategy) => {
+  assert.throws(() => new WritableStream({}, strategy), {
+    code: 'ERR_INVALID_ARG_TYPE',
+  });
+});
+
 [1, false, ''].forEach((type) => {
   assert.throws(() => new WritableStream({ type }), {
     code: 'ERR_INVALID_ARG_VALUE',
@@ -79,9 +93,11 @@ class Sink {
 });
 
 {
-  new WritableStream({}, 1);
-  new WritableStream({}, 'a');
+  new WritableStream({});
+  new WritableStream([]);
   new WritableStream({}, null);
+  new WritableStream({}, {});
+  new WritableStream({}, []);
 }
 
 {
@@ -129,7 +145,7 @@ class Sink {
 
   const writer = stream.getWriter();
 
-  assert.rejects(writer.closed, error);
+  assert.rejects(writer.closed, error).then(common.mustCall());
 
   writer.abort(error).then(common.mustCall(() => {
     assert.strictEqual(stream[kState].state, 'errored');
@@ -158,15 +174,36 @@ class Sink {
 }
 
 {
+  const stream = new WritableStream();
+  assert.strictEqual(isWritable(stream), true);
+  stream.close().then(common.mustCall(() => {
+    assert.strictEqual(isWritable(stream), false);
+  }));
+}
+
+{
+  const stream = new WritableStream({
+    write: common.mustCall((chunk, controller) => {
+      controller.error(new Error());
+    })
+  });
+  const writer = stream.getWriter();
+  assert.strictEqual(isErrored(stream), false);
+  writer.write().then(common.mustCall(() => {
+    assert.strictEqual(isErrored(stream), true);
+  }));
+}
+
+{
   assert.throws(() => Reflect.get(WritableStream.prototype, 'locked', {}), {
     code: 'ERR_INVALID_THIS',
   });
   assert.rejects(() => WritableStream.prototype.abort({}), {
     code: 'ERR_INVALID_THIS',
-  });
+  }).then(common.mustCall());
   assert.rejects(() => WritableStream.prototype.close({}), {
     code: 'ERR_INVALID_THIS',
-  });
+  }).then(common.mustCall());
   assert.throws(() => WritableStream.prototype.getWriter.call(), {
     code: 'ERR_INVALID_THIS',
   });
@@ -176,31 +213,25 @@ class Sink {
   assert.rejects(
     Reflect.get(WritableStreamDefaultWriter.prototype, 'closed'), {
       code: 'ERR_INVALID_THIS',
-    });
+    }).then(common.mustCall());
   assert.rejects(
     Reflect.get(WritableStreamDefaultWriter.prototype, 'ready'), {
       code: 'ERR_INVALID_THIS',
-    });
+    }).then(common.mustCall());
   assert.throws(
     () => Reflect.get(WritableStreamDefaultWriter.prototype, 'desiredSize'), {
       code: 'ERR_INVALID_THIS',
     });
   assert.rejects(WritableStreamDefaultWriter.prototype.abort({}), {
     code: 'ERR_INVALID_THIS',
-  });
+  }).then(common.mustCall());
   assert.rejects(WritableStreamDefaultWriter.prototype.close({}), {
     code: 'ERR_INVALID_THIS',
-  });
+  }).then(common.mustCall());
   assert.rejects(WritableStreamDefaultWriter.prototype.write({}), {
     code: 'ERR_INVALID_THIS',
-  });
+  }).then(common.mustCall());
   assert.throws(() => WritableStreamDefaultWriter.prototype.releaseLock({}), {
-    code: 'ERR_INVALID_THIS',
-  });
-
-  assert.throws(() => {
-    Reflect.get(WritableStreamDefaultController.prototype, 'abortReason', {});
-  }, {
     code: 'ERR_INVALID_THIS',
   });
 
@@ -256,5 +287,5 @@ class Sink {
   writer.abort(new Error('boom'));
 
   assert.strictEqual(writer.desiredSize, null);
-  setImmediate(() => assert.strictEqual(writer.desiredSize, null));
+  setImmediate(common.mustCall(() => assert.strictEqual(writer.desiredSize, null)));
 }

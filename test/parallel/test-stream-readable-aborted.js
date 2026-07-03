@@ -2,7 +2,7 @@
 
 const common = require('../common');
 const assert = require('assert');
-const { Readable } = require('stream');
+const { Readable, Duplex } = require('stream');
 
 {
   const readable = new Readable({
@@ -49,9 +49,18 @@ const { Readable } = require('stream');
     assert.strictEqual(readable.readableAborted, false);
     readable.destroy();
     assert.strictEqual(readable.readableAborted, false);
-    queueMicrotask(() => {
+    queueMicrotask(common.mustCall(() => {
       assert.strictEqual(readable.readableAborted, false);
-    });
+    }));
   }));
   readable.resume();
+}
+
+{
+  const duplex = new Duplex({
+    readable: false,
+    write() {}
+  });
+  duplex.destroy();
+  assert.strictEqual(duplex.readableAborted, false);
 }

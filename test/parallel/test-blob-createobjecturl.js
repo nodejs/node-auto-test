@@ -24,11 +24,17 @@ const assert = require('assert');
   const id = URL.createObjectURL(blob);
   assert.strictEqual(typeof id, 'string');
   const otherBlob = resolveObjectURL(id);
+  assert.ok(otherBlob instanceof Blob);
+  assert.strictEqual(otherBlob.constructor, Blob);
   assert.strictEqual(otherBlob.size, 5);
   assert.strictEqual(
     Buffer.from(await otherBlob.arrayBuffer()).toString(),
     'hello');
   URL.revokeObjectURL(id);
+
+  // should do nothing
+  URL.revokeObjectURL(id);
+
   assert.strictEqual(resolveObjectURL(id), undefined);
 
   // Leaving a Blob registered should not cause an assert

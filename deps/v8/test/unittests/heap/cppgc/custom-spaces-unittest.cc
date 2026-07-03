@@ -77,6 +77,14 @@ class CustomGCedFinal2 final : public CustomGCedBase {
   ~CustomGCedFinal2() { g_destructor_callcount++; }
 };
 
+constexpr size_t kDoubleWord = 2 * sizeof(void*);
+
+class alignas(kDoubleWord) CustomGCedWithDoubleWordAlignment final
+    : public GarbageCollected<CustomGCedWithDoubleWordAlignment> {
+ public:
+  void Trace(Visitor*) const {}
+};
+
 }  // namespace
 
 }  // namespace internal
@@ -93,7 +101,12 @@ struct SpaceTrait<internal::CustomGCed2> {
 
 template <typename T>
 struct SpaceTrait<
-    T, std::enable_if_t<std::is_base_of<internal::CustomGCedBase, T>::value>> {
+    T, std::enable_if_t<std::is_base_of_v<internal::CustomGCedBase, T>>> {
+  using Space = CustomSpace1;
+};
+
+template <>
+struct SpaceTrait<internal::CustomGCedWithDoubleWordAlignment> {
   using Space = CustomSpace1;
 };
 
@@ -112,6 +125,14 @@ TEST_F(TestWithHeapWithCustomSpaces, AllocateOnCustomSpaces) {
             NormalPage::FromPayload(custom2)->space().index());
   EXPECT_EQ(static_cast<size_t>(RawHeap::RegularSpaceType::kNormal1),
             NormalPage::FromPayload(regular)->space().index());
+}
+
+TEST_F(TestWithHeapWithCustomSpaces, AllocateDoubleWordAlignedOnCustomSpace) {
+  static constexpr size_t kAlignmentMask = kDoubleWord - 1;
+  auto* custom_aligned =
+      MakeGarbageCollected<CustomGCedWithDoubleWordAlignment>(
+          GetHeap()->GetAllocationHandle());
+  EXPECT_EQ(0u, reinterpret_cast<uintptr_t>(custom_aligned) & kAlignmentMask);
 }
 
 TEST_F(TestWithHeapWithCustomSpaces, DifferentSpacesUsesDifferentPages) {

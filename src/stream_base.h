@@ -37,7 +37,7 @@ class StreamReq {
   // BaseObject, and the slots are used for the identical purpose.
   enum InternalFields {
     kSlot = BaseObject::kSlot,
-    kStreamReqField = BaseObject::kInternalFieldCount,
+    kStreamReqField = AsyncWrap::kInternalFieldCount,
     kInternalFieldCount
   };
 
@@ -51,7 +51,7 @@ class StreamReq {
 
   // TODO(RaisinTen): Update the return type to a Maybe, so that we can indicate
   // if there is a pending exception/termination.
-  inline void Done(int status, const char* error_str = nullptr);
+  void Done(int status, const char* error_str = nullptr);
   inline void Dispose();
 
   StreamBase* stream() const { return stream_; }
@@ -225,7 +225,7 @@ class StreamResource {
   // These need to be implemented on the readable side of this stream:
 
   // Start reading from the underlying resource. This is called by the consumer
-  // when more data is desired. Use `EmitAlloc()` and `EmitData()` to
+  // when more data is desired. Use `EmitAlloc()` and `EmitRead()` to
   // pass data along to the consumer.
   virtual int ReadStart() = 0;
   // Stop reading from the underlying resource. This is called by the
@@ -244,14 +244,21 @@ class StreamResource {
   // `*bufs` and `*count` accordingly. This is a no-op by default.
   // Return 0 for success and a libuv error code for failures.
   virtual int DoTryWrite(uv_buf_t** bufs, size_t* count);
-  // Initiate a write of data. If the write completes synchronously, return 0 on
-  // success (with bufs modified to indicate how much data was consumed) or a
-  // libuv error code on failure. If the write will complete asynchronously,
-  // return 0. When the write completes asynchronously, call req_wrap->Done()
-  // with 0 on success (with bufs modified to indicate how much data was
-  // consumed) or a libuv error code on failure. Do not call req_wrap->Done() if
-  // the write completes synchronously, that is, it should never be called
-  // before DoWrite() has returned.
+  // Indicates whether this subclass overrides the DoTryWrite
+  virtual inline bool HasDoTryWrite() const { return false; }
+  // Initiate a write of data.
+  // Upon an immediate failure, a libuv error code is returned,
+  // w->Done() will never be called and caller should free `bufs`.
+  // Otherwise, 0 is returned and w->Done(status) will be called
+  // with status set to either
+  //  (1) 0 after all data are written, or
+  //  (2) a libuv error code when an error occurs
+  // in either case, w->Done() will never be called before DoWrite() returns.
+  // When 0 is returned:
+  //  (1) memory specified by `bufs` and `count` must remain valid until
+  //      w->Done() gets called.
+  //  (2) `bufs` might or might not be changed, caller should not rely on this.
+  //  (3) `bufs` should be freed after w->Done() gets called.
   virtual int DoWrite(WriteWrap* w,
                       uv_buf_t* bufs,
                       size_t count,
@@ -271,7 +278,7 @@ class StreamResource {
   inline void PushStreamListener(StreamListener* listener);
   // Remove a listener, and, if this was the currently active one,
   // transfer ownership back to the previous listener.
-  inline void RemoveStreamListener(StreamListener* listener);
+  void RemoveStreamListener(StreamListener* listener);
 
  protected:
   // Call the current listener's OnStreamAlloc() method.
@@ -303,11 +310,13 @@ class StreamBase : public StreamResource {
   // BaseObject (it's possible for it not to, however).
   enum InternalFields {
     kSlot = BaseObject::kSlot,
-    kStreamBaseField = BaseObject::kInternalFieldCount,
+    kStreamBaseField = AsyncWrap::kInternalFieldCount,
     kOnReadFunctionField,
     kInternalFieldCount
   };
 
+  static void AddMethods(IsolateData* isolate_data,
+                         v8::Local<v8::FunctionTemplate> target);
   static void AddMethods(Environment* env,
                          v8::Local<v8::FunctionTemplate> target);
   static void RegisterExternalReferences(ExternalReferenceRegistry* registry);
@@ -334,8 +343,7 @@ class StreamBase : public StreamResource {
   // ShutdownWrap object (that was created in JS), or a new one will be created.
   // Returns 1 in case of a synchronous completion, 0 in case of asynchronous
   // completion, and a libuv error case in case of synchronous failure.
-  inline int Shutdown(
-      v8::Local<v8::Object> req_wrap_obj = v8::Local<v8::Object>());
+  int Shutdown(v8::Local<v8::Object> req_wrap_obj = v8::Local<v8::Object>());
 
   // TODO(RaisinTen): Update the return type to a Maybe, so that we can indicate
   // if there is a pending exception/termination.
@@ -343,13 +351,17 @@ class StreamBase : public StreamResource {
   // WriteWrap object (that was created in JS), or a new one will be created.
   // This will first try to write synchronously using `DoTryWrite()`, then
   // asynchronously using `DoWrite()`.
+  // Caller can pass `skip_try_write` as true if it has already called
+  // `DoTryWrite()` and ends up with a partial write, or it knows that the
+  // write is too large to finish synchronously.
   // If the return value indicates a synchronous completion, no callback will
   // be invoked.
-  inline StreamWriteResult Write(
+  StreamWriteResult Write(
       uv_buf_t* bufs,
       size_t count,
       uv_stream_t* send_handle = nullptr,
-      v8::Local<v8::Object> req_wrap_obj = v8::Local<v8::Object>());
+      v8::Local<v8::Object> req_wrap_obj = v8::Local<v8::Object>(),
+      bool skip_try_write = false);
 
   // These can be overridden by subclasses to get more specific wrap instances.
   // For example, a subclass Foo could create a FooWriteWrap or FooShutdownWrap
@@ -401,7 +413,14 @@ class StreamBase : public StreamResource {
   EmitToJSStreamListener default_listener_;
 
   void SetWriteResult(const StreamWriteResult& res);
-  static void AddMethod(Environment* env,
+  static void AddAccessor(v8::Isolate* isolate,
+                          v8::Local<v8::Signature> sig,
+                          enum v8::PropertyAttribute attributes,
+                          v8::Local<v8::FunctionTemplate> t,
+                          JSMethodFunction* getter,
+                          JSMethodFunction* setter,
+                          v8::Local<v8::String> str);
+  static void AddMethod(v8::Isolate* isolate,
                         v8::Local<v8::Signature> sig,
                         enum v8::PropertyAttribute attributes,
                         v8::Local<v8::FunctionTemplate> t,
@@ -421,6 +440,11 @@ class StreamBase : public StreamResource {
 template <typename OtherBase>
 class SimpleShutdownWrap : public ShutdownWrap, public OtherBase {
  public:
+  enum InternalFields {
+    kInternalFieldCount = std::max<uint32_t>(ShutdownWrap::kInternalFieldCount,
+                                             OtherBase::kInternalFieldCount),
+  };
+
   SimpleShutdownWrap(StreamBase* stream,
                      v8::Local<v8::Object> req_wrap_obj);
 
@@ -438,6 +462,11 @@ class SimpleShutdownWrap : public ShutdownWrap, public OtherBase {
 template <typename OtherBase>
 class SimpleWriteWrap : public WriteWrap, public OtherBase {
  public:
+  enum InternalFields {
+    kInternalFieldCount = std::max<uint32_t>(WriteWrap::kInternalFieldCount,
+                                             OtherBase::kInternalFieldCount),
+  };
+
   SimpleWriteWrap(StreamBase* stream,
                   v8::Local<v8::Object> req_wrap_obj);
 

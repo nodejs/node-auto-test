@@ -19,7 +19,7 @@ Both V8 and Node.js use ICU to provide internationalization functionality.
 
 Note:
 
-> The files in this directory were written for the Node.js v0.12 effort.
+> The files in this directory were written for the Node.js 0.12 effort.
 > The original intent was to merge the tools such as `icutrim.py` and `iculslocs.cc`
 > back into ICU. ICU has gained its own “data slicer” tool.
 > There is an issue open, <https://github.com/nodejs/node/issues/25136>
@@ -27,8 +27,8 @@ Note:
 
 ## See Also
 
-* [docs/guides/maintaining-icu.md](../../doc/guides/maintaining-icu.md) for
-  information on maintaining ICU in Node.js
+* [docs/guides/maintaining-icu.md](../../doc/contributing/maintaining/maintaining-icu.md)
+  for information on maintaining ICU in Node.js
 
 * [docs/api/intl.md](../../doc/api/intl.md) for information on the
   internationalization-related APIs in Node.js
@@ -36,4 +36,4 @@ Note:
 * [The ICU Homepage][ICU]
 
 [ICU]: http://icu-project.org
-[ICU data slicer]: https://github.com/unicode-org/icu/blob/master/docs/userguide/icu_data/buildtool.md
+[ICU data slicer]: https://github.com/unicode-org/icu/blob/HEAD/docs/userguide/icu_data/buildtool.md

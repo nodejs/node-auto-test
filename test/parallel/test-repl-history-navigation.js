@@ -7,10 +7,11 @@ const stream = require('stream');
 const REPL = require('internal/repl');
 const assert = require('assert');
 const fs = require('fs');
-const path = require('path');
 const { inspect } = require('util');
 
-common.skipIfDumbTerminal();
+if (process.env.TERM === 'dumb') {
+  common.skip('skipping - dumb terminal');
+}
 
 const tmpdir = require('../common/tmpdir');
 tmpdir.refresh();
@@ -18,7 +19,7 @@ tmpdir.refresh();
 process.throwDeprecation = true;
 process.on('warning', common.mustNotCall());
 
-const defaultHistoryPath = path.join(tmpdir.path, '.node_repl_history');
+const defaultHistoryPath = tmpdir.resolve('.node_repl_history');
 
 // Create an input stream specialized for testing an array of actions
 class ActionStream extends stream.Stream {
@@ -74,6 +75,7 @@ const tests = [
     env: { NODE_REPL_HISTORY: defaultHistoryPath },
     test: [ 'let ab = 45', ENTER,
             '555 + 909', ENTER,
+            'let autocompleteMe = 123', ENTER,
             '{key : {key2 :[] }}', ENTER,
             'Array(100).fill(1).map((e, i) => i ** i)', LEFT, LEFT, DELETE,
             '2', ENTER],
@@ -82,7 +84,7 @@ const tests = [
   },
   {
     env: { NODE_REPL_HISTORY: defaultHistoryPath },
-    test: [UP, UP, UP, UP, UP, DOWN, DOWN, DOWN, DOWN, DOWN],
+    test: [UP, UP, UP, UP, UP, UP, DOWN, DOWN, DOWN, DOWN, DOWN, DOWN],
     expected: [prompt,
                `${prompt}Array(100).fill(1).map((e, i) => i ** 2)`,
                prev && '\n// [ 0, 1, 4, 9, 16, 25, 36, 49, 64, 81, 100, 121, ' +
@@ -92,6 +94,7 @@ const tests = [
                  ' 2025, 2116, 2209,...',
                `${prompt}{key : {key2 :[] }}`,
                prev && '\n// { key: { key2: [] } }',
+               `${prompt}let autocompleteMe = 123`,
                `${prompt}555 + 909`,
                prev && '\n// 1464',
                `${prompt}let ab = 45`,
@@ -99,6 +102,7 @@ const tests = [
                `${prompt}let ab = 45`,
                `${prompt}555 + 909`,
                prev && '\n// 1464',
+               `${prompt}let autocompleteMe = 123`,
                `${prompt}{key : {key2 :[] }}`,
                prev && '\n// { key: { key2: [] } }',
                `${prompt}Array(100).fill(1).map((e, i) => i ** 2)`,
@@ -128,7 +132,7 @@ const tests = [
     preview: false,
     showEscapeCodes: true,
     test: [
-      '55', UP, UP, UP, UP, UP, UP, ENTER,
+      '55', UP, UP, UP, UP, UP, UP, UP, ENTER,
     ],
     expected: [
       '\x1B[1G', '\x1B[0J', prompt, '\x1B[3G',
@@ -185,10 +189,10 @@ const tests = [
       ENTER,
       'veryLongName'.repeat(30),
       ENTER,
-      `${'\x1B[90m \x1B[39m'.repeat(235)} fun`,
+      `${'\x1B[90m \x1B[39m'.repeat(229)} aut`,
       ESCAPE,
       ENTER,
-      `${' '.repeat(236)} fun`,
+      `${' '.repeat(230)} aut`,
       ESCAPE,
       ENTER,
     ],
@@ -236,19 +240,20 @@ const tests = [
       prompt, '\x1B[3G',
       // 1. UP
       // This exceeds the maximum columns (250):
-      // Whitespace + prompt + ' // '.length + 'function'.length
-      // 236 + 2 + 4 + 8
+      // Whitespace + prompt + ' // '.length + 'autocompleteMe'.length
+      // 230 + 2 + 4 + 14
       '\x1B[1G', '\x1B[0J',
-      `${prompt}${' '.repeat(236)} fun`, '\x1B[243G',
-      ' // ction', '\x1B[243G',
-      ' // ction', '\x1B[243G',
+      `${prompt}${' '.repeat(230)} aut`, '\x1B[237G',
+      ' // ocompleteMe', '\x1B[237G',
+      '\n// 123', '\x1B[237G',
+      '\x1B[1A', '\x1B[1B', '\x1B[2K', '\x1B[1A',
       '\x1B[0K',
       // 2. UP
       '\x1B[1G', '\x1B[0J',
-      `${prompt}${' '.repeat(235)} fun`, '\x1B[242G',
-      // TODO(BridgeAR): Investigate why the preview is generated twice.
-      ' // ction', '\x1B[242G',
-      ' // ction', '\x1B[242G',
+      `${prompt}${' '.repeat(229)} aut`, '\x1B[236G',
+      ' // ocompleteMe', '\x1B[236G',
+      '\n// 123', '\x1B[236G',
+      '\x1B[1A', '\x1B[1B', '\x1B[2K', '\x1B[1A',
       // Preview cleanup
       '\x1B[0K',
       // 3. UP
@@ -326,8 +331,8 @@ const tests = [
     skip: !process.features.inspector,
     checkTotal: true,
     test: [
-      'fu',
-      'n',
+      'au',
+      't',
       RIGHT,
       BACKSPACE,
       LEFT,
@@ -353,74 +358,93 @@ const tests = [
     // K = Erase in line; 0 = right; 1 = left; 2 = total
     expected: [
       // 0.
-      // 'f'
-      '\x1B[1G', '\x1B[0J', prompt, '\x1B[3G', 'f',
+      // 'a'
+      '\x1B[1G', '\x1B[0J', prompt, '\x1B[3G', 'a',
       // 'u'
-      'u', ' // nction', '\x1B[5G',
-      // 'n' - Cleanup
+      'u', ' // tocompleteMe', '\x1B[5G',
+      '\n// 123', '\x1B[5G',
+      '\x1B[1A', '\x1B[1B', '\x1B[2K', '\x1B[1A',
+      // 't' - Cleanup
       '\x1B[0K',
-      'n', ' // ction', '\x1B[6G',
+      't', ' // ocompleteMe', '\x1B[6G',
+      '\n// 123', '\x1B[6G',
+      '\x1B[1A', '\x1B[1B', '\x1B[2K', '\x1B[1A',
       // 1. Right. Cleanup
       '\x1B[0K',
-      'ction',
+      'ocompleteMe',
+      '\n// 123', '\x1B[17G',
+      '\x1B[1A', '\x1B[1B', '\x1B[2K', '\x1B[1A',
       // 2. Backspace. Refresh
-      '\x1B[1G', '\x1B[0J', `${prompt}functio`, '\x1B[10G',
+      '\x1B[1G', '\x1B[0J', `${prompt}autocompleteM`, '\x1B[16G',
       // Autocomplete and refresh?
-      ' // n', '\x1B[10G', ' // n', '\x1B[10G',
+      ' // e', '\x1B[16G',
+      '\n// 123', '\x1B[16G',
+      '\x1B[1A', '\x1B[1B', '\x1B[2K', '\x1B[1A',
       // 3. Left. Cleanup
       '\x1B[0K',
-      '\x1B[1D', '\x1B[10G', ' // n', '\x1B[9G',
+      '\x1B[1D', '\x1B[16G', ' // e', '\x1B[15G',
       // 4. Left. Cleanup
-      '\x1B[10G', '\x1B[0K', '\x1B[9G',
-      '\x1B[1D', '\x1B[10G', ' // n', '\x1B[8G',
+      '\x1B[16G', '\x1B[0K', '\x1B[15G',
+      '\x1B[1D', '\x1B[16G', ' // e', '\x1B[14G',
       // 5. 'A' - Cleanup
-      '\x1B[10G', '\x1B[0K', '\x1B[8G',
+      '\x1B[16G', '\x1B[0K', '\x1B[14G',
       // Refresh
-      '\x1B[1G', '\x1B[0J', `${prompt}functAio`, '\x1B[9G',
+      '\x1B[1G', '\x1B[0J', `${prompt}autocompletAeM`, '\x1B[15G',
       // 6. Backspace. Refresh
-      '\x1B[1G', '\x1B[0J', `${prompt}functio`, '\x1B[8G', '\x1B[10G', ' // n',
-      '\x1B[8G', '\x1B[10G', ' // n',
-      '\x1B[8G', '\x1B[10G',
+      '\x1B[1G', '\x1B[0J', `${prompt}autocompleteM`,
+      '\x1B[14G', '\x1B[16G', ' // e',
+      '\x1B[14G', '\x1B[16G', ' // e',
+      '\x1B[14G', '\x1B[16G',
       // 7. Go to end. Cleanup
-      '\x1B[0K', '\x1B[8G', '\x1B[2C',
-      'n',
+      '\x1B[0K', '\x1B[14G', '\x1B[2C',
+      'e',
+      '\n// 123', '\x1B[17G',
+      '\x1B[1A', '\x1B[1B', '\x1B[2K', '\x1B[1A',
       // 8. Backspace. Refresh
-      '\x1B[1G', '\x1B[0J', `${prompt}functio`, '\x1B[10G',
+      '\x1B[1G', '\x1B[0J', `${prompt}autocompleteM`, '\x1B[16G',
       // Autocomplete
-      ' // n', '\x1B[10G', ' // n', '\x1B[10G',
+      ' // e', '\x1B[16G',
+      '\n// 123', '\x1B[16G',
+      '\x1B[1A', '\x1B[1B', '\x1B[2K', '\x1B[1A',
       // 9. Word left. Cleanup
-      '\x1B[0K', '\x1B[7D', '\x1B[10G', ' // n', '\x1B[3G', '\x1B[10G',
+      '\x1B[0K', '\x1B[13D', '\x1B[16G', ' // e', '\x1B[3G', '\x1B[16G',
       // 10. Word right. Cleanup
-      '\x1B[0K', '\x1B[3G', '\x1B[7C', ' // n', '\x1B[10G',
+      '\x1B[0K', '\x1B[3G', '\x1B[13C', ' // e', '\x1B[16G',
+      '\n// 123', '\x1B[16G',
+      '\x1B[1A', '\x1B[1B', '\x1B[2K', '\x1B[1A',
       // 11. ESCAPE
-      '\x1B[0K', ' // n', '\x1B[10G', '\x1B[0K',
+      '\x1B[0K',
       // 12. ENTER
       '\r\n',
-      'Uncaught ReferenceError: functio is not defined\n',
+      'Uncaught ReferenceError: autocompleteM is not defined\n',
       '\x1B[1G', '\x1B[0J',
       // 13. UP
       prompt, '\x1B[3G', '\x1B[1G', '\x1B[0J',
-      `${prompt}functio`, '\x1B[10G',
-      ' // n', '\x1B[10G',
-      ' // n', '\x1B[10G',
+      `${prompt}autocompleteM`, '\x1B[16G',
+      ' // e', '\x1B[16G',
+      '\n// 123', '\x1B[16G',
+      '\x1B[1A', '\x1B[1B', '\x1B[2K', '\x1B[1A',
       // 14. LEFT
-      '\x1B[0K', '\x1B[1D',
-      '\x1B[10G', ' // n', '\x1B[9G', '\x1B[10G',
+      '\x1B[0K', '\x1B[1D', '\x1B[16G',
+      ' // e', '\x1B[15G', '\x1B[16G',
       // 15. ENTER
-      '\x1B[0K', '\x1B[9G', '\x1B[1C',
+      '\x1B[0K', '\x1B[15G', '\x1B[1C',
       '\r\n',
-      'Uncaught ReferenceError: functio is not defined\n',
+      'Uncaught ReferenceError: autocompleteM is not defined\n',
       '\x1B[1G', '\x1B[0J',
-      '> ', '\x1B[3G',
+      prompt, '\x1B[3G',
       // 16. UP
       '\x1B[1G', '\x1B[0J',
-      '> functio', '\x1B[10G',
-      ' // n', '\x1B[10G',
-      ' // n', '\x1B[10G', '\x1B[0K',
+      `${prompt}autocompleteM`, '\x1B[16G',
+      ' // e', '\x1B[16G',
+      '\n// 123', '\x1B[16G',
+      '\x1B[1A', '\x1B[1B', '\x1B[2K', '\x1B[1A',
+      '\x1B[0K',
       // 17. ENTER
-      'n', '\r\n',
+      'e', '\r\n',
+      '123\n',
       '\x1B[1G', '\x1B[0J',
-      '... ', '\x1B[5G',
+      prompt, '\x1B[3G',
       '\r\n',
     ],
     clean: true
@@ -563,7 +587,7 @@ const tests = [
       prompt, ...'const util = {}',
       'undefined\n',
       prompt, ...'ut', ...(prev ? [' // il', '\n// {}',
-                                   'il', '\n// {}'] : [' // il', 'il']),
+                                   'il', '\n// {}'] : ['il']),
       '{}\n',
       prompt,
     ],
@@ -583,13 +607,232 @@ const tests = [
       'undefined\n',
       prompt, ...'globalThis.util = {}',
       '{}\n',
-      prompt, ...'ut', ' // il', 'il',
+      prompt, ...'ut', ...(prev ? [' // il', 'il' ] : ['il']),
       '{}\n',
       prompt, ...'Reflect.defineProperty(globalThis, "util", utilDesc)',
       'true\n',
       prompt,
     ],
     clean: false
+  },
+  {
+    // Test that preview should not be removed when pressing ESCAPE key
+    env: { NODE_REPL_HISTORY: defaultHistoryPath },
+    skip: !process.features.inspector,
+    test: [
+      '1+1',
+      ESCAPE,
+      ENTER,
+    ],
+    expected: [
+      prompt, ...'1+1',
+      '\n// 2',
+      '\n// 2',
+      '2\n',
+      prompt,
+    ],
+    clean: false
+  },
+  {
+    // Test that the multiline history is correctly navigated and it can be edited
+    env: { NODE_REPL_HISTORY: defaultHistoryPath },
+    skip: !process.features.inspector,
+    test: [
+      'let a = ``',
+      ENTER,
+      'a = `I am a multiline strong',
+      ENTER,
+      'which ends here`',
+      ENTER,
+      UP,
+      // press LEFT 19 times to reach the typo
+      ...Array(19).fill(LEFT),
+      BACKSPACE,
+      'i',
+      ENTER,
+    ],
+    expected: [
+      prompt, ...'let a = ``',
+      'undefined\n',
+      prompt, ...'a = `I am a multiline strong', // New Line, the user pressed ENTER
+      '| ',
+      ...'which ends here`', // New Line, the user pressed ENTER
+      "'I am a multiline strong\\nwhich ends here'\n", // This is the result printed to the console
+      prompt,
+      `${prompt}a = \`I am a multiline strong`, // This is the history being shown and navigated
+      `\n| which ends here\``,
+      `${prompt}a = \`I am a multiline strong`, // This is the history being shown and navigated
+      `\n| which ends here\``,
+
+      `${prompt}a = \`I am a multiline strng`, // This is the history being shown and edited
+      `\n| which ends here\``,
+
+      `${prompt}a = \`I am a multiline string`, // This is the history being shown and edited
+      `\n| which ends here\``,
+
+      `${prompt}a = \`I am a multiline string`, // This is the history being shown and edited
+      `\n| which ends here\``,
+      "'I am a multiline string\\nwhich ends here'\n", // This is the result printed to the console
+      prompt,
+    ],
+    clean: true
+  },
+  {
+    // Test that the previous multiline history can only be accessed going through the entirety of the current
+    // One navigating its all lines first.
+    env: { NODE_REPL_HISTORY: defaultHistoryPath },
+    skip: !process.features.inspector,
+    test: [
+      'let b = ``',
+      ENTER,
+      'b = `I am a multiline strong',
+      ENTER,
+      'which ends here`',
+      ENTER,
+      'let c = `I',
+      ENTER,
+      'am another one`',
+      ENTER,
+      UP,
+      UP,
+      UP,
+      UP,
+      // press RIGHT 10 times to reach the typo
+      ...Array(10).fill(RIGHT),
+      BACKSPACE,
+      'i',
+      ENTER,
+    ],
+    expected: [
+      prompt, ...'let b = ``',
+      'undefined\n',
+      prompt, ...'b = `I am a multiline strong', // New Line, the user pressed ENTER
+      '| ',
+      ...'which ends here`', // New Line, the user pressed ENTER
+      "'I am a multiline strong\\nwhich ends here'\n", // This is the result printed to the console
+      prompt, ...'let c = `I', // New Line, the user pressed ENTER
+      '| ',
+      ...'am another one`', // New Line, the user pressed ENTER
+      'undefined\n',
+      prompt,
+      `${prompt}let c = \`I`, // This is the history being shown and navigated
+      `\n| am another one\``,
+
+      `${prompt}let c = \`I`, // This is the history being shown and navigated
+      `\n| am another one\``,
+
+      `${prompt}b = \`I am a multiline strong`, // This is the history being shown and edited
+      `\n| which ends here\``,
+      `${prompt}b = \`I am a multiline strong`, // This is the history being shown and edited
+      `\n| which ends here\``,
+      `${prompt}b = \`I am a multiline strng`, // This is the history being shown and edited
+      `\n| which ends here\``,
+
+      `${prompt}b = \`I am a multiline string`, // This is the history being shown and edited
+      `\n| which ends here\``,
+
+      `${prompt}b = \`I am a multiline string`, // This is the history being shown and edited
+      `\n| which ends here\``,
+      "'I am a multiline string\\nwhich ends here'\n", // This is the result printed to the console
+      prompt,
+    ],
+    clean: true
+  },
+  {
+    // Test that we can recover from a line with a syntax error
+    env: { NODE_REPL_HISTORY: defaultHistoryPath },
+    skip: !process.features.inspector,
+    test: [
+      'let d = ``',
+      ENTER,
+      'd = `I am a',
+      ENTER,
+      'super',
+      ENTER,
+      'broken` line\'',
+      ENTER,
+      UP,
+      BACKSPACE,
+      '`',
+      // press LEFT 6 times to reach the typo
+      ...Array(6).fill(LEFT),
+      BACKSPACE,
+      ENTER,
+    ],
+    expected: [
+      prompt, ...'let d = ``', // New Line, the user pressed ENTER
+      'undefined\n',
+      prompt, ...'d = `I am a', // New Line, the user pressed ENTER
+      '| ',
+      ...'super', // New Line, the user pressed ENTER
+      '| ',
+      ...'broken` line\'', // New Line, the user pressed ENTER
+      "[broken` line'\n" +
+      '        ^^^^\n' +
+      '\n' +
+      "Uncaught SyntaxError: Unexpected identifier 'line'\n" +
+      '] {\n' +
+      '  [stack]: [Getter/Setter],\n' +
+      `  [message]: "Unexpected identifier 'line'"\n` +
+      '}\n',
+      prompt,
+      `${prompt}d = \`I am a`, // This is the history being shown and edited
+      `\n| super`,
+      `\n| broken\` line'`,
+
+      `${prompt}d = \`I am a`, // This is the history being shown and edited
+      `\n| super`,
+      '\n| broken` line',
+      '`',
+
+      `${prompt}d = \`I am a`, // This is the history being shown and edited
+      `\n| super`,
+      `\n| broken line\``,
+      "'I am a\\nsuper\\nbroken line'\n", // This is the result printed to the console
+      prompt,
+    ],
+    clean: true
+  },
+  {
+    // Test that multiline history is not duplicated
+    env: { NODE_REPL_HISTORY: defaultHistoryPath },
+    skip: !process.features.inspector,
+    test: [
+      "let f = ''",
+      ENTER,
+      'f = `multiline',
+      ENTER,
+      'string`',
+      ENTER, // Finished issuing the multiline command
+      UP,
+      ENTER, // Trying to reissue the same command
+      UP, UP, UP, // Going back 3 times in the history, it should show the var definition
+      DOWN, DOWN, // Going down 2 times should show the multiline command only once
+    ],
+    expected: [
+      prompt,
+      ...`let f = ''`,
+      'undefined\n',
+      prompt,
+      ...'f = `multiline',
+      '| ',
+      ...'string`',
+      "'multiline\\nstring'\n",
+      prompt,
+      `${prompt}f = \`multiline`,
+      '\n| string`',
+      "'multiline\\nstring'\n",
+      prompt,
+      `${prompt}f = \`multiline`,
+      `\n| string\``,
+      `${prompt}f = \`multiline`,
+      `\n| string\``,
+      `${prompt}let f = ''`,
+      `${prompt}f = \`multiline`,
+      `\n| string\``,
+      prompt,
+    ],
+    clean: true
   },
 ];
 const numtests = tests.length;
@@ -624,7 +867,7 @@ function runTest() {
   REPL.createInternalRepl(opts.env, {
     input: new ActionStream(),
     output: new stream.Writable({
-      write(chunk, _, next) {
+      write: common.mustCallAtLeast((chunk, _, next) => {
         const output = chunk.toString();
 
         if (!opts.showEscapeCodes &&
@@ -649,20 +892,20 @@ function runTest() {
         }
 
         next();
-      }
+      }),
     }),
     completer: opts.completer,
     prompt,
     useColors: false,
     preview: opts.preview,
     terminal: true
-  }, function(err, repl) {
+  }, common.mustCall((err, repl) => {
     if (err) {
       console.error(`Failed test # ${numtests - tests.length}`);
       throw err;
     }
 
-    repl.once('close', () => {
+    repl.once('close', common.mustCall(() => {
       if (opts.clean)
         cleanupTmpFile();
 
@@ -674,7 +917,7 @@ function runTest() {
       }
 
       setImmediate(runTestWrap, true);
-    });
+    }));
 
     if (opts.columns) {
       Object.defineProperty(repl, 'columns', {
@@ -683,7 +926,7 @@ function runTest() {
       });
     }
     repl.input.run(opts.test);
-  });
+  }));
 }
 
 // run the tests

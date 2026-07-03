@@ -26,13 +26,32 @@
 #include "nghttp3_vec.h"
 #include "nghttp3_macro.h"
 
-size_t nghttp3_vec_len(const nghttp3_vec *vec, size_t n) {
+uint64_t nghttp3_vec_len(const nghttp3_vec *vec, size_t n) {
   size_t i;
-  size_t res = 0;
+  uint64_t res = 0;
 
   for (i = 0; i < n; ++i) {
     res += vec[i].len;
   }
 
   return res;
+}
+
+int nghttp3_vec_len_uvarint(uint64_t *dest, const nghttp3_vec *vec, size_t n) {
+  uint64_t res = 0;
+  size_t len;
+  size_t i;
+
+  for (i = 0; i < n; ++i) {
+    len = vec[i].len;
+    if (len > NGHTTP3_MAX_VARINT - res) {
+      return -1;
+    }
+
+    res += len;
+  }
+
+  *dest = res;
+
+  return 0;
 }

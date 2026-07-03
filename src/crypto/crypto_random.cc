@@ -1,47 +1,54 @@
 #include "crypto/crypto_random.h"
-#include "crypto/crypto_util.h"
-#include "allocated_buffer-inl.h"
 #include "async_wrap-inl.h"
+#include "crypto/crypto_util.h"
 #include "env-inl.h"
 #include "memory_tracker-inl.h"
+#include "ncrypto.h"
 #include "threadpoolwork-inl.h"
 #include "v8.h"
 
-#include <openssl/bn.h>
-#include <openssl/rand.h>
+#include <compare>
 
 namespace node {
 
+using ncrypto::BignumPointer;
+using ncrypto::ClearErrorOnReturn;
+using ncrypto::DataPointer;
 using v8::ArrayBuffer;
-using v8::BackingStore;
-using v8::False;
+using v8::Boolean;
 using v8::FunctionCallbackInfo;
-using v8::Just;
+using v8::Int32;
+using v8::JustVoid;
 using v8::Local;
 using v8::Maybe;
+using v8::MaybeLocal;
 using v8::Nothing;
 using v8::Object;
-using v8::True;
 using v8::Uint32;
+using v8::Undefined;
 using v8::Value;
 
 namespace crypto {
-Maybe<bool> RandomBytesTraits::EncodeOutput(
-    Environment* env,
-    const RandomBytesConfig& params,
-    ByteSource* unused,
-    v8::Local<v8::Value>* result) {
-  *result = v8::Undefined(env->isolate());
-  return Just(!result->IsEmpty());
+namespace {
+BignumPointer::PrimeCheckCallback getPrimeCheckCallback(Environment* env) {
+  // The callback is used to check if the operation should be stopped.
+  // Currently, the only check we perform is if env->is_stopping()
+  // is true.
+  return [env](int a, int b) -> bool { return !env->is_stopping(); };
 }
 
-Maybe<bool> RandomBytesTraits::AdditionalConfig(
+}  // namespace
+MaybeLocal<Value> RandomBytesTraits::EncodeOutput(
+    Environment* env, const RandomBytesConfig& params, ByteSource* unused) {
+  return Undefined(env->isolate());
+}
+
+Maybe<void> RandomBytesTraits::AdditionalConfig(
     CryptoJobMode mode,
     const FunctionCallbackInfo<Value>& args,
     unsigned int offset,
     RandomBytesConfig* params) {
-  Environment* env = Environment::GetCurrent(args);
-  CHECK(IsAnyByteSource(args[offset]));  // Buffer to fill
+  CHECK(IsAnyBufferSource(args[offset]));  // Buffer to fill
   CHECK(args[offset + 1]->IsUint32());  // Offset
   CHECK(args[offset + 2]->IsUint32());  // Size
 
@@ -52,46 +59,37 @@ Maybe<bool> RandomBytesTraits::AdditionalConfig(
   CHECK_GE(byte_offset + size, byte_offset);  // Overflow check.
   CHECK_LE(byte_offset + size, in.size());  // Bounds check.
 
-  if (UNLIKELY(size > INT_MAX)) {
-    THROW_ERR_OUT_OF_RANGE(env, "buffer is too large");
-    return Nothing<bool>();
-  }
-
   params->buffer = in.data() + byte_offset;
   params->size = size;
 
-  return Just(true);
+  return JustVoid();
 }
 
-bool RandomBytesTraits::DeriveBits(
-    Environment* env,
-    const RandomBytesConfig& params,
-    ByteSource* unused) {
-  CheckEntropy();  // Ensure that OpenSSL's PRNG is properly seeded.
-  return RAND_bytes(params.buffer, params.size) != 0;
+bool RandomBytesTraits::DeriveBits(Environment* env,
+                                   const RandomBytesConfig& params,
+                                   ByteSource* unused,
+                                   CryptoJobMode mode,
+                                   CryptoErrorStore* errors) {
+  return ncrypto::CSPRNG(params.buffer, params.size);
 }
 
 void RandomPrimeConfig::MemoryInfo(MemoryTracker* tracker) const {
   tracker->TrackFieldWithSize("prime", prime ? bits * 8 : 0);
 }
 
-Maybe<bool> RandomPrimeTraits::EncodeOutput(
-    Environment* env,
-    const RandomPrimeConfig& params,
-    ByteSource* unused,
-    v8::Local<v8::Value>* result) {
-  size_t size = BN_num_bytes(params.prime.get());
-  std::shared_ptr<BackingStore> store =
-      ArrayBuffer::NewBackingStore(env->isolate(), size);
-  BN_bn2binpad(
-      params.prime.get(),
-      reinterpret_cast<unsigned char*>(store->Data()),
-      size);
-  *result = ArrayBuffer::New(env->isolate(), store);
-  return Just(true);
+MaybeLocal<Value> RandomPrimeTraits::EncodeOutput(
+    Environment* env, const RandomPrimeConfig& params, ByteSource* unused) {
+  size_t size = params.prime.byteLength();
+  auto store = ArrayBuffer::NewBackingStore(env->isolate(), size);
+  CHECK_EQ(size,
+           BignumPointer::EncodePaddedInto(
+               params.prime.get(),
+               reinterpret_cast<unsigned char*>(store->Data()),
+               size));
+  return ArrayBuffer::New(env->isolate(), std::move(store));
 }
 
-Maybe<bool> RandomPrimeTraits::AdditionalConfig(
+Maybe<void> RandomPrimeTraits::AdditionalConfig(
     CryptoJobMode mode,
     const FunctionCallbackInfo<Value>& args,
     unsigned int offset,
@@ -106,138 +104,113 @@ Maybe<bool> RandomPrimeTraits::AdditionalConfig(
 
   if (!args[offset + 2]->IsUndefined()) {
     ArrayBufferOrViewContents<unsigned char> add(args[offset + 2]);
-    params->add.reset(BN_bin2bn(add.data(), add.size(), nullptr));
-    if (!params->add) {
+    params->add.reset(add.data(), add.size());
+    if (!params->add) [[unlikely]] {
       THROW_ERR_CRYPTO_OPERATION_FAILED(env, "could not generate prime");
-      return Nothing<bool>();
+      return Nothing<void>();
     }
   }
 
   if (!args[offset + 3]->IsUndefined()) {
     ArrayBufferOrViewContents<unsigned char> rem(args[offset + 3]);
-    params->rem.reset(BN_bin2bn(rem.data(), rem.size(), nullptr));
-    if (!params->rem) {
+    params->rem.reset(rem.data(), rem.size());
+    if (!params->rem) [[unlikely]] {
       THROW_ERR_CRYPTO_OPERATION_FAILED(env, "could not generate prime");
-      return Nothing<bool>();
+      return Nothing<void>();
     }
   }
 
+  // The JS interface already ensures that the (positive) size fits into an int.
   int bits = static_cast<int>(size);
-  if (bits < 0) {
-    THROW_ERR_OUT_OF_RANGE(env, "invalid size");
-    return Nothing<bool>();
-  }
+  CHECK_GT(bits, 0);
 
   if (params->add) {
-    if (BN_num_bits(params->add.get()) > bits) {
+    if (BignumPointer::GetBitCount(params->add.get()) > bits) [[unlikely]] {
       // If we allowed this, the best case would be returning a static prime
       // that wasn't generated randomly. The worst case would be an infinite
       // loop within OpenSSL, blocking the main thread or one of the threads
       // in the thread pool.
       THROW_ERR_OUT_OF_RANGE(env, "invalid options.add");
-      return Nothing<bool>();
+      return Nothing<void>();
     }
 
-    if (params->rem) {
-      if (BN_cmp(params->add.get(), params->rem.get()) != 1) {
-        // This would definitely lead to an infinite loop if allowed since
-        // OpenSSL does not check this condition.
-        THROW_ERR_OUT_OF_RANGE(env, "invalid options.rem");
-        return Nothing<bool>();
-      }
+    if (params->rem && params->add <= params->rem) [[unlikely]] {
+      // This would definitely lead to an infinite loop if allowed since
+      // OpenSSL does not check this condition.
+      THROW_ERR_OUT_OF_RANGE(env, "invalid options.rem");
+      return Nothing<void>();
     }
   }
 
   params->bits = bits;
   params->safe = safe;
-  params->prime.reset(BN_secure_new());
-  if (!params->prime) {
+  params->prime = BignumPointer::NewSecure();
+  if (!params->prime) [[unlikely]] {
     THROW_ERR_CRYPTO_OPERATION_FAILED(env, "could not generate prime");
-    return Nothing<bool>();
+    return Nothing<void>();
   }
 
-  return Just(true);
+  return JustVoid();
 }
 
-bool RandomPrimeTraits::DeriveBits(
-    Environment* env,
-    const RandomPrimeConfig& params,
-    ByteSource* unused) {
-
-  CheckEntropy();
-
-  if (BN_generate_prime_ex(
-          params.prime.get(),
-          params.bits,
-          params.safe ? 1 : 0,
-          params.add.get(),
-          params.rem.get(),
-          nullptr) == 0) {
-    return false;
-  }
-
-  return true;
+bool RandomPrimeTraits::DeriveBits(Environment* env,
+                                   const RandomPrimeConfig& params,
+                                   ByteSource* unused,
+                                   CryptoJobMode mode,
+                                   CryptoErrorStore* errors) {
+  return params.prime.generate(
+      BignumPointer::PrimeConfig{
+          .bits = params.bits,
+          .safe = params.safe,
+          .add = params.add,
+          .rem = params.rem,
+      },
+      getPrimeCheckCallback(env));
 }
 
 void CheckPrimeConfig::MemoryInfo(MemoryTracker* tracker) const {
-  tracker->TrackFieldWithSize(
-      "prime", candidate ? BN_num_bytes(candidate.get()) : 0);
+  tracker->TrackFieldWithSize("prime", candidate ? candidate.byteLength() : 0);
 }
 
-Maybe<bool> CheckPrimeTraits::AdditionalConfig(
+Maybe<void> CheckPrimeTraits::AdditionalConfig(
     CryptoJobMode mode,
     const FunctionCallbackInfo<Value>& args,
     unsigned int offset,
     CheckPrimeConfig* params) {
-  Environment* env = Environment::GetCurrent(args);
-
   ArrayBufferOrViewContents<unsigned char> candidate(args[offset]);
 
-  params->candidate =
-      BignumPointer(BN_bin2bn(
-          candidate.data(),
-          candidate.size(),
-          nullptr));
-
-  CHECK(args[offset + 1]->IsUint32());  // Checks
-
-  const int checks = static_cast<int>(args[offset + 1].As<Uint32>()->Value());
-  if (checks < 0) {
-    THROW_ERR_OUT_OF_RANGE(env, "invalid options.checks");
-    return Nothing<bool>();
+  params->candidate = BignumPointer(candidate.data(), candidate.size());
+  if (!params->candidate) {
+    ThrowCryptoError(
+        Environment::GetCurrent(args), ERR_get_error(), "BignumPointer");
+    return Nothing<void>();
   }
 
-  params->checks = checks;
+  CHECK(args[offset + 1]->IsInt32());  // Checks
+  params->checks = args[offset + 1].As<Int32>()->Value();
+  CHECK_GE(params->checks, 0);
 
-  return Just(true);
+  return JustVoid();
 }
 
-bool CheckPrimeTraits::DeriveBits(
-    Environment* env,
-    const CheckPrimeConfig& params,
-    ByteSource* out) {
-
-  BignumCtxPointer ctx(BN_CTX_new());
-
-  int ret = BN_is_prime_ex(
-            params.candidate.get(),
-            params.checks,
-            ctx.get(),
-            nullptr);
-  if (ret < 0) return false;
-  char* data = MallocOpenSSL<char>(1);
-  data[0] = ret;
-  *out = ByteSource::Allocated(data, 1);
+bool CheckPrimeTraits::DeriveBits(Environment* env,
+                                  const CheckPrimeConfig& params,
+                                  ByteSource* out,
+                                  CryptoJobMode mode,
+                                  CryptoErrorStore* errors) {
+  int ret = params.candidate.isPrime(params.checks, getPrimeCheckCallback(env));
+  if (ret < 0) [[unlikely]]
+    return false;
+  auto buf = DataPointer::Alloc(1);
+  static_cast<char*>(buf.get())[0] = ret;
+  *out = ByteSource::Allocated(buf.release());
   return true;
 }
 
-Maybe<bool> CheckPrimeTraits::EncodeOutput(
-    Environment* env,
-    const CheckPrimeConfig& params,
-    ByteSource* out,
-    v8::Local<v8::Value>* result) {
-  *result = out->get()[0] ? True(env->isolate()) : False(env->isolate());
-  return Just(true);
+MaybeLocal<Value> CheckPrimeTraits::EncodeOutput(Environment* env,
+                                                 const CheckPrimeConfig& params,
+                                                 ByteSource* out) {
+  return Boolean::New(env->isolate(), out->data<char>()[0] != 0);
 }
 
 namespace Random {

@@ -167,7 +167,7 @@ class TestWriter extends EE {
   const w = [ new TestWriter(), new TestWriter() ];
 
   let writes = SPLIT;
-  w[0].on('write', function() {
+  w[0].on('write', common.mustCallAtLeast(() => {
     if (--writes === 0) {
       r.unpipe();
       assert.deepStrictEqual(r._readableState.pipes, []);
@@ -175,7 +175,7 @@ class TestWriter extends EE {
       r.pipe(w[1]);
       assert.deepStrictEqual(r._readableState.pipes, [w[1]]);
     }
-  });
+  }));
 
   let ended = 0;
 
@@ -281,14 +281,14 @@ class TestWriter extends EE {
   r.push(null);
 
   const w1 = new R();
-  w1.write = function(chunk) {
+  w1.write = common.mustCall(function(chunk) {
     assert.strictEqual(chunk[0], 'one');
     w1.emit('close');
     process.nextTick(function() {
       r.pipe(w2);
       r.pipe(w3);
     });
-  };
+  });
   w1.end = common.mustNotCall();
 
   r.pipe(w1);
@@ -296,7 +296,7 @@ class TestWriter extends EE {
   const expected = ['two', 'two', 'three', 'three', 'four', 'four'];
 
   const w2 = new R();
-  w2.write = function(chunk) {
+  w2.write = common.mustCallAtLeast(function(chunk) {
     assert.strictEqual(chunk[0], expected.shift());
     assert.strictEqual(counter, 0);
 
@@ -312,11 +312,11 @@ class TestWriter extends EE {
     }, 10);
 
     return false;
-  };
+  });
   w2.end = common.mustCall();
 
   const w3 = new R();
-  w3.write = function(chunk) {
+  w3.write = common.mustCallAtLeast(function(chunk) {
     assert.strictEqual(chunk[0], expected.shift());
     assert.strictEqual(counter, 1);
 
@@ -332,7 +332,7 @@ class TestWriter extends EE {
     }, 50);
 
     return false;
-  };
+  });
   w3.end = common.mustCall(function() {
     assert.strictEqual(counter, 2);
     assert.strictEqual(expected.length, 0);
@@ -354,11 +354,11 @@ class TestWriter extends EE {
   assert.strictEqual(v, null);
 
   const w = new R();
-  w.write = function(buffer) {
+  w.write = common.mustCall(function(buffer) {
     written = true;
     assert.strictEqual(ended, false);
     assert.strictEqual(buffer.toString(), 'foo');
-  };
+  });
 
   w.end = common.mustCall(function() {
     ended = true;
@@ -422,7 +422,7 @@ class TestWriter extends EE {
 
 {
   // Verify readableEncoding property
-  assert(R.prototype.hasOwnProperty('readableEncoding'));
+  assert(Object.hasOwn(R.prototype, 'readableEncoding'));
 
   const r = new R({ encoding: 'utf8' });
   assert.strictEqual(r.readableEncoding, 'utf8');
@@ -430,7 +430,7 @@ class TestWriter extends EE {
 
 {
   // Verify readableObjectMode property
-  assert(R.prototype.hasOwnProperty('readableObjectMode'));
+  assert(Object.hasOwn(R.prototype, 'readableObjectMode'));
 
   const r = new R({ objectMode: true });
   assert.strictEqual(r.readableObjectMode, true);
@@ -438,7 +438,7 @@ class TestWriter extends EE {
 
 {
   // Verify writableObjectMode property
-  assert(W.prototype.hasOwnProperty('writableObjectMode'));
+  assert(Object.hasOwn(W.prototype, 'writableObjectMode'));
 
   const w = new W({ objectMode: true });
   assert.strictEqual(w.writableObjectMode, true);

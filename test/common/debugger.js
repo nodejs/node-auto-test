@@ -4,19 +4,28 @@ const spawn = require('child_process').spawn;
 
 const BREAK_MESSAGE = new RegExp('(?:' + [
   'assert', 'break', 'break on start', 'debugCommand',
-  'exception', 'other', 'promiseRejection',
+  'exception', 'other', 'promiseRejection', 'step',
 ].join('|') + ') in', 'i');
 
-const TIMEOUT = common.platformTimeout(5000);
+let TIMEOUT = common.platformTimeout(10000);
+// Some macOS and Windows machines require more time to receive the outputs from the client.
+// https://github.com/nodejs/build/issues/3014
+if (common.isWindows || common.isMacOS) {
+  TIMEOUT = common.platformTimeout(15000);
+}
 
 function isPreBreak(output) {
   return /Break on start/.test(output) && /1 \(function \(exports/.test(output);
 }
 
-function startCLI(args, flags = [], spawnOpts = {}) {
+function startCLI(args, flags = [], spawnOpts = {}, opts = { randomPort: true }) {
   let stderrOutput = '';
-  const child =
-    spawn(process.execPath, [...flags, 'inspect', ...args], spawnOpts);
+  const child = spawn(process.execPath, [
+    ...flags,
+    'inspect',
+    ...(opts.randomPort !== false ? ['--port=0'] : []),
+    ...args,
+  ], spawnOpts);
 
   const outputBuffer = [];
   function bufferOutput(chunk) {
@@ -79,12 +88,12 @@ function startCLI(args, flags = [], spawnOpts = {}) {
           reject(new Error(message));
         }
 
+        // Capture stack trace here to show where waitFor was called from when it times out.
+        const timeoutErr = new Error(`Timeout (${TIMEOUT}) while waiting for ${pattern}`);
         const timer = setTimeout(() => {
           tearDown();
-          reject(new Error([
-            `Timeout (${TIMEOUT}) while waiting for ${pattern}`,
-            `found: ${this.output}`,
-          ].join('; ')));
+          timeoutErr.output = this.output;
+          reject(timeoutErr);
         }, TIMEOUT);
 
         function tearDown() {
@@ -115,13 +124,13 @@ function startCLI(args, flags = [], spawnOpts = {}) {
     get breakInfo() {
       const output = this.output;
       const breakMatch =
-        output.match(/break (?:on start )?in ([^\n]+):(\d+)\n/i);
+        output.match(/(step |break (?:on start )?)in ([^\n]+):(\d+)\n/i);
 
       if (breakMatch === null) {
         throw new Error(
           `Could not find breakpoint info in ${JSON.stringify(output)}`);
       }
-      return { filename: breakMatch[1], line: +breakMatch[2] };
+      return { filename: breakMatch[2], line: +breakMatch[3] };
     },
 
     ctrlC() {
@@ -130,6 +139,10 @@ function startCLI(args, flags = [], spawnOpts = {}) {
 
     get output() {
       return getOutput();
+    },
+
+    get stderrOutput() {
+      return stderrOutput;
     },
 
     get rawOutput() {

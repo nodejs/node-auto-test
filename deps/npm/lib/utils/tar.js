@@ -1,52 +1,49 @@
 const tar = require('tar')
 const ssri = require('ssri')
-const npmlog = require('npmlog')
+const { log, output, META } = require('proc-log')
 const formatBytes = require('./format-bytes.js')
-const columnify = require('columnify')
 const localeCompare = require('@isaacs/string-locale-compare')('en', {
   sensitivity: 'case',
   numeric: true,
 })
 
-const logTar = (tarball, opts = {}) => {
-  const { unicode = false, log = npmlog } = opts
+const logTar = (tarball, { unicode = false, json, key, redact } = {}) => {
+  if (json) {
+    const meta = redact === false ? { [META]: true, redact: false } : undefined
+    output.buffer(key == null ? tarball : { [key]: tarball }, meta)
+    return
+  }
   log.notice('')
   log.notice('', `${unicode ? '📦 ' : 'package:'} ${tarball.name}@${tarball.version}`)
-  log.notice('=== Tarball Contents ===')
+  log.notice('Tarball Contents')
   if (tarball.files.length) {
-    log.notice('', columnify(tarball.files.map((f) => {
-      const bytes = formatBytes(f.size, false)
-      return (/^node_modules\//.test(f.path)) ? null
-        : { path: f.path, size: `${bytes}` }
-    }).filter(f => f), {
-      include: ['size', 'path'],
-      showHeaders: false,
-    }))
+    log.notice(
+      '',
+      tarball.files.map(f =>
+        /^node_modules\//.test(f.path) ? null : `${formatBytes(f.size, false)} ${f.path}`
+      ).filter(f => f).join('\n')
+    )
   }
   if (tarball.bundled.length) {
-    log.notice('=== Bundled Dependencies ===')
-    tarball.bundled.forEach((name) => log.notice('', name))
+    log.notice('Bundled Dependencies')
+    tarball.bundled.forEach(name => log.notice('', name))
   }
-  log.notice('=== Tarball Details ===')
-  log.notice('', columnify([
-    { name: 'name:', value: tarball.name },
-    { name: 'version:', value: tarball.version },
-    tarball.filename && { name: 'filename:', value: tarball.filename },
-    { name: 'package size:', value: formatBytes(tarball.size) },
-    { name: 'unpacked size:', value: formatBytes(tarball.unpackedSize) },
-    { name: 'shasum:', value: tarball.shasum },
-    {
-      name: 'integrity:',
-      value: tarball.integrity.toString().substr(0, 20) + '[...]' + tarball.integrity.toString().substr(80),
-    },
-    tarball.bundled.length && { name: 'bundled deps:', value: tarball.bundled.length },
-    tarball.bundled.length && { name: 'bundled files:', value: tarball.entryCount - tarball.files.length },
-    tarball.bundled.length && { name: 'own files:', value: tarball.files.length },
-    { name: 'total files:', value: tarball.entryCount },
-  ].filter((x) => x), {
-    include: ['name', 'value'],
-    showHeaders: false,
-  }))
+  log.notice('Tarball Details')
+  log.notice('', `name: ${tarball.name}`)
+  log.notice('', `version: ${tarball.version}`)
+  if (tarball.filename) {
+    log.notice('', `filename: ${tarball.filename}`)
+  }
+  log.notice('', `package size: ${formatBytes(tarball.size)}`)
+  log.notice('', `unpacked size: ${formatBytes(tarball.unpackedSize)}`)
+  log.notice('', `shasum: ${tarball.shasum}`)
+  log.notice('', `integrity: ${tarball.integrity.toString().slice(0, 20)}[...]${tarball.integrity.toString().slice(80)}`)
+  if (tarball.bundled.length) {
+    log.notice('', `bundled deps: ${tarball.bundled.length}`)
+    log.notice('', `bundled files: ${tarball.entryCount - tarball.files.length}`)
+    log.notice('', `own files: ${tarball.files.length}`)
+  }
+  log.notice('', `total files: ${tarball.entryCount}`)
   log.notice('', '')
 }
 
@@ -62,7 +59,7 @@ const getContents = async (manifest, tarball) => {
       totalEntries++
       totalEntrySize += entry.size
       const p = entry.path
-      if (p.startsWith('package/node_modules/')) {
+      if (p.startsWith('package/node_modules/') && p !== 'package/node_modules/') {
         const name = p.match(/^package\/node_modules\/((?:@[^/]+\/)?[^/]+)/)[1]
         bundled.add(name)
       }
@@ -75,13 +72,13 @@ const getContents = async (manifest, tarball) => {
   })
   stream.end(tarball)
 
-  const integrity = await ssri.fromData(tarball, {
+  const integrity = ssri.fromData(tarball, {
     algorithms: ['sha1', 'sha512'],
   })
 
   const comparator = ({ path: a }, { path: b }) => localeCompare(a, b)
 
-  const isUpper = (str) => {
+  const isUpper = str => {
     const ch = str.charAt(0)
     return ch === ch.toUpperCase()
   }
@@ -101,7 +98,9 @@ const getContents = async (manifest, tarball) => {
     unpackedSize: totalEntrySize,
     shasum,
     integrity: ssri.parse(integrity.sha512[0]),
-    filename: `${manifest.name}-${manifest.version}.tgz`,
+    // @scope/packagename.tgz => scope-packagename.tgz
+    // we can safely use these global replace rules due to npm package naming rules
+    filename: `${manifest.name.replace('@', '').replace('/', '-')}-${manifest.version}.tgz`,
     files: uppers.concat(others),
     entryCount: totalEntries,
     bundled: Array.from(bundled),

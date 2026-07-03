@@ -9,8 +9,10 @@
 
 #include "include/v8-callbacks.h"
 #include "include/v8-primitive.h"
+#include "src/base/iterator.h"
 #include "src/base/strings.h"
 #include "src/common/globals.h"
+#include "src/execution/isolate-utils.h"
 #include "src/handles/handles.h"
 #include "src/logging/runtime-call-stats-scope.h"
 #include "src/objects/objects-inl.h"
@@ -22,13 +24,13 @@ namespace internal {
 
 class V8_NODISCARD ScopedExternalStringLock {
  public:
-  explicit ScopedExternalStringLock(ExternalString string) {
+  explicit ScopedExternalStringLock(Tagged<ExternalString> string) {
     DCHECK(!string.is_null());
-    if (string.IsExternalOneByteString()) {
-      resource_ = ExternalOneByteString::cast(string).resource();
+    if (IsExternalOneByteString(string)) {
+      resource_ = Cast<ExternalOneByteString>(string)->resource();
     } else {
-      DCHECK(string.IsExternalTwoByteString());
-      resource_ = ExternalTwoByteString::cast(string).resource();
+      DCHECK(IsExternalTwoByteString(string));
+      resource_ = Cast<ExternalTwoByteString>(string)->resource();
     }
     DCHECK(resource_);
     resource_->Lock();
@@ -99,10 +101,10 @@ class ExternalStringStream {
   using ExternalString = typename CharTraits<Char>::ExternalString;
 
  public:
-  ExternalStringStream(ExternalString string, size_t start_offset,
+  ExternalStringStream(Tagged<ExternalString> string, size_t start_offset,
                        size_t length)
       : lock_(string),
-        data_(string.GetChars() + start_offset),
+        data_(string->GetChars() + start_offset),
         length_(length) {}
 
   ExternalStringStream(const ExternalStringStream& other) V8_NOEXCEPT
@@ -152,54 +154,48 @@ template <typename Char>
 class ChunkedStream {
  public:
   explicit ChunkedStream(ScriptCompiler::ExternalSourceStream* source)
-      : source_(source) {}
+      : source_(source), chunks_(std::make_shared<std::vector<Chunk>>()) {}
 
-  ChunkedStream(const ChunkedStream&) V8_NOEXCEPT {
-    // TODO(rmcilroy): Implement cloning for chunked streams.
-    UNREACHABLE();
-  }
+  ChunkedStream(const ChunkedStream& other) V8_NOEXCEPT
+      : source_(nullptr),
+        chunks_(other.chunks_) {}
 
   // The no_gc argument is only here because of the templated way this class
   // is used along with other implementations that require V8 heap access.
   Range<Char> GetDataAt(size_t pos, RuntimeCallStats* stats,
                         DisallowGarbageCollection* no_gc = nullptr) {
-    Chunk chunk = FindChunk(pos, stats);
+    Chunk& chunk = FindChunk(pos, stats);
     size_t buffer_end = chunk.length;
     size_t buffer_pos = std::min(buffer_end, pos - chunk.position);
-    return {&chunk.data[buffer_pos], &chunk.data[buffer_end]};
+    return {&chunk.data.get()[buffer_pos], &chunk.data.get()[buffer_end]};
   }
 
-  ~ChunkedStream() {
-    for (Chunk& chunk : chunks_) delete[] chunk.data;
-  }
-
-  static const bool kCanBeCloned = false;
+  static const bool kCanBeCloned = true;
   static const bool kCanAccessHeap = false;
 
  private:
   struct Chunk {
     Chunk(const Char* const data, size_t position, size_t length)
         : data(data), position(position), length(length) {}
-    const Char* const data;
+    std::unique_ptr<const Char[]> data;
     // The logical position of data.
     const size_t position;
     const size_t length;
     size_t end_position() const { return position + length; }
   };
 
-  Chunk FindChunk(size_t position, RuntimeCallStats* stats) {
-    while (V8_UNLIKELY(chunks_.empty())) FetchChunk(size_t{0}, stats);
+  Chunk& FindChunk(size_t position, RuntimeCallStats* stats) {
+    while (V8_UNLIKELY(chunks_->empty())) FetchChunk(size_t{0}, stats);
 
     // Walk forwards while the position is in front of the current chunk.
-    while (position >= chunks_.back().end_position() &&
-           chunks_.back().length > 0) {
-      FetchChunk(chunks_.back().end_position(), stats);
+    while (position >= chunks_->back().end_position() &&
+           chunks_->back().length > 0) {
+      FetchChunk(chunks_->back().end_position(), stats);
     }
 
     // Walk backwards.
-    for (auto reverse_it = chunks_.rbegin(); reverse_it != chunks_.rend();
-         ++reverse_it) {
-      if (reverse_it->position <= position) return *reverse_it;
+    for (Chunk& chunk : base::Reversed(*chunks_)) {
+      if (chunk.position <= position) return chunk;
     }
 
     UNREACHABLE();
@@ -209,11 +205,15 @@ class ChunkedStream {
                             size_t length) {
     // Incoming data has to be aligned to Char size.
     DCHECK_EQ(0, length % sizeof(Char));
-    chunks_.emplace_back(reinterpret_cast<const Char*>(data), position,
-                         length / sizeof(Char));
+    chunks_->emplace_back(reinterpret_cast<const Char*>(data), position,
+                          length / sizeof(Char));
   }
 
   void FetchChunk(size_t position, RuntimeCallStats* stats) {
+    // Cloned ChunkedStreams have a null source, and therefore can't fetch any
+    // new data.
+    DCHECK_NOT_NULL(source_);
+
     const uint8_t* data = nullptr;
     size_t length;
     {
@@ -226,7 +226,7 @@ class ChunkedStream {
   ScriptCompiler::ExternalSourceStream* source_;
 
  protected:
-  std::vector<struct Chunk> chunks_;
+  std::shared_ptr<std::vector<struct Chunk>> chunks_;
 };
 
 // Provides a buffered utf-16 view on the bytes from the underlying ByteStream.
@@ -251,8 +251,7 @@ class BufferedCharacterStream : public Utf16CharacterStream {
   }
 
  protected:
-  bool ReadBlock() final {
-    size_t position = pos();
+  bool ReadBlock(size_t position) final {
     buffer_pos_ = position;
     buffer_start_ = &buffer_[0];
     buffer_cursor_ = buffer_start_;
@@ -284,7 +283,7 @@ class BufferedCharacterStream : public Utf16CharacterStream {
   ByteStream<uint8_t> byte_stream_;
 };
 
-// Provides a unbuffered utf-16 view on the bytes from the underlying
+// Provides an unbuffered utf-16 view on the bytes from the underlying
 // ByteStream.
 template <template <typename T> class ByteStream>
 class UnbufferedCharacterStream : public Utf16CharacterStream {
@@ -308,16 +307,24 @@ class UnbufferedCharacterStream : public Utf16CharacterStream {
   }
 
  protected:
-  bool ReadBlock() final {
-    size_t position = pos();
+  bool ReadBlock(size_t position) final {
     buffer_pos_ = position;
     DisallowGarbageCollection no_gc;
     Range<uint16_t> range =
         byte_stream_.GetDataAt(position, runtime_call_stats(), &no_gc);
+    if (range.length() == 0) {
+      // We should not set the buffer pointers to nullptr to avoid undefined
+      // behavior, for example when incrementing buffer_cursor_. So instead use
+      // this static array.
+      static const uint16_t empty_buffer[1] = {0};
+      buffer_start_ = empty_buffer;
+      buffer_end_ = empty_buffer;
+      buffer_cursor_ = empty_buffer;
+      return false;
+    }
     buffer_start_ = range.start;
     buffer_end_ = range.end;
     buffer_cursor_ = buffer_start_;
-    if (range.length() == 0) return false;
 
     DCHECK(!range.unaligned_start());
     DCHECK_LE(buffer_start_, buffer_end_);
@@ -330,7 +337,7 @@ class UnbufferedCharacterStream : public Utf16CharacterStream {
   ByteStream<uint16_t> byte_stream_;
 };
 
-// Provides a unbuffered utf-16 view on the bytes from the underlying
+// Provides an unbuffered utf-16 view on the bytes from the underlying
 // ByteStream.
 class RelocatingCharacterStream final
     : public UnbufferedCharacterStream<OnHeapStream> {
@@ -339,20 +346,17 @@ class RelocatingCharacterStream final
   RelocatingCharacterStream(Isolate* isolate, size_t pos, TArgs... args)
       : UnbufferedCharacterStream<OnHeapStream>(pos, args...),
         isolate_(isolate) {
-    isolate->heap()->AddGCEpilogueCallback(UpdateBufferPointersCallback,
-                                           v8::kGCTypeAll, this);
+    isolate->main_thread_local_heap()->AddGCEpilogueCallback(
+        UpdateBufferPointersCallback, this);
   }
 
  private:
   ~RelocatingCharacterStream() final {
-    isolate_->heap()->RemoveGCEpilogueCallback(UpdateBufferPointersCallback,
-                                               this);
+    isolate_->main_thread_local_heap()->RemoveGCEpilogueCallback(
+        UpdateBufferPointersCallback, this);
   }
 
-  static void UpdateBufferPointersCallback(v8::Isolate* v8_isolate,
-                                           v8::GCType type,
-                                           v8::GCCallbackFlags flags,
-                                           void* stream) {
+  static void UpdateBufferPointersCallback(void* stream) {
     reinterpret_cast<RelocatingCharacterStream*>(stream)
         ->UpdateBufferPointers();
   }
@@ -386,7 +390,7 @@ class BufferedUtf16CharacterStream : public Utf16CharacterStream {
  protected:
   static const size_t kBufferSize = 512;
 
-  bool ReadBlock() final;
+  bool ReadBlock(size_t position) final;
 
   // FillBuffer should read up to kBufferSize characters at position and store
   // them into buffer_[0..]. It returns the number of characters stored.
@@ -400,10 +404,9 @@ class BufferedUtf16CharacterStream : public Utf16CharacterStream {
 BufferedUtf16CharacterStream::BufferedUtf16CharacterStream()
     : Utf16CharacterStream(buffer_, buffer_, buffer_, 0) {}
 
-bool BufferedUtf16CharacterStream::ReadBlock() {
+bool BufferedUtf16CharacterStream::ReadBlock(size_t position) {
   DCHECK_EQ(buffer_start_, buffer_);
 
-  size_t position = pos();
   buffer_pos_ = position;
   buffer_cursor_ = buffer_;
   buffer_end_ = buffer_ + FillBuffer(position);
@@ -476,8 +479,7 @@ class Windows1252CharacterStream final : public Utf16CharacterStream {
   }
 
  protected:
-  bool ReadBlock() final {
-    size_t position = pos();
+  bool ReadBlock(size_t position) final {
     buffer_pos_ = position;
     buffer_start_ = &buffer_[0];
     buffer_cursor_ = buffer_start_;
@@ -525,18 +527,18 @@ class Utf8ExternalStreamingStream final : public BufferedUtf16CharacterStream {
  public:
   Utf8ExternalStreamingStream(
       ScriptCompiler::ExternalSourceStream* source_stream)
-      : current_({0, {0, 0, 0, unibrow::Utf8::State::kAccept}}),
+      : chunks_(std::make_shared<std::vector<Chunk>>()),
+        current_({0, {0, 0, 0, unibrow::Utf8::State::kAccept}}),
         source_stream_(source_stream) {}
-  ~Utf8ExternalStreamingStream() final {
-    for (const Chunk& chunk : chunks_) delete[] chunk.data;
-  }
+  ~Utf8ExternalStreamingStream() final = default;
 
   bool can_access_heap() const final { return false; }
 
-  bool can_be_cloned() const final { return false; }
+  bool can_be_cloned() const final { return true; }
 
   std::unique_ptr<Utf16CharacterStream> Clone() const override {
-    UNREACHABLE();
+    return std::unique_ptr<Utf16CharacterStream>(
+        new Utf8ExternalStreamingStream(*this));
   }
 
  protected:
@@ -566,10 +568,17 @@ class Utf8ExternalStreamingStream final : public BufferedUtf16CharacterStream {
   // - The chunk data (data pointer and length), and
   // - the position at the first byte of the chunk.
   struct Chunk {
-    const uint8_t* data;
+    Chunk(const uint8_t* data, size_t length, StreamPosition start)
+        : data(data), length(length), start(start) {}
+    std::unique_ptr<const uint8_t[]> data;
     size_t length;
     StreamPosition start;
   };
+
+  Utf8ExternalStreamingStream(const Utf8ExternalStreamingStream& source_stream)
+      V8_NOEXCEPT : chunks_(source_stream.chunks_),
+                    current_({0, {0, 0, 0, unibrow::Utf8::State::kAccept}}),
+                    source_stream_(nullptr) {}
 
   // Within the current chunk, skip forward from current_ towards position.
   bool SkipToPosition(size_t position);
@@ -581,7 +590,9 @@ class Utf8ExternalStreamingStream final : public BufferedUtf16CharacterStream {
   // (This call is potentially expensive.)
   void SearchPosition(size_t position);
 
-  std::vector<Chunk> chunks_;
+  Chunk& GetChunk(size_t chunk_no) { return (*chunks_)[chunk_no]; }
+
+  std::shared_ptr<std::vector<Chunk>> chunks_;
   Position current_;
   ScriptCompiler::ExternalSourceStream* source_stream_;
 };
@@ -592,14 +603,14 @@ bool Utf8ExternalStreamingStream::SkipToPosition(size_t position) {
   // Already there? Then return immediately.
   if (current_.pos.chars == position) return true;
 
-  const Chunk& chunk = chunks_[current_.chunk_no];
+  const Chunk& chunk = GetChunk(current_.chunk_no);
   DCHECK(current_.pos.bytes >= chunk.start.bytes);
 
   unibrow::Utf8::State state = chunk.start.state;
   uint32_t incomplete_char = chunk.start.incomplete_char;
   size_t it = current_.pos.bytes - chunk.start.bytes;
-  const uint8_t* cursor = &chunk.data[it];
-  const uint8_t* end = &chunk.data[chunk.length];
+  const uint8_t* cursor = &chunk.data.get()[it];
+  const uint8_t* end = &chunk.data.get()[chunk.length];
 
   size_t chars = current_.pos.chars;
 
@@ -625,7 +636,7 @@ bool Utf8ExternalStreamingStream::SkipToPosition(size_t position) {
     }
   }
 
-  current_.pos.bytes = chunk.start.bytes + (cursor - chunk.data);
+  current_.pos.bytes = chunk.start.bytes + (cursor - chunk.data.get());
   current_.pos.chars = chars;
   current_.pos.incomplete_char = incomplete_char;
   current_.pos.state = state;
@@ -635,11 +646,11 @@ bool Utf8ExternalStreamingStream::SkipToPosition(size_t position) {
 }
 
 void Utf8ExternalStreamingStream::FillBufferFromCurrentChunk() {
-  DCHECK_LT(current_.chunk_no, chunks_.size());
+  DCHECK_LT(current_.chunk_no, chunks_->size());
   DCHECK_EQ(buffer_start_, buffer_cursor_);
   DCHECK_LT(buffer_end_ + 1, buffer_start_ + kBufferSize);
 
-  const Chunk& chunk = chunks_[current_.chunk_no];
+  const Chunk& chunk = GetChunk(current_.chunk_no);
 
   // The buffer_ is writable, but buffer_*_ members are const. So we get a
   // non-const pointer into buffer that points to the same char as buffer_end_.
@@ -665,8 +676,8 @@ void Utf8ExternalStreamingStream::FillBufferFromCurrentChunk() {
   }
 
   size_t it = current_.pos.bytes - chunk.start.bytes;
-  const uint8_t* cursor = chunk.data + it;
-  const uint8_t* end = chunk.data + chunk.length;
+  const uint8_t* cursor = chunk.data.get() + it;
+  const uint8_t* end = chunk.data.get() + chunk.length;
 
   // Deal with possible BOM.
   if (V8_UNLIKELY(current_.pos.bytes < 3 && current_.pos.chars == 0)) {
@@ -714,7 +725,7 @@ void Utf8ExternalStreamingStream::FillBufferFromCurrentChunk() {
     output_cursor += ascii_length;
   }
 
-  current_.pos.bytes = chunk.start.bytes + (cursor - chunk.data);
+  current_.pos.bytes = chunk.start.bytes + (cursor - chunk.data.get());
   current_.pos.chars += (output_cursor - buffer_end_);
   current_.pos.incomplete_char = incomplete_char;
   current_.pos.state = state;
@@ -725,12 +736,20 @@ void Utf8ExternalStreamingStream::FillBufferFromCurrentChunk() {
 
 bool Utf8ExternalStreamingStream::FetchChunk() {
   RCS_SCOPE(runtime_call_stats(), RuntimeCallCounterId::kGetMoreDataCallback);
-  DCHECK_EQ(current_.chunk_no, chunks_.size());
-  DCHECK(chunks_.empty() || chunks_.back().length != 0);
+  DCHECK_EQ(current_.chunk_no, chunks_->size());
+  DCHECK(chunks_->empty() || chunks_->back().length != 0);
+
+  // Clone Utf8ExternalStreamingStreams have a null source stream, and
+  // therefore can't fetch any new data.
+  DCHECK_NOT_NULL(source_stream_);
+
+  // Utf8ExternalStreamingStreams that have been cloned are not allowed to fetch
+  // any more.
+  DCHECK_EQ(chunks_.use_count(), 1);
 
   const uint8_t* chunk = nullptr;
   size_t length = source_stream_->GetMoreData(&chunk);
-  chunks_.push_back({chunk, length, current_.pos});
+  chunks_->emplace_back(chunk, length, current_.pos);
   return length > 0;
 }
 
@@ -741,8 +760,8 @@ void Utf8ExternalStreamingStream::SearchPosition(size_t position) {
   // FillBuffer right after the current buffer.
   if (current_.pos.chars == position) return;
 
-  // No chunks. Fetch at least one, so we can assume !chunks_.empty() below.
-  if (chunks_.empty()) {
+  // No chunks. Fetch at least one, so we can assume !chunks_->empty() below.
+  if (chunks_->empty()) {
     DCHECK_EQ(current_.chunk_no, 0u);
     DCHECK_EQ(current_.pos.bytes, 0u);
     DCHECK_EQ(current_.pos.chars, 0u);
@@ -751,38 +770,39 @@ void Utf8ExternalStreamingStream::SearchPosition(size_t position) {
 
   // Search for the last chunk whose start position is less or equal to
   // position.
-  size_t chunk_no = chunks_.size() - 1;
-  while (chunk_no > 0 && chunks_[chunk_no].start.chars > position) {
+  size_t chunk_no = chunks_->size() - 1;
+  while (chunk_no > 0 && GetChunk(chunk_no).start.chars > position) {
     chunk_no--;
   }
 
   // Did we find the terminating (zero-length) chunk? Then we're seeking
   // behind the end of the data, and position does not exist.
   // Set current_ to point to the terminating chunk.
-  if (chunks_[chunk_no].length == 0) {
-    current_ = {chunk_no, chunks_[chunk_no].start};
+  if (GetChunk(chunk_no).length == 0) {
+    current_ = {chunk_no, GetChunk(chunk_no).start};
     return;
   }
 
   // Did we find the non-last chunk? Then our position must be within chunk_no.
-  if (chunk_no + 1 < chunks_.size()) {
+  if (chunk_no + 1 < chunks_->size()) {
     // Fancy-pants optimization for ASCII chunks within a utf-8 stream.
     // (Many web sites declare utf-8 encoding, but use only (or almost only) the
     //  ASCII subset for their JavaScript sources. We can exploit this, by
     //  checking whether the # bytes in a chunk are equal to the # chars, and if
     //  so avoid the expensive SkipToPosition.)
     bool ascii_only_chunk =
-        chunks_[chunk_no].start.incomplete_char == 0 &&
-        (chunks_[chunk_no + 1].start.bytes - chunks_[chunk_no].start.bytes) ==
-            (chunks_[chunk_no + 1].start.chars - chunks_[chunk_no].start.chars);
+        GetChunk(chunk_no).start.incomplete_char == 0 &&
+        (GetChunk(chunk_no + 1).start.bytes - GetChunk(chunk_no).start.bytes) ==
+            (GetChunk(chunk_no + 1).start.chars -
+             GetChunk(chunk_no).start.chars);
     if (ascii_only_chunk) {
-      size_t skip = position - chunks_[chunk_no].start.chars;
+      size_t skip = position - GetChunk(chunk_no).start.chars;
       current_ = {chunk_no,
-                  {chunks_[chunk_no].start.bytes + skip,
-                   chunks_[chunk_no].start.chars + skip, 0,
+                  {GetChunk(chunk_no).start.bytes + skip,
+                   GetChunk(chunk_no).start.chars + skip, 0,
                    unibrow::Utf8::State::kAccept}};
     } else {
-      current_ = {chunk_no, chunks_[chunk_no].start};
+      current_ = {chunk_no, GetChunk(chunk_no).start};
       SkipToPosition(position);
     }
 
@@ -795,12 +815,12 @@ void Utf8ExternalStreamingStream::SearchPosition(size_t position) {
   // What's left: We're in the last, non-terminating chunk. Our position
   // may be in the chunk, but it may also be in 'future' chunks, which we'll
   // have to obtain.
-  DCHECK_EQ(chunk_no, chunks_.size() - 1);
-  current_ = {chunk_no, chunks_[chunk_no].start};
+  DCHECK_EQ(chunk_no, chunks_->size() - 1);
+  current_ = {chunk_no, GetChunk(chunk_no).start};
   bool have_more_data = true;
   bool found = SkipToPosition(position);
   while (have_more_data && !found) {
-    DCHECK_EQ(current_.chunk_no, chunks_.size());
+    DCHECK_EQ(current_.chunk_no, chunks_->size());
     have_more_data = FetchChunk();
     found = have_more_data && SkipToPosition(position);
   }
@@ -808,9 +828,9 @@ void Utf8ExternalStreamingStream::SearchPosition(size_t position) {
   // We'll return with a postion != the desired position only if we're out
   // of data. In that case, we'll point to the terminating chunk.
   DCHECK_EQ(found, current_.pos.chars == position);
-  DCHECK_EQ(have_more_data, chunks_.back().length != 0);
+  DCHECK_EQ(have_more_data, chunks_->back().length != 0);
   DCHECK_IMPLIES(!found, !have_more_data);
-  DCHECK_IMPLIES(!found, current_.chunk_no == chunks_.size() - 1);
+  DCHECK_IMPLIES(!found, current_.chunk_no == chunks_->size() - 1);
 }
 
 size_t Utf8ExternalStreamingStream::FillBuffer(size_t position) {
@@ -818,8 +838,8 @@ size_t Utf8ExternalStreamingStream::FillBuffer(size_t position) {
   buffer_end_ = buffer_;
 
   SearchPosition(position);
-  bool out_of_data = current_.chunk_no != chunks_.size() &&
-                     chunks_[current_.chunk_no].length == 0 &&
+  bool out_of_data = current_.chunk_no != chunks_->size() &&
+                     GetChunk(current_.chunk_no).length == 0 &&
                      current_.pos.incomplete_char == 0;
 
   if (out_of_data) return 0;
@@ -829,7 +849,7 @@ size_t Utf8ExternalStreamingStream::FillBuffer(size_t position) {
   //  can't guarantee progress with one chunk. Thus we iterate.)
   while (!out_of_data && buffer_cursor_ == buffer_end_) {
     // At end of current data, but there might be more? Then fetch it.
-    if (current_.chunk_no == chunks_.size()) {
+    if (current_.chunk_no == chunks_->size()) {
       out_of_data = !FetchChunk();
     }
     FillBufferFromCurrentChunk();
@@ -850,36 +870,35 @@ Utf16CharacterStream* ScannerStream::For(Isolate* isolate,
 
 Utf16CharacterStream* ScannerStream::For(Isolate* isolate, Handle<String> data,
                                          int start_pos, int end_pos) {
-  DCHECK_GE(start_pos, 0);
-  DCHECK_LE(start_pos, end_pos);
-  DCHECK_LE(end_pos, data->length());
+  CHECK_GE(start_pos, 0);
+  CHECK_LE(start_pos, end_pos);
+  CHECK_LE(end_pos, data->length());
   size_t start_offset = 0;
-  if (data->IsSlicedString()) {
-    SlicedString string = SlicedString::cast(*data);
-    start_offset = string.offset();
-    String parent = string.parent();
-    if (parent.IsThinString()) parent = ThinString::cast(parent).actual();
+  if (IsSlicedString(*data)) {
+    Tagged<SlicedString> string = Cast<SlicedString>(*data);
+    start_offset = string->offset();
+    Tagged<String> parent = string->parent();
+    if (IsThinString(parent)) parent = Cast<ThinString>(parent)->actual();
     data = handle(parent, isolate);
   } else {
     data = String::Flatten(isolate, data);
   }
-  if (data->IsExternalOneByteString()) {
+  if (IsExternalOneByteString(*data)) {
     return new BufferedCharacterStream<ExternalStringStream>(
-        static_cast<size_t>(start_pos), ExternalOneByteString::cast(*data),
+        static_cast<size_t>(start_pos), Cast<ExternalOneByteString>(*data),
         start_offset, static_cast<size_t>(end_pos));
-  } else if (data->IsExternalTwoByteString()) {
+  } else if (IsExternalTwoByteString(*data)) {
     return new UnbufferedCharacterStream<ExternalStringStream>(
-        static_cast<size_t>(start_pos), ExternalTwoByteString::cast(*data),
+        static_cast<size_t>(start_pos), Cast<ExternalTwoByteString>(*data),
         start_offset, static_cast<size_t>(end_pos));
-  } else if (data->IsSeqOneByteString()) {
+  } else if (IsSeqOneByteString(*data)) {
     return new BufferedCharacterStream<OnHeapStream>(
-        static_cast<size_t>(start_pos), Handle<SeqOneByteString>::cast(data),
+        static_cast<size_t>(start_pos), Cast<SeqOneByteString>(data),
         start_offset, static_cast<size_t>(end_pos));
-  } else if (data->IsSeqTwoByteString()) {
+  } else if (IsSeqTwoByteString(*data)) {
     return new RelocatingCharacterStream(
-        isolate, static_cast<size_t>(start_pos),
-        Handle<SeqTwoByteString>::cast(data), start_offset,
-        static_cast<size_t>(end_pos));
+        isolate, static_cast<size_t>(start_pos), Cast<SeqTwoByteString>(data),
+        start_offset, static_cast<size_t>(end_pos));
   } else {
     UNREACHABLE();
   }

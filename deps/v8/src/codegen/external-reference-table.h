@@ -5,11 +5,11 @@
 #ifndef V8_CODEGEN_EXTERNAL_REFERENCE_TABLE_H_
 #define V8_CODEGEN_EXTERNAL_REFERENCE_TABLE_H_
 
-#include <vector>
-
+#include "include/v8-memory-span.h"
 #include "src/builtins/accessors.h"
 #include "src/builtins/builtins.h"
 #include "src/codegen/external-reference.h"
+#include "src/execution/isolate-data-fields.h"
 #include "src/logging/counters-definitions.h"
 
 namespace v8 {
@@ -35,11 +35,12 @@ class ExternalReferenceTable {
   static constexpr int kRuntimeReferenceCount =
       Runtime::kNumFunctions -
       Runtime::kNumInlineFunctions;  // Don't count dupe kInline... functions.
-  static constexpr int kIsolateAddressReferenceCount = kIsolateAddressCount;
+  static constexpr int kIsolateFieldReferenceCount = kNumIsolateFieldIds;
   static constexpr int kAccessorReferenceCount =
-      Accessors::kAccessorInfoCount + Accessors::kAccessorSetterCount;
+      Accessors::kAccessorInfoCount + Accessors::kAccessorGetterCount +
+      Accessors::kAccessorSetterCount + Accessors::kAccessorCallbackCount;
   // The number of stub cache external references, see AddStubCache.
-  static constexpr int kStubCacheReferenceCount = 12;
+  static constexpr int kStubCacheReferenceCount = 6 * 3;  // 3 stub caches
   static constexpr int kStatsCountersReferenceCount =
 #define SC(...) +1
       STATS_COUNTER_NATIVE_CODE_LIST(SC);
@@ -50,7 +51,7 @@ class ExternalReferenceTable {
       kAccessorReferenceCount;
   static constexpr int kSize =
       kSizeIsolateIndependent + kExternalReferenceCountIsolateDependent +
-      kIsolateAddressReferenceCount + kStubCacheReferenceCount +
+      kIsolateFieldReferenceCount + kStubCacheReferenceCount +
       kStatsCountersReferenceCount;
   static constexpr uint32_t kEntrySize =
       static_cast<uint32_t>(kSystemPointerSize);
@@ -59,7 +60,7 @@ class ExternalReferenceTable {
   Address address(uint32_t i) const { return ref_addr_[i]; }
   const char* name(uint32_t i) const { return ref_name_[i]; }
 
-  bool is_initialized() const { return is_initialized_ != 0; }
+  bool is_initialized() const { return is_initialized_ == kInitialized; }
 
   static const char* ResolveSymbol(void* address);
 
@@ -68,8 +69,10 @@ class ExternalReferenceTable {
     return i * kEntrySize;
   }
 
-  static void InitializeOncePerProcess();
-  static const char* NameOfIsolateIndependentAddress(Address address);
+  static void InitializeOncePerIsolateGroup(
+      MemorySpan<Address> shared_external_references);
+  static const char* NameOfIsolateIndependentAddress(
+      Address address, MemorySpan<Address> shared_external_references);
 
   const char* NameFromOffset(uint32_t offset) {
     DCHECK_EQ(offset % kEntrySize, 0);
@@ -81,32 +84,51 @@ class ExternalReferenceTable {
   ExternalReferenceTable() = default;
   ExternalReferenceTable(const ExternalReferenceTable&) = delete;
   ExternalReferenceTable& operator=(const ExternalReferenceTable&) = delete;
-  void Init(Isolate* isolate);
+
+  void InitIsolateIndependent(
+      MemorySpan<Address> shared_external_references);  // Step 1.
+
+  void Init(Isolate* isolate);    // Step 2.
 
  private:
-  static void AddIsolateIndependent(Address address, int* index);
+  static void AddIsolateIndependent(
+      Address address, int* index,
+      MemorySpan<Address> shared_external_references);
 
-  static void AddIsolateIndependentReferences(int* index);
-  static void AddBuiltins(int* index);
-  static void AddRuntimeFunctions(int* index);
-  static void AddAccessors(int* index);
+  static void AddIsolateIndependentReferences(
+      int* index, MemorySpan<Address> shared_external_references);
+  static void AddBuiltins(int* index,
+                          MemorySpan<Address> shared_external_references);
+  static void AddRuntimeFunctions(
+      int* index, MemorySpan<Address> shared_external_references);
+  static void AddAccessors(int* index,
+                           MemorySpan<Address> shared_external_references);
 
   void Add(Address address, int* index);
 
-  void CopyIsolateIndependentReferences(int* index);
+  void CopyIsolateIndependentReferences(
+      int* index, MemorySpan<Address> shared_external_references);
   void AddIsolateDependentReferences(Isolate* isolate, int* index);
-  void AddIsolateAddresses(Isolate* isolate, int* index);
+  void AddIsolateFields(Isolate* isolate, int* index);
   void AddStubCache(Isolate* isolate, int* index);
 
   Address GetStatsCounterAddress(StatsCounter* counter);
   void AddNativeCodeStatsCounters(Isolate* isolate, int* index);
 
-  STATIC_ASSERT(sizeof(Address) == kEntrySize);
+  static_assert(sizeof(Address) == kEntrySize);
+#ifdef DEBUG
+  Address ref_addr_[kSize] = {kNullAddress};
+#else
   Address ref_addr_[kSize];
+#endif  // DEBUG
   static const char* const ref_name_[kSize];
 
-  // Not bool to guarantee deterministic size.
-  uint32_t is_initialized_ = 0;
+  enum InitializationState : uint32_t {
+    kUninitialized,
+    kInitializedIsolateIndependent,
+    kInitialized,
+  };
+  InitializationState is_initialized_ = kUninitialized;
 
   // Redirect disabled stats counters to this field. This is done to make sure
   // we can have a snapshot that includes native counters even when the embedder
@@ -116,7 +138,7 @@ class ExternalReferenceTable {
   uint32_t dummy_stats_counter_ = 0;
 };
 
-STATIC_ASSERT(ExternalReferenceTable::kSizeInBytes ==
+static_assert(ExternalReferenceTable::kSizeInBytes ==
               sizeof(ExternalReferenceTable));
 
 }  // namespace internal

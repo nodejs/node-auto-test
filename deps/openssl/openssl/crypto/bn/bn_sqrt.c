@@ -1,5 +1,5 @@
 /*
- * Copyright 2000-2021 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2000-2022 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -14,7 +14,8 @@ BIGNUM *BN_mod_sqrt(BIGNUM *in, const BIGNUM *a, const BIGNUM *p, BN_CTX *ctx)
 /*
  * Returns 'ret' such that ret^2 == a (mod p), using the Tonelli/Shanks
  * algorithm (cf. Henri Cohen, "A Course in Algebraic Computational Number
- * Theory", algorithm 1.5.1). 'p' must be prime!
+ * Theory", algorithm 1.5.1). 'p' must be prime, otherwise an error or
+ * an incorrect "result" will be returned.
  */
 {
     BIGNUM *ret = in;
@@ -170,7 +171,7 @@ BIGNUM *BN_mod_sqrt(BIGNUM *in, const BIGNUM *a, const BIGNUM *p, BN_CTX *ctx)
      * find some y that is not a square.
      */
     if (!BN_copy(q, p))
-        goto end;               /* use 'q' as temp */
+        goto end; /* use 'q' as temp */
     q->neg = 0;
     i = 2;
     do {
@@ -185,7 +186,7 @@ BIGNUM *BN_mod_sqrt(BIGNUM *in, const BIGNUM *a, const BIGNUM *p, BN_CTX *ctx)
             if (!BN_priv_rand_ex(y, BN_num_bits(p), 0, 0, 0, ctx))
                 goto end;
             if (BN_ucmp(y, p) >= 0) {
-                if (!(p->neg ? BN_add : BN_sub) (y, y, p))
+                if (!(p->neg ? BN_add : BN_sub)(y, y, p))
                     goto end;
             }
             /* now 0 <= y < |p| */
@@ -202,8 +203,7 @@ BIGNUM *BN_mod_sqrt(BIGNUM *in, const BIGNUM *a, const BIGNUM *p, BN_CTX *ctx)
             ERR_raise(ERR_LIB_BN, BN_R_P_IS_NOT_PRIME);
             goto end;
         }
-    }
-    while (r == 1 && ++i < 82);
+    } while (r == 1 && ++i < 82);
 
     if (r != -1) {
         /*
@@ -254,7 +254,7 @@ BIGNUM *BN_mod_sqrt(BIGNUM *in, const BIGNUM *a, const BIGNUM *p, BN_CTX *ctx)
         goto end;
 
     /* x := a^((q-1)/2) */
-    if (BN_is_zero(t)) {        /* special case: p = 2^e + 1 */
+    if (BN_is_zero(t)) { /* special case: p = 2^e + 1 */
         if (!BN_nnmod(t, A, p, ctx))
             goto end;
         if (BN_is_zero(t)) {
@@ -303,18 +303,23 @@ BIGNUM *BN_mod_sqrt(BIGNUM *in, const BIGNUM *a, const BIGNUM *p, BN_CTX *ctx)
             goto vrfy;
         }
 
-        /* find smallest  i  such that  b^(2^i) = 1 */
-        i = 1;
-        if (!BN_mod_sqr(t, b, p, ctx))
-            goto end;
-        while (!BN_is_one(t)) {
-            i++;
-            if (i == e) {
-                ERR_raise(ERR_LIB_BN, BN_R_NOT_A_SQUARE);
-                goto end;
+        /* Find the smallest i, 0 < i < e, such that b^(2^i) = 1. */
+        for (i = 1; i < e; i++) {
+            if (i == 1) {
+                if (!BN_mod_sqr(t, b, p, ctx))
+                    goto end;
+
+            } else {
+                if (!BN_mod_mul(t, t, t, p, ctx))
+                    goto end;
             }
-            if (!BN_mod_mul(t, t, t, p, ctx))
-                goto end;
+            if (BN_is_one(t))
+                break;
+        }
+        /* If not found, a is not a square or p is not prime. */
+        if (i >= e) {
+            ERR_raise(ERR_LIB_BN, BN_R_NOT_A_SQUARE);
+            goto end;
         }
 
         /* t := y^2^(e - i - 1) */
@@ -333,7 +338,7 @@ BIGNUM *BN_mod_sqrt(BIGNUM *in, const BIGNUM *a, const BIGNUM *p, BN_CTX *ctx)
         e = i;
     }
 
- vrfy:
+vrfy:
     if (!err) {
         /*
          * verify the result -- the input might have been not a square (test
@@ -349,7 +354,7 @@ BIGNUM *BN_mod_sqrt(BIGNUM *in, const BIGNUM *a, const BIGNUM *p, BN_CTX *ctx)
         }
     }
 
- end:
+end:
     if (err) {
         if (ret != in)
             BN_clear_free(ret);

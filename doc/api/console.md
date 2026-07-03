@@ -6,20 +6,24 @@
 
 <!-- source_link=lib/console.js -->
 
-The `console` module provides a simple debugging console that is similar to the
-JavaScript console mechanism provided by web browsers.
+The `node:console` module provides a simple debugging console that is similar to
+the JavaScript console mechanism provided by web browsers.
 
 The module exports two specific components:
 
-* A `Console` class with methods such as `console.log()`, `console.error()` and
+* A `Console` class with methods such as `console.log()`, `console.error()`, and
   `console.warn()` that can be used to write to any Node.js stream.
 * A global `console` instance configured to write to [`process.stdout`][] and
   [`process.stderr`][]. The global `console` can be used without calling
-  `require('console')`.
+  `require('node:console')`.
 
 _**Warning**_: The global console object's methods are neither consistently
 synchronous like the browser APIs they resemble, nor are they consistently
-asynchronous like all other Node.js streams. See the [note on process I/O][] for
+asynchronous like all other Node.js streams. Programs that desire to depend
+on the synchronous / asynchronous behavior of the console functions should
+first figure out the nature of console's backing stream. This is because the
+stream is dependent on the underlying platform and standard stream
+configuration of the current process. See the [note on process I/O][] for
 more information.
 
 Example using the global `console`:
@@ -77,11 +81,15 @@ changes:
 <!--type=class-->
 
 The `Console` class can be used to create a simple logger with configurable
-output streams and can be accessed using either `require('console').Console`
+output streams and can be accessed using either `require('node:console').Console`
 or `console.Console` (or their destructured counterparts):
 
-```js
-const { Console } = require('console');
+```mjs
+import { Console } from 'node:console';
+```
+
+```cjs
+const { Console } = require('node:console');
 ```
 
 ```js
@@ -94,6 +102,9 @@ const { Console } = console;
 
 <!-- YAML
 changes:
+  - version: v24.10.0
+    pr-url: https://github.com/nodejs/node/pull/60082
+    description: The `inspectOptions` option can be a `Map` from stream to options.
   - version:
      - v14.2.0
      - v12.17.0
@@ -123,8 +134,9 @@ changes:
     and the value returned by `getColorDepth()` on the respective stream. This
     option can not be used, if `inspectOptions.colors` is set as well.
     **Default:** `'auto'`.
-  * `inspectOptions` {Object} Specifies options that are passed along to
-    [`util.inspect()`][].
+  * `inspectOptions` {Object|Map} Specifies options that are passed along to
+    [`util.inspect()`][]. Can be an options object or, if different options
+    for stdout and stderr are desired, a `Map` from stream objects to options.
   * `groupIndentation` {number} Set group indentation.
     **Default:** `2`.
 
@@ -132,7 +144,28 @@ Creates a new `Console` with one or two writable stream instances. `stdout` is a
 writable stream to print log or info output. `stderr` is used for warning or
 error output. If `stderr` is not provided, `stdout` is used for `stderr`.
 
-```js
+```mjs
+import { createWriteStream } from 'node:fs';
+import { Console } from 'node:console';
+// Alternatively
+// const { Console } = console;
+
+const output = createWriteStream('./stdout.log');
+const errorOutput = createWriteStream('./stderr.log');
+// Custom simple logger
+const logger = new Console({ stdout: output, stderr: errorOutput });
+// use it like console
+const count = 5;
+logger.log('count: %d', count);
+// In stdout.log: count 5
+```
+
+```cjs
+const fs = require('node:fs');
+const { Console } = require('node:console');
+// Alternatively
+// const { Console } = console;
+
 const output = fs.createWriteStream('./stdout.log');
 const errorOutput = fs.createWriteStream('./stderr.log');
 // Custom simple logger
@@ -207,9 +240,7 @@ added: v8.3.0
 Maintains an internal counter specific to `label` and outputs to `stdout` the
 number of times `console.count()` has been called with the given `label`.
 
-<!-- eslint-skip -->
-
-```js
+```console
 > console.count()
 default: 1
 undefined
@@ -241,9 +272,7 @@ added: v8.3.0
 
 Resets the internal counter specific to `label`.
 
-<!-- eslint-skip -->
-
-```js
+```console
 > console.count('abc');
 abc: 1
 undefined
@@ -408,7 +437,7 @@ added: v10.0.0
 
 Try to construct a table with the columns of the properties of `tabularData`
 (or use `properties`) and rows of `tabularData` and log it. Falls back to just
-logging the argument if it can’t be parsed as tabular.
+logging the argument if it can't be parsed as tabular.
 
 ```js
 // These can't be parsed as tabular data
@@ -420,18 +449,18 @@ console.table(undefined);
 
 console.table([{ a: 1, b: 'Y' }, { a: 'Z', b: 2 }]);
 // ┌─────────┬─────┬─────┐
-// │ (index) │  a  │  b  │
+// │ (index) │ a   │ b   │
 // ├─────────┼─────┼─────┤
-// │    0    │  1  │ 'Y' │
-// │    1    │ 'Z' │  2  │
+// │ 0       │ 1   │ 'Y' │
+// │ 1       │ 'Z' │ 2   │
 // └─────────┴─────┴─────┘
 
 console.table([{ a: 1, b: 'Y' }, { a: 'Z', b: 2 }], ['a']);
 // ┌─────────┬─────┐
-// │ (index) │  a  │
+// │ (index) │ a   │
 // ├─────────┼─────┤
-// │    0    │  1  │
-// │    1    │ 'Z' │
+// │ 0       │ 1   │
+// │ 1       │ 'Z' │
 // └─────────┴─────┘
 ```
 
@@ -459,7 +488,7 @@ changes:
     description: The elapsed time is displayed with a suitable time unit.
   - version: v6.0.0
     pr-url: https://github.com/nodejs/node/pull/5901
-    description: This method no longer supports multiple calls that don’t map
+    description: This method no longer supports multiple calls that don't map
                  to individual `console.time()` calls; see below for details.
 -->
 
@@ -469,10 +498,10 @@ Stops a timer that was previously started by calling [`console.time()`][] and
 prints the result to `stdout`:
 
 ```js
-console.time('100-elements');
-for (let i = 0; i < 100; i++) {}
-console.timeEnd('100-elements');
-// prints 100-elements: 225.438ms
+console.time('bunch-of-stuff');
+// Do a bunch of stuff.
+console.timeEnd('bunch-of-stuff');
+// Prints: bunch-of-stuff: 225.438ms
 ```
 
 ### `console.timeLog([label][, ...data])`

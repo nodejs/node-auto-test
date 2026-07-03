@@ -2,12 +2,11 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --allow-natives-syntax --turbo-optimize-apply --opt
+// Flags: --allow-natives-syntax --turbo-optimize-apply --turbofan
 
-// These tests do not work well if this script is run more than once (e.g.
-// --stress-opt); after a few runs the whole function is immediately compiled
-// and assertions would fail. We prevent re-runs.
-// Flags: --nostress-opt --no-always-opt
+// These tests do not work well if we flush the feedback vector, which causes
+// deoptimization.
+// Flags: --no-stress-flush-code --no-flush-bytecode
 
 // Some of the tests rely on optimizing/deoptimizing at predictable moments, so
 // this is not suitable for deoptimization fuzzing.
@@ -18,7 +17,10 @@
 // Test JSCallReducer::ReduceJSCallWithArrayLike.
 (function () {
   "use strict";
-  var sum_js_got_interpreted = true;
+  // Introduce an indirection, so that we don't depend on
+  // ContextCells constness.
+  var sum_js_got_interpreted = null;
+  sum_js_got_interpreted = true;
   function sum_js(a, b, c, d) {
     sum_js_got_interpreted = %IsBeingInterpreted();
     return a + b + c + d;
@@ -30,7 +32,7 @@
   %PrepareFunctionForOptimization(sum_js);
   %PrepareFunctionForOptimization(foo);
   assertEquals('abc', foo('a', 'b', 'c'));
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertTrue(sum_js_got_interpreted);
   assertEquals('abc', foo('a', 'b', 'c'));
   assertOptimized(foo);
@@ -58,7 +60,10 @@
 // Test with holey array.
 (function () {
   "use strict";
-  var sum_js_got_interpreted = true;
+  // Introduce an indirection, so that we don't depend
+  // on ContextCells constness.
+  var sum_js_got_interpreted = null;
+  sum_js_got_interpreted = true;
   function sum_js(a, b, c, d) {
     sum_js_got_interpreted = %IsBeingInterpreted();
     return a + b + c + d;
@@ -70,7 +75,7 @@
   %PrepareFunctionForOptimization(sum_js);
   %PrepareFunctionForOptimization(foo);
   assertEquals('AundefinedB', foo('A', 'B'));
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertTrue(sum_js_got_interpreted);
   assertEquals('AundefinedB', foo('A', 'B'));
   assertFalse(sum_js_got_interpreted);
@@ -80,7 +85,10 @@
 // Test with holey-double array.
 (function () {
   "use strict";
-  var sum_js_got_interpreted = true;
+  // Introduce an indirection, so that we don't depend
+  // on ContextCells constness.
+  var sum_js_got_interpreted = null;
+  sum_js_got_interpreted = true;
   function sum_js(a, b, c, d) {
     sum_js_got_interpreted = %IsBeingInterpreted();
     return a + b + (c ? c : .0) + d;
@@ -92,30 +100,22 @@
   %PrepareFunctionForOptimization(sum_js);
   %PrepareFunctionForOptimization(foo);
   assertEquals(45.31, foo(16.11, 26.06));
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertTrue(sum_js_got_interpreted);
 
-  // This is expected to deoptimize
+  // We optimize in the next call and  sum_js stays inlined.
   assertEquals(45.31, foo(16.11, 26.06));
-  assertTrue(sum_js_got_interpreted);
-  assertUnoptimized(foo);
-
-  // Optimize again
-  %PrepareFunctionForOptimization(foo);
-  assertEquals(45.31, foo(16.11, 26.06));
-  %OptimizeFunctionForTopTier(foo);
-  assertTrue(sum_js_got_interpreted);
-
-  // This should stay optimized, but with the call not inlined.
-  assertEquals(45.31, foo(16.11, 26.06));
-  assertTrue(sum_js_got_interpreted);
+  assertFalse(sum_js_got_interpreted);
   assertOptimized(foo);
 })();
 
 // Test deopt when array size changes.
 (function () {
   "use strict";
-  var sum_js_got_interpreted = true;
+  // Introduce an indirection, so that we don't depend on
+  // ContextCells constness.
+  var sum_js_got_interpreted = null;
+  sum_js_got_interpreted = true;
   function sum_js(a, b, c, d) {
     sum_js_got_interpreted = %IsBeingInterpreted();
     return a + b + c + d;
@@ -130,7 +130,7 @@
   %PrepareFunctionForOptimization(foo);
   // Here array size changes.
   assertEquals('abc', foo('a', 'b', 'c'));
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertTrue(sum_js_got_interpreted);
   // Here it should deoptimize.
   assertEquals('abc', foo('a', 'b', 'c'));
@@ -138,7 +138,7 @@
   assertTrue(sum_js_got_interpreted);
   // Now speculation mode prevents the optimization.
   %PrepareFunctionForOptimization(foo);
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertEquals('abc', foo('a', 'b', 'c'));
   assertTrue(sum_js_got_interpreted);
   assertOptimized(foo);
@@ -147,7 +147,10 @@
 // Test with FixedDoubleArray.
 (function () {
   "use strict";
-  var sum_js_got_interpreted = true;
+  // Introduce an indirection, so that we don't depend on
+  // ContextCells constness.
+  var sum_js_got_interpreted = null;
+  sum_js_got_interpreted = true;
   function sum_js(a, b, c, d) {
     sum_js_got_interpreted = %IsBeingInterpreted();
     return a + b + c + d;
@@ -159,7 +162,7 @@
   %PrepareFunctionForOptimization(sum_js);
   %PrepareFunctionForOptimization(foo);
   assertEquals(56.34, foo(11.03, 16.11, 26.06));
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertTrue(sum_js_got_interpreted);
   assertEquals(56.34, foo(11.03, 16.11, 26.06));
   assertFalse(sum_js_got_interpreted);
@@ -169,7 +172,10 @@
 // Test with empty array.
 (function () {
   "use strict";
-  var got_interpreted = true;
+  // Introduce an indirection, so that we don't depend on
+  // ContextCells constness.
+  var got_interpreted = null;
+  got_interpreted = true;
   function fortytwo() {
     got_interpreted = %IsBeingInterpreted();
     return 42;
@@ -181,7 +187,7 @@
   %PrepareFunctionForOptimization(fortytwo);
   %PrepareFunctionForOptimization(foo);
   assertEquals(42, foo());
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertTrue(got_interpreted);
   assertEquals(42, foo());
   assertFalse(got_interpreted);
@@ -191,13 +197,19 @@
 // Test with empty array that changes size.
 (function () {
   "use strict";
-  var got_interpreted = true;
+  // Introduce an indirection, so that we don't depend on
+  // ContextCells constness.
+  var got_interpreted = null;
+  got_interpreted = true;
   function fortytwo() {
     got_interpreted = %IsBeingInterpreted();
     return 42 + arguments.length;
   }
 
-  var len = 2;
+  // Introduce an indirection, so that we don't depend on
+  // ContextCells constness.
+  var len = null;
+  len = 2;
   function foo() {
     let args = []
     for (var i = 0; i < len; i++) { args.push(1); }
@@ -208,7 +220,7 @@
   %PrepareFunctionForOptimization(fortytwo);
   %PrepareFunctionForOptimization(foo);
   assertEquals(44, foo());
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertTrue(got_interpreted);
   assertEquals(44, foo());
   assertTrue(got_interpreted);
@@ -220,10 +232,69 @@
   assertOptimized(foo);
 })();
 
+// Test with FixedDoubleArray and Math.min/max.
+(function () {
+  "use strict";
+  function arrayMin(val) {
+    return Math.min.apply(Math, val);
+  }
+  function arrayMax(val) {
+    return Math.max.apply(Math, val);
+  }
+
+  %PrepareFunctionForOptimization(arrayMin);
+  %PrepareFunctionForOptimization(arrayMin);
+  assertEquals(11.03, arrayMin([11.03, 16.11, 26.06]));
+
+  %PrepareFunctionForOptimization(arrayMax);
+  %PrepareFunctionForOptimization(arrayMax);
+  assertEquals(26.06, arrayMax([11.03, 16.11, 26.06]));
+  %OptimizeFunctionOnNextCall(arrayMin);
+  %OptimizeFunctionOnNextCall(arrayMax);
+
+  assertEquals(11.03, arrayMin([11.03, 16.11, 26.06]));
+  assertEquals(26.06, arrayMax([11.03, 16.11, 26.06]));
+
+  assertOptimized(arrayMin);
+  assertOptimized(arrayMax);
+
+})();
+
+// Test with holey double array and Math.min/max.
+(function () {
+  "use strict";
+  function arrayMin(val) {
+    return Math.min.apply(Math, val);
+  }
+  function arrayMax(val) {
+    return Math.max.apply(Math, val);
+  }
+
+  %PrepareFunctionForOptimization(arrayMin);
+  %PrepareFunctionForOptimization(arrayMin);
+  assertEquals(NaN, arrayMin([11.03, 16.11, , 26.06]));
+
+  %PrepareFunctionForOptimization(arrayMax);
+  %PrepareFunctionForOptimization(arrayMax);
+  assertEquals(NaN, arrayMax([11.03, 16.11, , 26.06]));
+  %OptimizeFunctionOnNextCall(arrayMin);
+  %OptimizeFunctionOnNextCall(arrayMax);
+
+  assertEquals(NaN, arrayMin([11.03, 16.11, , 26.06]));
+  assertEquals(NaN, arrayMax([11.03, 16.11, , 26.06]));
+
+  assertOptimized(arrayMin);
+  assertOptimized(arrayMax);
+
+})();
+
 // Test Reflect.apply().
 (function () {
   "use strict";
-  var sum_js_got_interpreted = true;
+  // Introduce an indirection, so that we don't depend on
+  // ContextCells constness.
+  var sum_js_got_interpreted = null;
+  sum_js_got_interpreted = true;
   function sum_js(a, b, c, d) {
     sum_js_got_interpreted = %IsBeingInterpreted();
     return a + b + c + d;
@@ -235,7 +306,7 @@
   %PrepareFunctionForOptimization(sum_js);
   %PrepareFunctionForOptimization(foo);
   assertEquals('abc', foo('a', 'b', 'c'));
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertTrue(sum_js_got_interpreted);
   assertEquals('abc', foo('a', 'b', 'c'));
   assertFalse(sum_js_got_interpreted);
@@ -245,7 +316,10 @@
 // Test Reflect.apply() with empty array.
 (function () {
   "use strict";
-  var got_interpreted = true;
+  // Introduce an indirection, so that we don't depend on
+  // ContextCells constness.
+  var got_interpreted = null;
+  got_interpreted = true;
   function fortytwo() {
     got_interpreted = %IsBeingInterpreted();
     return 42;
@@ -257,7 +331,7 @@
   %PrepareFunctionForOptimization(fortytwo);
   %PrepareFunctionForOptimization(foo);
   assertEquals(42, foo());
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertTrue(got_interpreted);
   assertEquals(42, foo());
   assertFalse(got_interpreted);
@@ -267,13 +341,17 @@
 // Test Reflect.apply() with empty array that changes size.
 (function () {
   "use strict";
-  var got_interpreted = true;
+  // Introduce an indirection, so that we don't depend on
+  // ContextCells constness.
+  var got_interpreted = null;
+  got_interpreted = true;
   function fortytwo() {
     got_interpreted = %IsBeingInterpreted();
     return 42 + arguments.length;
   }
 
-  var len = 2;
+  var len = null;
+  len = 2;
   function foo() {
     let args = []
     for (var i = 0; i < len; i++) { args.push(1); }
@@ -284,7 +362,7 @@
   %PrepareFunctionForOptimization(fortytwo);
   %PrepareFunctionForOptimization(foo);
   assertEquals(44, foo());
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertTrue(got_interpreted);
   assertEquals(44, foo());
   assertTrue(got_interpreted);
@@ -299,7 +377,10 @@
 // Test JSCallReducer::ReduceJSCallWithSpread.
 (function () {
   "use strict";
-  var sum_js_got_interpreted = true;
+  // Introduce an indirection, so that we don't depend on
+  // ContextCells constness.
+  var sum_js_got_interpreted = null;
+  sum_js_got_interpreted = true;
   function sum_js(a, b, c, d) {
     sum_js_got_interpreted = %IsBeingInterpreted();
     return a + b + c + d;
@@ -312,7 +393,7 @@
   %PrepareFunctionForOptimization(sum_js);
   %PrepareFunctionForOptimization(foo);
   assertEquals('abc', foo('a', 'b', 'c'));
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertTrue(sum_js_got_interpreted);
   assertEquals('abc', foo('a', 'b', 'c'));
   assertFalse(sum_js_got_interpreted);
@@ -322,7 +403,10 @@
 // Test spread call with empty array.
 (function () {
   "use strict";
-  var sum_js_got_interpreted = true;
+  // Introduce an indirection, so that we don't depend on
+  // ContextCells constness.
+  var sum_js_got_interpreted = null;
+  sum_js_got_interpreted = true;
   function sum_js(a, b, c) {
     sum_js_got_interpreted = %IsBeingInterpreted();
     return a + b + c;
@@ -335,7 +419,7 @@
   %PrepareFunctionForOptimization(sum_js);
   %PrepareFunctionForOptimization(foo);
   assertEquals('abc', foo('a', 'b', 'c'));
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertTrue(sum_js_got_interpreted);
   assertEquals('abc', foo('a', 'b', 'c'));
   assertFalse(sum_js_got_interpreted);
@@ -345,13 +429,17 @@
 // Test spread call with empty array that changes size.
 (function () {
   "use strict";
-  var max_got_interpreted = true;
+  // Introduce an indirection, so that we don't depend on
+  // ContextCells constness.
+  var max_got_interpreted = null;
+  max_got_interpreted = true;
   function max() {
     max_got_interpreted = %IsBeingInterpreted();
     return Math.max(...arguments);
   }
 
-  var len = 2;
+  var len = null;
+  len = 2;
   function foo(x, y, z) {
     let args = [];
     for (var i = 0; i < len; i++) { args.push(4 + i); }
@@ -361,7 +449,7 @@
   %PrepareFunctionForOptimization(max);
   %PrepareFunctionForOptimization(foo);
   assertEquals(5, foo(1, 2, 3));
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertTrue(max_got_interpreted);
   assertEquals(5, foo(1, 2, 3));
   assertTrue(max_got_interpreted);
@@ -376,7 +464,10 @@
 // Test spread call with more args.
 (function () {
   "use strict";
-  var sum_js_got_interpreted = true;
+  // Introduce an indirection, so that we don't depend on
+  // ContextCells constness.
+  var sum_js_got_interpreted = null;
+  sum_js_got_interpreted = true;
   function sum_js(a, b, c, d, e, f, g) {
     assertEquals(7, arguments.length);
     sum_js_got_interpreted = %IsBeingInterpreted();
@@ -390,7 +481,7 @@
   %PrepareFunctionForOptimization(sum_js);
   %PrepareFunctionForOptimization(foo);
   assertEquals('abccba', foo('a', 'b', 'c'));
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertTrue(sum_js_got_interpreted);
   assertEquals('abccba', foo('a', 'b', 'c'));
   assertFalse(sum_js_got_interpreted);
@@ -417,7 +508,7 @@
   len = 0;
   %PrepareFunctionForOptimization(foo);
   assertEquals(3, foo(1, 2, 3));
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertEquals(3, foo(1, 2, 3));
   assertOptimized(foo);
   // Deoptimize when input of Math.max is not number
@@ -428,7 +519,7 @@
   len = 2;
   %PrepareFunctionForOptimization(foo1);
   assertEquals(3, foo1(1, 2, 3));
-  %OptimizeFunctionForTopTier(foo1);
+  %OptimizeFunctionOnNextCall(foo1);
   assertEquals(3, foo1(1, 2, 3));
   //Deoptimize when array length changes
   assertUnoptimized(foo1);
@@ -454,7 +545,7 @@
   len = 0;
   %PrepareFunctionForOptimization(foo);
   assertEquals(2, foo(1, 2, 3));
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertEquals(2, foo(1, 2, 3));
   assertOptimized(foo);
   // Deoptimzie when input of Math.max is not number
@@ -465,7 +556,7 @@
   len = 2;
   %PrepareFunctionForOptimization(foo1);
   assertEquals(3, foo1(1, 2, 3));
-  %OptimizeFunctionForTopTier(foo1);
+  %OptimizeFunctionOnNextCall(foo1);
   assertEquals(3, foo1(1, 2, 3));
   assertOptimized(foo1);
   // No Deoptimization when array length changes
@@ -476,7 +567,10 @@
 // Test apply on JSCreateClosure.
 (function () {
   "use strict";
-  var sum_got_interpreted = true;
+  // Introduce an indirection, so that we don't depend on
+  // ContextCells constness.
+  var sum_got_interpreted = null;
+  sum_got_interpreted = true;
   function foo_closure() {
     return function(a, b, c, d) {
       sum_got_interpreted = %IsBeingInterpreted();
@@ -493,8 +587,8 @@
   %PrepareFunctionForOptimization(foo_closure);
   %PrepareFunctionForOptimization(foo);
   assertEquals('abc', foo('a', 'b', 'c'));
-  %OptimizeFunctionForTopTier(foo_closure);
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo_closure);
+  %OptimizeFunctionOnNextCall(foo);
   assertTrue(sum_got_interpreted);
   assertEquals('abc', foo('a', 'b', 'c'));
   assertFalse(sum_got_interpreted);
@@ -504,7 +598,10 @@
 // Test apply with JSBoundFunction
 (function () {
   "use strict";
-  var sum_got_interpreted = true;
+  // Introduce an indirection, so that we don't depend on
+  // ContextCells constness.
+  var sum_got_interpreted = null;
+  sum_got_interpreted = true;
   function sum_js(a, b, c, d, e) {
     sum_got_interpreted = %IsBeingInterpreted();
     return this.x + a + b + c + d + e;
@@ -519,7 +616,7 @@
   assertEquals(166, foo(40, 42, 44));
   assertTrue(sum_got_interpreted);
 
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertEquals(166, foo(40, 42, 44));
   assertFalse(sum_got_interpreted);
   assertOptimized(foo);
@@ -528,7 +625,10 @@
 // Test apply with nested bindings
 (function () {
   "use strict";
-  var sum_got_interpreted = true;
+  // Introduce an indirection, so that we don't depend on
+  // ContextCells constness.
+  var sum_got_interpreted = null;
+  sum_got_interpreted = true;
   function sum_js(a, b, c, d, e) {
     sum_got_interpreted = %IsBeingInterpreted();
     return this.x + a + b + c + d + e;
@@ -543,7 +643,7 @@
   assertEquals(166, foo(40, 42, 44));
   assertTrue(sum_got_interpreted);
 
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertEquals(166, foo(40, 42, 44));
   assertFalse(sum_got_interpreted);
   assertOptimized(foo);
@@ -552,7 +652,10 @@
 // Test apply on bound function (JSCreateBoundFunction).
 (function () {
   "use strict";
-  var sum_got_interpreted = true;
+  // Introduce an indirection, so that we don't depend on
+  // ContextCells constness.
+  var sum_got_interpreted = null;
+  sum_got_interpreted = true;
   function sum_js(a, b, c, d) {
     sum_got_interpreted = %IsBeingInterpreted();
     return this.x + a + b + c + d;
@@ -566,7 +669,7 @@
   assertEquals('42abc', foo('a', 'b', 'c'));
   assertTrue(sum_got_interpreted);
 
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertEquals('42abc', foo('a', 'b', 'c'));
   assertFalse(sum_got_interpreted);
   assertOptimized(foo);
@@ -575,7 +678,10 @@
 // Test apply on bound function (JSCreateBoundFunction) with args.
 (function () {
   "use strict";
-  var sum_got_interpreted = true;
+  // Introduce an indirection, so that we don't depend on
+  // ContextCells constness.
+  var sum_got_interpreted = null;
+  sum_got_interpreted = true
   function sum_js(a, b, c, d, e, f) {
     sum_got_interpreted = %IsBeingInterpreted();
     return this.x + a + b + c + d + e + f;
@@ -589,7 +695,7 @@
   assertEquals('45abc', foo('a', 'b', 'c'));
   assertTrue(sum_got_interpreted);
 
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertEquals('45abc', foo('a', 'b', 'c'));
   assertFalse(sum_got_interpreted);
   assertOptimized(foo);
@@ -598,7 +704,10 @@
 // Test call with array-like under-application.
 (function () {
   "use strict";
-  var sum_js_got_interpreted = true;
+  // Introduce an indirection, so that we don't depend on
+  // ContextCells constness.
+  var sum_js_got_interpreted = null;
+  sum_js_got_interpreted = true
   function sum_js(a, b, c, d) {
     sum_js_got_interpreted = %IsBeingInterpreted();
     return a + b + c + d + arguments.length;
@@ -610,7 +719,7 @@
   %PrepareFunctionForOptimization(sum_js);
   %PrepareFunctionForOptimization(foo);
   assertEquals('ABundefined3', foo('A', 'B'));
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertTrue(sum_js_got_interpreted);
   assertEquals('ABundefined3', foo('A', 'B'));
   assertFalse(sum_js_got_interpreted);
@@ -620,7 +729,10 @@
 // Test call with array-like over-application.
 (function () {
   "use strict";
-  var sum_js_got_interpreted = true;
+  // Introduce an indirection, so that we don't depend on
+  // ContextCells constness.
+  var sum_js_got_interpreted = null;
+  sum_js_got_interpreted = true
   function sum_js(a, b, c, d) {
     sum_js_got_interpreted = %IsBeingInterpreted();
     return a + b + c + d + arguments.length;
@@ -632,7 +744,7 @@
   %PrepareFunctionForOptimization(sum_js);
   %PrepareFunctionForOptimization(foo);
   assertEquals('abc6', foo('a', 'b', 'c', 'd', 'e'));
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertTrue(sum_js_got_interpreted);
   assertEquals('abc6', foo('a', 'b', 'c', 'd', 'e'));
   assertFalse(sum_js_got_interpreted);
@@ -642,7 +754,10 @@
 // Test call with spread under-application.
 (function () {
   "use strict";
-  var sum_js_got_interpreted = true;
+  // Introduce an indirection, so that we don't depend on
+  // ContextCells constness.
+  var sum_js_got_interpreted = null;
+  sum_js_got_interpreted = true
   function sum_js(a, b, c, d) {
     sum_js_got_interpreted = %IsBeingInterpreted();
     return a + b + c + d + arguments.length;
@@ -655,7 +770,7 @@
   %PrepareFunctionForOptimization(sum_js);
   %PrepareFunctionForOptimization(foo);
   assertEquals('ABundefined3', foo('A', 'B'));
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertTrue(sum_js_got_interpreted);
   assertEquals('ABundefined3', foo('A', 'B'));
   assertFalse(sum_js_got_interpreted);
@@ -665,7 +780,10 @@
 // Test call with spread over-application.
 (function () {
   "use strict";
-  var sum_js_got_interpreted = true;
+  // Introduce an indirection, so that we don't depend on
+  // ContextCells constness.
+  var sum_js_got_interpreted = null;
+  sum_js_got_interpreted = true
   function sum_js(a, b, c, d) {
     sum_js_got_interpreted = %IsBeingInterpreted();
     return a + b + c + d + arguments.length;
@@ -678,7 +796,7 @@
   %PrepareFunctionForOptimization(sum_js);
   %PrepareFunctionForOptimization(foo);
   assertEquals('abc6', foo('a', 'b', 'c', 'd', 'e'));
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertTrue(sum_js_got_interpreted);
   assertEquals('abc6', foo('a', 'b', 'c', 'd', 'e'));
   assertFalse(sum_js_got_interpreted);
@@ -688,7 +806,10 @@
 // Test calling function that has rest parameters.
 (function () {
   "use strict";
-  var sum_js_got_interpreted = true;
+  // Introduce an indirection, so that we don't depend on
+  // ContextCells constness.
+  var sum_js_got_interpreted = null;
+  sum_js_got_interpreted = true
   function sum_js(a, b, ...moreArgs) {
     sum_js_got_interpreted = %IsBeingInterpreted();
     return a + b + moreArgs[0] + moreArgs[1] + moreArgs[2] + moreArgs[3];
@@ -700,7 +821,7 @@
   %PrepareFunctionForOptimization(sum_js);
   %PrepareFunctionForOptimization(foo);
   assertEquals('abcde', foo('a', 'b', 'c', 'd', 'e'));
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertTrue(sum_js_got_interpreted);
   assertEquals('abcde', foo('a', 'b', 'c', 'd', 'e'));
   assertFalse(sum_js_got_interpreted);
@@ -725,7 +846,7 @@
   assertTrue(sum_js_got_interpreted);
 
   // The call is not inlined with CreateArguments.
-  %OptimizeFunctionForTopTier(foo);
+  %OptimizeFunctionOnNextCall(foo);
   assertEquals('abc', foo('a', 'b', 'c'));
   assertTrue(sum_js_got_interpreted);
   assertOptimized(foo);
@@ -734,7 +855,10 @@
 // Test with inlined calls.
 (function () {
   "use strict";
-  var sum_js_got_interpreted = true;
+  // Introduce an indirection, so that we don't depend on
+  // ContextCells constness.
+  var sum_js_got_interpreted = null;
+  sum_js_got_interpreted = true
   function sum_js(a, b, c, d) {
     sum_js_got_interpreted = %IsBeingInterpreted();
     return a + b + c + d;
@@ -753,7 +877,7 @@
   assertTrue(sum_js_got_interpreted);
 
   // Optimization also works if the call is in an inlined function.
-  %OptimizeFunctionForTopTier(bar);
+  %OptimizeFunctionOnNextCall(bar);
   assertEquals('cba', bar('a', 'b', 'c'));
   assertFalse(sum_js_got_interpreted);
   assertOptimized(bar);

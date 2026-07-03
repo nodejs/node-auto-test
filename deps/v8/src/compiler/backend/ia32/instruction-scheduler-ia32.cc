@@ -48,33 +48,34 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kIA32Popcnt:
     case kIA32Bswap:
     case kIA32Lea:
-    case kSSEFloat32Cmp:
-    case kSSEFloat32Sqrt:
-    case kSSEFloat32Round:
-    case kSSEFloat64Cmp:
-    case kSSEFloat64Mod:
-    case kSSEFloat32Max:
-    case kSSEFloat64Max:
-    case kSSEFloat32Min:
-    case kSSEFloat64Min:
-    case kSSEFloat64Sqrt:
-    case kSSEFloat64Round:
-    case kSSEFloat32ToFloat64:
-    case kSSEFloat64ToFloat32:
-    case kSSEFloat32ToInt32:
-    case kSSEFloat32ToUint32:
-    case kSSEFloat64ToInt32:
-    case kSSEFloat64ToUint32:
+    case kIA32Float32Cmp:
+    case kIA32Float32Sqrt:
+    case kIA32Float32Round:
+    case kIA32Float64Cmp:
+    case kIA32Float64Mod:
+    case kIA32Float32Max:
+    case kIA32Float64Max:
+    case kIA32Float32Min:
+    case kIA32Float64Min:
+    case kIA32Float64Sqrt:
+    case kIA32Float64Round:
+    case kIA32Float32ToFloat64:
+    case kIA32Float64ToFloat32:
+    case kIA32Float32ToInt32:
+    case kIA32Float32ToUint32:
+    case kIA32Float64ToInt32:
+    case kIA32Float64ToUint32:
     case kSSEInt32ToFloat32:
-    case kSSEUint32ToFloat32:
+    case kIA32Uint32ToFloat32:
     case kSSEInt32ToFloat64:
-    case kSSEUint32ToFloat64:
-    case kSSEFloat64ExtractLowWord32:
-    case kSSEFloat64ExtractHighWord32:
-    case kSSEFloat64InsertLowWord32:
-    case kSSEFloat64InsertHighWord32:
-    case kSSEFloat64LoadLowWord32:
-    case kSSEFloat64SilenceNaN:
+    case kIA32Uint32ToFloat64:
+    case kIA32Float64ExtractLowWord32:
+    case kIA32Float64ExtractHighWord32:
+    case kIA32Float64InsertLowWord32:
+    case kIA32Float64InsertHighWord32:
+    case kIA32Float64FromWord32Pair:
+    case kIA32Float64LoadLowWord32:
+    case kIA32Float64SilenceNaN:
     case kFloat32Add:
     case kFloat32Sub:
     case kFloat64Add:
@@ -89,9 +90,16 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kFloat32Neg:
     case kIA32BitcastFI:
     case kIA32BitcastIF:
+    case kIA32Blendvpd:
+    case kIA32Blendvps:
+    case kIA32Pblendvb:
+    case kIA32Cvttps2dq:
+    case kIA32Cvttpd2dq:
+    case kIA32I32x4TruncF32x4U:
+    case kIA32I32x4TruncF64x2UZero:
     case kIA32F64x2Splat:
-    case kF64x2ExtractLane:
-    case kF64x2ReplaceLane:
+    case kIA32F64x2ExtractLane:
+    case kIA32F64x2ReplaceLane:
     case kIA32F64x2Sqrt:
     case kIA32F64x2Add:
     case kIA32F64x2Sub:
@@ -103,8 +111,10 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kIA32F64x2Ne:
     case kIA32F64x2Lt:
     case kIA32F64x2Le:
-    case kIA32F64x2Pmin:
-    case kIA32F64x2Pmax:
+    case kIA32F64x2Qfma:
+    case kIA32F64x2Qfms:
+    case kIA32Minpd:
+    case kIA32Maxpd:
     case kIA32F64x2Round:
     case kIA32F64x2ConvertLowI32x4S:
     case kIA32F64x2ConvertLowI32x4U:
@@ -137,25 +147,21 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kIA32Insertps:
     case kIA32F32x4SConvertI32x4:
     case kIA32F32x4UConvertI32x4:
-    case kIA32F32x4Abs:
-    case kIA32F32x4Neg:
     case kIA32F32x4Sqrt:
-    case kIA32F32x4RecipApprox:
-    case kIA32F32x4RecipSqrtApprox:
     case kIA32F32x4Add:
     case kIA32F32x4Sub:
     case kIA32F32x4Mul:
     case kIA32F32x4Div:
-    case kSSEF32x4Min:
-    case kAVXF32x4Min:
-    case kSSEF32x4Max:
-    case kAVXF32x4Max:
+    case kIA32F32x4Min:
+    case kIA32F32x4Max:
     case kIA32F32x4Eq:
     case kIA32F32x4Ne:
     case kIA32F32x4Lt:
     case kIA32F32x4Le:
-    case kIA32F32x4Pmin:
-    case kIA32F32x4Pmax:
+    case kIA32F32x4Qfma:
+    case kIA32F32x4Qfms:
+    case kIA32Minps:
+    case kIA32Maxps:
     case kIA32F32x4Round:
     case kIA32F32x4DemoteF64x2Zero:
     case kIA32I32x4Splat:
@@ -189,6 +195,7 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kIA32I32x4Abs:
     case kIA32I32x4BitMask:
     case kIA32I32x4DotI16x8S:
+    case kIA32I32x4DotI8x16I7x16AddS:
     case kIA32I32x4ExtMulLowI16x8S:
     case kIA32I32x4ExtMulHighI16x8S:
     case kIA32I32x4ExtMulLowI16x8U:
@@ -240,6 +247,8 @@ int InstructionScheduler::GetTargetInstructionFlags(
     case kIA32I16x8ExtAddPairwiseI8x16S:
     case kIA32I16x8ExtAddPairwiseI8x16U:
     case kIA32I16x8Q15MulRSatS:
+    case kIA32I16x8RelaxedQ15MulRS:
+    case kIA32I16x8DotI8x16I7x16S:
     case kIA32I8x16Splat:
     case kIA32I8x16ExtractLaneS:
     case kIA32Pinsrb:
@@ -406,8 +415,8 @@ int InstructionScheduler::GetInstructionLatency(const Instruction* instr) {
     case kIA32Imul:
     case kIA32ImulHigh:
       return 5;
-    case kSSEFloat32Cmp:
-    case kSSEFloat64Cmp:
+    case kIA32Float32Cmp:
+    case kIA32Float64Cmp:
       return 9;
     case kFloat32Add:
     case kFloat32Sub:
@@ -415,24 +424,24 @@ int InstructionScheduler::GetInstructionLatency(const Instruction* instr) {
     case kFloat64Sub:
     case kFloat32Abs:
     case kFloat32Neg:
-    case kSSEFloat64Max:
-    case kSSEFloat64Min:
+    case kIA32Float64Max:
+    case kIA32Float64Min:
     case kFloat64Abs:
     case kFloat64Neg:
       return 5;
     case kFloat32Mul:
       return 4;
-    case kSSEFloat32ToFloat64:
-    case kSSEFloat64ToFloat32:
+    case kIA32Float32ToFloat64:
+    case kIA32Float64ToFloat32:
       return 6;
-    case kSSEFloat32Round:
-    case kSSEFloat64Round:
-    case kSSEFloat32ToInt32:
-    case kSSEFloat64ToInt32:
+    case kIA32Float32Round:
+    case kIA32Float64Round:
+    case kIA32Float32ToInt32:
+    case kIA32Float64ToInt32:
       return 8;
-    case kSSEFloat32ToUint32:
+    case kIA32Float32ToUint32:
       return 21;
-    case kSSEFloat64ToUint32:
+    case kIA32Float64ToUint32:
       return 15;
     case kIA32Idiv:
       return 33;
@@ -442,10 +451,10 @@ int InstructionScheduler::GetInstructionLatency(const Instruction* instr) {
       return 35;
     case kFloat64Div:
       return 63;
-    case kSSEFloat32Sqrt:
-    case kSSEFloat64Sqrt:
+    case kIA32Float32Sqrt:
+    case kIA32Float64Sqrt:
       return 25;
-    case kSSEFloat64Mod:
+    case kIA32Float64Mod:
       return 50;
     case kArchTruncateDoubleToI:
       return 9;

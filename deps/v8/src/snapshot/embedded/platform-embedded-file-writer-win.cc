@@ -11,12 +11,9 @@
 #if defined(V8_OS_WIN64)
 #include "src/builtins/builtins.h"
 #include "src/diagnostics/unwinding-info-win64.h"
-#include "src/snapshot/embedded/embedded-data.h"
+#include "src/snapshot/embedded/embedded-data-inl.h"
 #include "src/snapshot/embedded/embedded-file-writer.h"
 #endif  // V8_OS_WIN64
-
-namespace v8 {
-namespace internal {
 
 // V8_CC_MSVC is true for both MSVC and clang on windows. clang can handle
 // __asm__-style inline assembly but MSVC cannot, and thus we need a more
@@ -25,6 +22,13 @@ namespace internal {
 #if defined(_MSC_VER) && !defined(__clang__)
 #define V8_COMPILER_IS_MSVC
 #endif
+
+#if defined(V8_COMPILER_IS_MSVC)
+#include "src/flags/flags.h"
+#endif
+
+namespace v8 {
+namespace internal {
 
 // MSVC uses MASM for x86 and x64, while it has a ARMASM for ARM32 and
 // ARMASM64 for ARM64. Since ARMASM and ARMASM64 accept a slightly tweaked
@@ -109,7 +113,7 @@ void EmitUnwindData(PlatformEmbeddedFileWriterWin* w,
   w->Comment("    UnwindInfoAddress");
   w->StartPdataSection();
   {
-    STATIC_ASSERT(Builtins::kAllBuiltinsAreIsolateIndependent);
+    static_assert(Builtins::kAllBuiltinsAreIsolateIndependent);
     Address prev_builtin_end_offset = 0;
     for (Builtin builtin = Builtins::kFirst; builtin <= Builtins::kLast;
          ++builtin) {
@@ -119,9 +123,9 @@ void EmitUnwindData(PlatformEmbeddedFileWriterWin* w,
       // entry because the return address can be retrieved from [rsp].
       if (unwind_infos[builtin_index].is_leaf_function()) continue;
 
-      uint64_t builtin_start_offset = blob->InstructionStartOfBuiltin(builtin) -
+      uint64_t builtin_start_offset = blob->InstructionStartOf(builtin) -
                                       reinterpret_cast<Address>(blob->code());
-      uint32_t builtin_size = blob->InstructionSizeOfBuiltin(builtin);
+      uint32_t builtin_size = blob->InstructionSizeOf(builtin);
 
       const std::vector<int>& xdata_desc =
           unwind_infos[builtin_index].fp_offsets();
@@ -196,15 +200,15 @@ void EmitUnwindData(PlatformEmbeddedFileWriterWin* w,
   std::vector<int> code_chunks;
   std::vector<win64_unwindinfo::FrameOffsets> fp_adjustments;
 
-  STATIC_ASSERT(Builtins::kAllBuiltinsAreIsolateIndependent);
+  static_assert(Builtins::kAllBuiltinsAreIsolateIndependent);
   for (Builtin builtin = Builtins::kFirst; builtin <= Builtins::kLast;
        ++builtin) {
     const int builtin_index = static_cast<int>(builtin);
     if (unwind_infos[builtin_index].is_leaf_function()) continue;
 
-    uint64_t builtin_start_offset = blob->InstructionStartOfBuiltin(builtin) -
+    uint64_t builtin_start_offset = blob->InstructionStartOf(builtin) -
                                     reinterpret_cast<Address>(blob->code());
-    uint32_t builtin_size = blob->InstructionSizeOfBuiltin(builtin);
+    uint32_t builtin_size = blob->InstructionSizeOf(builtin);
 
     const std::vector<int>& xdata_desc =
         unwind_infos[builtin_index].fp_offsets();
@@ -364,15 +368,6 @@ void PlatformEmbeddedFileWriterWin::SectionText() {
   }
 }
 
-void PlatformEmbeddedFileWriterWin::SectionData() {
-  if (target_arch_ == EmbeddedTargetArch::kArm64) {
-    fprintf(fp_, "  AREA |.data|, DATA, ALIGN=%d, READWRITE\n",
-            ARM64_DATA_ALIGNMENT_POWER);
-  } else {
-    fprintf(fp_, ".DATA\n");
-  }
-}
-
 void PlatformEmbeddedFileWriterWin::SectionRoData() {
   if (target_arch_ == EmbeddedTargetArch::kArm64) {
     fprintf(fp_, "  AREA |.rodata|, DATA, ALIGN=%d, READONLY\n",
@@ -387,13 +382,6 @@ void PlatformEmbeddedFileWriterWin::DeclareUint32(const char* name,
   DeclareSymbolGlobal(name);
   fprintf(fp_, "%s%s %s %d\n", SYMBOL_PREFIX, name, DirectiveAsString(kLong),
           value);
-}
-
-void PlatformEmbeddedFileWriterWin::DeclarePointerToSymbol(const char* name,
-                                                           const char* target) {
-  DeclareSymbolGlobal(name);
-  fprintf(fp_, "%s%s %s %s%s\n", SYMBOL_PREFIX, name,
-          DirectiveAsString(PointerSizeDirective()), SYMBOL_PREFIX, target);
 }
 
 void PlatformEmbeddedFileWriterWin::StartPdataSection() {
@@ -509,10 +497,6 @@ void PlatformEmbeddedFileWriterWin::SourceInfo(int fileid, const char* filename,
 // TODO(mmarchini): investigate emitting size annotations for Windows
 void PlatformEmbeddedFileWriterWin::DeclareFunctionBegin(const char* name,
                                                          uint32_t size) {
-  if (ENABLE_CONTROL_FLOW_INTEGRITY_BOOL) {
-    DeclareSymbolGlobal(name);
-  }
-
   if (target_arch_ == EmbeddedTargetArch::kArm64) {
     fprintf(fp_, "%s%s FUNCTION\n", SYMBOL_PREFIX, name);
 
@@ -584,10 +568,6 @@ void PlatformEmbeddedFileWriterWin::SectionText() {
   fprintf(fp_, ".section .text$hot,\"xr\"\n");
 }
 
-void PlatformEmbeddedFileWriterWin::SectionData() {
-  fprintf(fp_, ".section .data\n");
-}
-
 void PlatformEmbeddedFileWriterWin::SectionRoData() {
   fprintf(fp_, ".section .rdata\n");
 }
@@ -599,14 +579,6 @@ void PlatformEmbeddedFileWriterWin::DeclareUint32(const char* name,
   IndentedDataDirective(kLong);
   fprintf(fp_, "%d", value);
   Newline();
-}
-
-void PlatformEmbeddedFileWriterWin::DeclarePointerToSymbol(const char* name,
-                                                           const char* target) {
-  DeclareSymbolGlobal(name);
-  DeclareLabel(name);
-  fprintf(fp_, "  %s %s%s\n", DirectiveAsString(PointerSizeDirective()),
-          SYMBOL_PREFIX, target);
 }
 
 void PlatformEmbeddedFileWriterWin::StartPdataSection() {
@@ -637,14 +609,7 @@ void PlatformEmbeddedFileWriterWin::DeclareSymbolGlobal(const char* name) {
 }
 
 void PlatformEmbeddedFileWriterWin::AlignToCodeAlignment() {
-#if V8_TARGET_ARCH_X64
-  // On x64 use 64-bytes code alignment to allow 64-bytes loop header alignment.
-  STATIC_ASSERT(64 >= kCodeAlignment);
-  fprintf(fp_, ".balign 64\n");
-#else
-  STATIC_ASSERT(32 >= kCodeAlignment);
-  fprintf(fp_, ".balign 32\n");
-#endif
+  fprintf(fp_, ".balign %d\n", static_cast<int>(kCodeAlignment));
 }
 
 void PlatformEmbeddedFileWriterWin::AlignToDataAlignment() {
@@ -674,7 +639,11 @@ void PlatformEmbeddedFileWriterWin::DeclareFunctionBegin(const char* name,
                                                          uint32_t size) {
   DeclareLabel(name);
 
-  if (target_arch_ == EmbeddedTargetArch::kArm64) {
+  if (target_arch_ == EmbeddedTargetArch::kArm64
+#if V8_ENABLE_DRUMBRAKE
+      || IsDrumBrakeInstructionHandler(name)
+#endif  // V8_ENABLE_DRUMBRAKE
+  ) {
     // Windows ARM64 assembly is in GAS syntax, but ".type" is invalid directive
     // in PE/COFF for Windows.
     DeclareSymbolGlobal(name);

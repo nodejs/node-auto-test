@@ -5,9 +5,15 @@
 #ifndef V8_HEAP_CPPGC_HEAP_PAGE_H_
 #define V8_HEAP_CPPGC_HEAP_PAGE_H_
 
+#include <atomic>
+
+#include "include/cppgc/internal/base-page-handle.h"
+#include "src/base/hashing.h"
 #include "src/base/iterator.h"
 #include "src/base/macros.h"
+#include "src/heap/base/basic-slot-set.h"
 #include "src/heap/cppgc/globals.h"
+#include "src/heap/cppgc/heap-config.h"
 #include "src/heap/cppgc/heap-object-header.h"
 #include "src/heap/cppgc/object-start-bitmap.h"
 
@@ -19,8 +25,9 @@ class NormalPageSpace;
 class LargePageSpace;
 class HeapBase;
 class PageBackend;
+class SlotSet;
 
-class V8_EXPORT_PRIVATE BasePage {
+class V8_EXPORT_PRIVATE BasePage : public BasePageHandle {
  public:
   static inline BasePage* FromPayload(void*);
   static inline const BasePage* FromPayload(const void*);
@@ -33,9 +40,9 @@ class V8_EXPORT_PRIVATE BasePage {
   BasePage(const BasePage&) = delete;
   BasePage& operator=(const BasePage&) = delete;
 
-  HeapBase& heap() const { return heap_; }
+  HeapBase& heap() const;
 
-  BaseSpace& space() const { return space_; }
+  BaseSpace& space() const { return *space_; }
 
   bool is_large() const { return type_ == PageType::kLarge; }
 
@@ -43,6 +50,9 @@ class V8_EXPORT_PRIVATE BasePage {
   ConstAddress PayloadStart() const;
   Address PayloadEnd();
   ConstAddress PayloadEnd() const;
+
+  // Size of the payload with the page header.
+  size_t AllocatedSize() const;
 
   // Returns the size of live objects on the page at the last GC.
   // The counter is update after sweeping.
@@ -57,7 +67,8 @@ class V8_EXPORT_PRIVATE BasePage {
 
   // |address| is guaranteed to point into the page but not payload. Returns
   // nullptr when pointing into free list entries and the valid header
-  // otherwise.
+  // otherwise. The function is not thread-safe and cannot be called when
+  // e.g. sweeping is in progress.
   HeapObjectHeader* TryObjectHeaderFromInnerAddress(void* address) const;
   const HeapObjectHeader* TryObjectHeaderFromInnerAddress(
       const void* address) const;
@@ -68,13 +79,14 @@ class V8_EXPORT_PRIVATE BasePage {
   // added for tsan builds.
   void SynchronizedLoad() const {
 #if defined(THREAD_SANITIZER)
-    v8::base::AsAtomicPtr(&type_)->load(std::memory_order_acquire);
+    (void)std::atomic_ref<PageType>(const_cast<PageType&>(type_))
+        .load(std::memory_order_acquire);
 #endif
   }
   void SynchronizedStore() {
     std::atomic_thread_fence(std::memory_order_seq_cst);
 #if defined(THREAD_SANITIZER)
-    v8::base::AsAtomicPtr(&type_)->store(type_, std::memory_order_release);
+    std::atomic_ref<PageType>(type_).store(type_, std::memory_order_release);
 #endif
   }
 
@@ -85,15 +97,57 @@ class V8_EXPORT_PRIVATE BasePage {
   void ResetDiscardedMemory() { discarded_memory_ = 0; }
   size_t discarded_memory() const { return discarded_memory_; }
 
+  void IncrementMarkedBytes(size_t value) {
+    const size_t old_marked_bytes =
+        marked_bytes_.fetch_add(value, std::memory_order_relaxed);
+    USE(old_marked_bytes);
+    DCHECK_GE(old_marked_bytes + value, old_marked_bytes);
+  }
+  void DecrementMarkedBytes(size_t value) {
+    const size_t old_marked_bytes =
+        marked_bytes_.fetch_sub(value, std::memory_order_relaxed);
+    USE(old_marked_bytes);
+    DCHECK_LE(old_marked_bytes - value, old_marked_bytes);
+  }
+  void ResetMarkedBytes(size_t new_value = 0) {
+    marked_bytes_.store(new_value, std::memory_order_relaxed);
+  }
+  size_t marked_bytes() const {
+    return marked_bytes_.load(std::memory_order_relaxed);
+  }
+
+  bool contains_young_objects() const { return contains_young_objects_; }
+  void set_as_containing_young_objects(bool value) {
+    contains_young_objects_ = value;
+  }
+
+#if defined(CPPGC_YOUNG_GENERATION)
+  V8_INLINE SlotSet* slot_set() const { return slot_set_.get(); }
+  V8_INLINE SlotSet& GetOrAllocateSlotSet();
+  void ResetSlotSet();
+#endif  // defined(CPPGC_YOUNG_GENERATION)
+
+  void ChangeOwner(BaseSpace&);
+
  protected:
   enum class PageType : uint8_t { kNormal, kLarge };
   BasePage(HeapBase&, BaseSpace&, PageType);
 
  private:
-  HeapBase& heap_;
-  BaseSpace& space_;
+  struct SlotSetDeleter {
+    void operator()(SlotSet*) const;
+    size_t page_size_ = 0;
+  };
+  void AllocateSlotSet();
+
+  BaseSpace* space_;
   PageType type_;
+  bool contains_young_objects_ = false;
+#if defined(CPPGC_YOUNG_GENERATION)
+  std::unique_ptr<SlotSet, SlotSetDeleter> slot_set_;
+#endif  // defined(CPPGC_YOUNG_GENERATION)
   size_t discarded_memory_ = 0;
+  std::atomic<size_t> marked_bytes_{0};
 };
 
 class V8_EXPORT_PRIVATE NormalPage final : public BasePage {
@@ -144,7 +198,7 @@ class V8_EXPORT_PRIVATE NormalPage final : public BasePage {
   using const_iterator = IteratorImpl<const HeapObjectHeader>;
 
   // Allocates a new page in the detached state.
-  static NormalPage* Create(PageBackend&, NormalPageSpace&);
+  static NormalPage* TryCreate(PageBackend&, NormalPageSpace&);
   // Destroys and frees the page. The page must be detached from the
   // corresponding space (i.e. be swept when called).
   static void Destroy(NormalPage*);
@@ -173,7 +227,7 @@ class V8_EXPORT_PRIVATE NormalPage final : public BasePage {
   Address PayloadEnd();
   ConstAddress PayloadEnd() const;
 
-  static size_t PayloadSize();
+  static constexpr size_t PayloadSize();
 
   bool PayloadContains(ConstAddress address) const {
     return (PayloadStart() <= address) && (address < PayloadEnd());
@@ -194,7 +248,7 @@ class V8_EXPORT_PRIVATE NormalPage final : public BasePage {
 
  private:
   NormalPage(HeapBase& heap, BaseSpace& space);
-  ~NormalPage();
+  ~NormalPage() = default;
 
   size_t allocated_bytes_at_last_gc_ = 0;
   PlatformAwareObjectStartBitmap object_start_bitmap_;
@@ -202,10 +256,19 @@ class V8_EXPORT_PRIVATE NormalPage final : public BasePage {
 
 class V8_EXPORT_PRIVATE LargePage final : public BasePage {
  public:
+  static constexpr size_t PageHeaderSize() {
+    // Header should be un-aligned to `kAllocationGranularity` so that adding a
+    // `HeapObjectHeader` gets the user object aligned to
+    // `kGuaranteedObjectAlignment`.
+    return RoundUp<kGuaranteedObjectAlignment>(sizeof(LargePage) +
+                                               sizeof(HeapObjectHeader)) -
+           sizeof(HeapObjectHeader);
+  }
+
   // Returns the allocation size required for a payload of size |size|.
   static size_t AllocationSize(size_t size);
   // Allocates a new page in the detached state.
-  static LargePage* Create(PageBackend&, LargePageSpace&, size_t);
+  static LargePage* TryCreate(PageBackend&, LargePageSpace&, size_t);
   // Destroys and frees the page. The page must be detached from the
   // corresponding space (i.e. be swept when called).
   static void Destroy(LargePage*);
@@ -239,24 +302,23 @@ class V8_EXPORT_PRIVATE LargePage final : public BasePage {
   }
 
  private:
+  static constexpr size_t kGuaranteedObjectAlignment =
+      2 * kAllocationGranularity;
+
   LargePage(HeapBase& heap, BaseSpace& space, size_t);
-  ~LargePage();
+  ~LargePage() = default;
 
   size_t payload_size_;
 };
 
 // static
 BasePage* BasePage::FromPayload(void* payload) {
-  return reinterpret_cast<BasePage*>(
-      (reinterpret_cast<uintptr_t>(payload) & kPageBaseMask) + kGuardPageSize);
+  return static_cast<BasePage*>(BasePageHandle::FromPayload(payload));
 }
 
 // static
 const BasePage* BasePage::FromPayload(const void* payload) {
-  return reinterpret_cast<const BasePage*>(
-      (reinterpret_cast<uintptr_t>(const_cast<void*>(payload)) &
-       kPageBaseMask) +
-      kGuardPageSize);
+  return static_cast<const BasePage*>(BasePageHandle::FromPayload(payload));
 }
 
 template <AccessMode mode = AccessMode::kNonAtomic>
@@ -296,7 +358,37 @@ const HeapObjectHeader& BasePage::ObjectHeaderFromInnerAddress(
   return *header;
 }
 
+#if defined(CPPGC_YOUNG_GENERATION)
+SlotSet& BasePage::GetOrAllocateSlotSet() {
+  if (!slot_set_) AllocateSlotSet();
+  return *slot_set_;
+}
+#endif  // defined(CPPGC_YOUNG_GENERATION)
+
+// static
+constexpr inline size_t NormalPage::PayloadSize() {
+  return kPageSize - RoundUp(sizeof(NormalPage), kAllocationGranularity);
+}
+
 }  // namespace internal
 }  // namespace cppgc
+
+namespace v8::base {
+
+template <>
+struct hash<const cppgc::internal::BasePage*> {
+  V8_INLINE size_t
+  operator()(const cppgc::internal::BasePage* base_page) const {
+#ifdef CPPGC_POINTER_COMPRESSION
+    using AddressType = uint32_t;
+#else
+    using AddressType = uintptr_t;
+#endif
+    return static_cast<AddressType>(reinterpret_cast<uintptr_t>(base_page)) >>
+           cppgc::internal::api_constants::kPageSizeBits;
+  }
+};
+
+}  // namespace v8::base
 
 #endif  // V8_HEAP_CPPGC_HEAP_PAGE_H_

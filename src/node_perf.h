@@ -21,8 +21,6 @@ class ExternalReferenceRegistry;
 
 namespace performance {
 
-extern const uint64_t timeOrigin;
-
 inline const char* GetPerformanceMilestoneName(
     PerformanceMilestone milestone) {
   switch (milestone) {
@@ -65,6 +63,7 @@ inline PerformanceEntryType ToPerformanceEntryTypeEnum(
 enum PerformanceGCKind {
   NODE_PERFORMANCE_GC_MAJOR = v8::GCType::kGCTypeMarkSweepCompact,
   NODE_PERFORMANCE_GC_MINOR = v8::GCType::kGCTypeScavenge,
+  NODE_PERFORMANCE_GC_MINOR_MARK_SWEEP = v8::GCType::kGCTypeMinorMarkSweep,
   NODE_PERFORMANCE_GC_INCREMENTAL = v8::GCType::kGCTypeIncrementalMarking,
   NODE_PERFORMANCE_GC_WEAKCB = v8::GCType::kGCTypeProcessWeakCallbacks
 };
@@ -126,12 +125,12 @@ struct PerformanceEntry {
     }
 
     v8::Local<v8::Value> argv[] = {
-      OneByteString(env->isolate(), name.c_str()),
-      OneByteString(env->isolate(), GetPerformanceEntryTypeName(Traits::kType)),
-      v8::Number::New(env->isolate(), start_time),
-      v8::Number::New(env->isolate(), duration),
-      detail
-    };
+        OneByteString(env->isolate(), name),
+        OneByteString(env->isolate(),
+                      GetPerformanceEntryTypeName(Traits::kType)),
+        v8::Number::New(env->isolate(), start_time),
+        v8::Number::New(env->isolate(), duration),
+        detail};
 
     node::MakeSyncCallback(
         env->isolate(),
@@ -159,23 +158,6 @@ struct GCPerformanceEntryTraits {
 };
 
 using GCPerformanceEntry = PerformanceEntry<GCPerformanceEntryTraits>;
-
-class ELDHistogram : public IntervalHistogram {
- public:
-  static void RegisterExternalReferences(ExternalReferenceRegistry* registry);
-  static void Initialize(Environment* env, v8::Local<v8::Object> target);
-  static void New(const v8::FunctionCallbackInfo<v8::Value>& args);
-
-  ELDHistogram(
-      Environment* env,
-      v8::Local<v8::Object> wrap,
-      int64_t interval);
-
-  void OnInterval() override;
-
-  SET_MEMORY_INFO_NAME(ELDHistogram)
-  SET_SELF_SIZE(ELDHistogram)
-};
 
 }  // namespace performance
 }  // namespace node

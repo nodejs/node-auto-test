@@ -1,82 +1,55 @@
 const t = require('tap')
-const path = require('path')
+const { resolve } = require('node:path')
+const fs = require('node:fs/promises')
+const { load: _loadMockNpm } = require('../../fixtures/mock-npm.js')
+const mockGlobals = require('@npmcli/mock-globals')
+const tmock = require('../../fixtures/tmock')
+const { cleanCwd, cleanDate } = require('../../fixtures/clean-snapshot.js')
 
-// make a bunch of stuff consistent for snapshots
+t.formatSnapshot = (p) => {
+  if (Array.isArray(p.files) && !p.files.length) {
+    delete p.files
+  }
+  if (p?.json === undefined) {
+    delete p.json
+  }
+  return p
+}
+t.cleanSnapshot = p => cleanDate(cleanCwd(p))
 
-process.getuid = () => 69
-process.getgid = () => 420
-
-Object.defineProperty(process, 'arch', {
-  value: 'x64',
-  configurable: true,
+mockGlobals(t, {
+  process: {
+    getuid: () => 867,
+    getgid: () => 5309,
+    arch: 'x64',
+    version: '123.456.789-node',
+    platform: 'posix',
+  },
 })
 
-const { resolve } = require('path')
-const npm = require('../../../lib/npm.js')
-const CACHE = '/some/cache/dir'
-npm.config = {
-  flat: {
-    color: false,
-  },
-  loaded: false,
-  localPrefix: '/some/prefix/dir',
-  get: key => {
-    if (key === 'cache')
-      return CACHE
-    else if (key === 'node-version')
-      return '99.99.99'
-    else if (key === 'global')
-      return false
-    else
-      throw new Error('unexpected config lookup: ' + key)
-  },
-}
-
-npm.version = '123.69.420-npm'
-Object.defineProperty(process, 'version', {
-  value: '123.69.420-node',
-  configurable: true,
-})
-
-const npmlog = require('npmlog')
-const verboseLogs = []
-npmlog.verbose = (...message) => {
-  verboseLogs.push(message)
-}
-
-const EXPLAIN_CALLED = []
-const mocks = {
-  '../../../lib/utils/explain-eresolve.js': {
-    report: (...args) => {
-      EXPLAIN_CALLED.push(args)
-      return 'explanation'
+const loadMockNpm = async (t, { errorMocks, ...opts } = {}) => {
+  const mockError = tmock(t, '{LIB}/utils/error-message.js', errorMocks)
+  const res = await _loadMockNpm(t, {
+    ...opts,
+    mocks: {
+      ...opts.mocks,
+      '{ROOT}/package.json': {
+        version: '123.456.789-npm',
+      },
     },
-  },
-  // XXX ???
-  get '../../../lib/utils/is-windows.js' () {
-    return process.platform === 'win32'
-  },
-}
-let errorMessage = t.mock('../../../lib/utils/error-message.js', { ...mocks })
-
-const beWindows = () => {
-  Object.defineProperty(process, 'platform', {
-    value: 'win32',
-    configurable: true,
   })
-  errorMessage = t.mock('../../../lib/utils/error-message.js', { ...mocks })
+  return {
+    ...res,
+    errorMessage: (er) => mockError.errorMessage(er, res.npm),
+  }
 }
 
-const bePosix = () => {
-  Object.defineProperty(process, 'platform', {
-    value: 'posix',
-    configurable: true,
+t.test('just simple messages', async t => {
+  const { errorMessage } = await loadMockNpm(t, {
+    prefixDir: { 'package-lock.json': '{}' },
+    command: 'audit',
+    exec: true,
   })
-  errorMessage = t.mock('../../../lib/utils/error-message.js', { ...mocks })
-}
-
-t.test('just simple messages', t => {
-  npm.command = 'audit'
   const codes = [
     'ENOAUDIT',
     'ENOLOCK',
@@ -102,8 +75,7 @@ t.test('just simple messages', t => {
     'E403',
     'ERR_SOCKET_TIMEOUT',
   ]
-  t.plan(codes.length)
-  codes.forEach(code => {
+  for (const code of codes) {
     const path = '/some/path'
     const pkgid = 'some@package'
     const file = '/some/file'
@@ -115,33 +87,24 @@ t.test('just simple messages', t => {
       file,
       stack,
     })
-    t.matchSnapshot(errorMessage(er, npm))
-  })
+    t.matchSnapshot(errorMessage(er))
+  }
 })
 
-t.test('replace message/stack sensistive info', t => {
-  npm.command = 'audit'
-  const path = '/some/path'
-  const pkgid = 'some@package'
-  const file = '/some/file'
-  const stack = 'dummy stack trace at https://user:pass@registry.npmjs.org/'
-  const message = 'Error at registry: https://user:pass@registry.npmjs.org/'
-  const er = Object.assign(new Error(message), {
+t.test('replace message/stack sensitive info', async t => {
+  const { errorMessage } = await loadMockNpm(t, { command: 'audit' })
+  const er = Object.assign(new Error('Error at registry: https://user:pass@registry.npmjs.org/'), {
     code: 'ENOAUDIT',
-    path,
-    pkgid,
-    file,
-    stack,
+    path: '/some/path',
+    pkgid: 'some@package',
+    file: '/some/file',
+    stack: 'dummy stack trace at https://user:pass@registry.npmjs.org/',
   })
-  t.matchSnapshot(errorMessage(er, npm))
-  t.end()
+  t.matchSnapshot(errorMessage(er))
 })
 
-t.test('bad engine with config loaded', t => {
-  npm.config.loaded = true
-  t.teardown(() => {
-    npm.config.loaded = false
-  })
+t.test('bad engine without config loaded', async t => {
+  const { errorMessage } = await loadMockNpm(t, { load: false })
   const path = '/some/path'
   const pkgid = 'some@package'
   const file = '/some/file'
@@ -153,11 +116,11 @@ t.test('bad engine with config loaded', t => {
     file,
     stack,
   })
-  t.matchSnapshot(errorMessage(er, npm))
-  t.end()
+  t.matchSnapshot(errorMessage(er))
 })
 
-t.test('enoent without a file', t => {
+t.test('enoent without a file', async t => {
+  const { errorMessage } = await loadMockNpm(t)
   const path = '/some/path'
   const pkgid = 'some@package'
   const stack = 'dummy stack trace'
@@ -167,12 +130,11 @@ t.test('enoent without a file', t => {
     pkgid,
     stack,
   })
-  t.matchSnapshot(errorMessage(er, npm))
-  t.end()
+  t.matchSnapshot(errorMessage(er))
 })
 
-t.test('enolock without a command', t => {
-  npm.command = null
+t.test('enolock without a command', async t => {
+  const { errorMessage } = await loadMockNpm(t, { command: null })
   const path = '/some/path'
   const pkgid = 'some@package'
   const file = '/some/file'
@@ -184,190 +146,130 @@ t.test('enolock without a command', t => {
     file,
     stack,
   })
-  t.matchSnapshot(errorMessage(er, npm))
-  t.end()
+  t.matchSnapshot(errorMessage(er))
 })
 
-t.test('default message', t => {
-  t.matchSnapshot(errorMessage(new Error('error object'), npm))
-  t.matchSnapshot(errorMessage('error string'), npm)
+t.test('default message', async t => {
+  const { errorMessage } = await loadMockNpm(t)
+  t.matchSnapshot(errorMessage(new Error('error object')))
+  t.matchSnapshot(errorMessage('error string'))
   t.matchSnapshot(errorMessage(Object.assign(new Error('cmd err'), {
     cmd: 'some command',
     signal: 'SIGYOLO',
     args: ['a', 'r', 'g', 's'],
     stdout: 'stdout',
     stderr: 'stderr',
-  }), npm))
-  t.end()
+  })))
 })
 
-t.test('args are cleaned', t => {
+t.test('args are cleaned', async t => {
+  const { errorMessage } = await loadMockNpm(t)
   t.matchSnapshot(errorMessage(Object.assign(new Error('cmd err'), {
     cmd: 'some command',
     signal: 'SIGYOLO',
     args: ['a', 'r', 'g', 's', 'https://evil:password@npmjs.org'],
     stdout: 'stdout',
     stderr: 'stderr',
-  }), npm))
-  t.end()
+  })))
 })
 
-t.test('eacces/eperm', t => {
-  const runTest = (windows, loaded, cachePath, cacheDest) => t => {
-    if (windows)
-      beWindows()
-    else
-      bePosix()
+t.test('eacces/eperm', async t => {
+  const runTest = (windows, loaded, cachePath, cacheDest) => async t => {
+    const { errorMessage, logs, cache } = await loadMockNpm(t, {
+      windows,
+      load: loaded,
+      globals: windows ? { 'process.platform': 'win32' } : [],
+    })
 
-    npm.config.loaded = loaded
-    const path = `${cachePath ? CACHE : '/not/cache/dir'}/path`
-    const dest = `${cacheDest ? CACHE : '/not/cache/dir'}/dest`
+    const path = `${cachePath ? cache : '/not/cache/dir'}/path`
+    const dest = `${cacheDest ? cache : '/not/cache/dir'}/dest`
     const er = Object.assign(new Error('whoopsie'), {
       code: 'EACCES',
       path,
       dest,
       stack: 'dummy stack trace',
     })
-    verboseLogs.length = 0
-    t.matchSnapshot(errorMessage(er, npm))
-    t.matchSnapshot(verboseLogs)
-    t.end()
-    verboseLogs.length = 0
+
+    t.matchSnapshot(errorMessage(er))
+    t.matchSnapshot(logs.verbose)
   }
 
   for (const windows of [true, false]) {
     for (const loaded of [true, false]) {
       for (const cachePath of [true, false]) {
         for (const cacheDest of [true, false]) {
-          const m = JSON.stringify({windows, loaded, cachePath, cacheDest})
+          const m = JSON.stringify({ windows, loaded, cachePath, cacheDest })
           t.test(m, runTest(windows, loaded, cachePath, cacheDest))
         }
       }
     }
   }
-  t.end()
 })
 
 t.test('json parse', t => {
-  t.test('merge conflict in package.json', t => {
-    const dir = t.testdir({
-      'package.json': `
-{
-  "array": [
-<<<<<<< HEAD
-    100,
-    {
-      "foo": "baz"
-    },
-||||||| merged common ancestors
-    1,
-=======
-    111,
-    1,
-    2,
-    3,
-    {
-      "foo": "bar"
-    },
->>>>>>> a
-    1
-  ],
-  "a": {
-    "b": {
-<<<<<<< HEAD
-      "c": {
-        "x": "bbbb"
-      }
-||||||| merged common ancestors
-      "c": {
-        "x": "aaaa"
-      }
-=======
-      "c": "xxxx"
->>>>>>> a
+  mockGlobals(t, { 'process.argv': ['arg', 'v'] })
+
+  t.test('merge conflict in package.json', async t => {
+    const prefixDir = {
+      'package.json': await fs.readFile(
+        resolve(__dirname, '../../fixtures/merge-conflict.json'), 'utf-8'),
     }
-  }
-}
-`,
-    })
-    const { prefix } = npm
-    const { argv } = process
-    t.teardown(() => {
-      Object.defineProperty(npm, 'prefix', {
-        value: prefix,
-        configurable: true,
-      })
-      process.argv = argv
-    })
-    Object.defineProperty(npm, 'prefix', { value: dir, configurable: true })
-    process.argv = ['arg', 'v']
+    const { errorMessage, npm } = await loadMockNpm(t, { prefixDir })
     t.matchSnapshot(errorMessage(Object.assign(new Error('conflicted'), {
       code: 'EJSONPARSE',
-      path: resolve(dir, 'package.json'),
-    }), npm))
+      path: resolve(npm.prefix, 'package.json'),
+    })))
     t.end()
   })
 
-  t.test('just regular bad json in package.json', t => {
-    const dir = t.testdir({
+  t.test('just regular bad json in package.json', async t => {
+    const prefixDir = {
       'package.json': 'not even slightly json',
-    })
-    const { prefix } = npm
-    const { argv } = process
-    t.teardown(() => {
-      Object.defineProperty(npm, 'prefix', {
-        value: prefix,
-        configurable: true,
-      })
-      process.argv = argv
-    })
-    Object.defineProperty(npm, 'prefix', { value: dir, configurable: true })
-    process.argv = ['arg', 'v']
+    }
+    const { errorMessage, npm } = await loadMockNpm(t, { prefixDir })
     t.matchSnapshot(errorMessage(Object.assign(new Error('not json'), {
       code: 'EJSONPARSE',
-      path: resolve(dir, 'package.json'),
-    }), npm))
+      path: resolve(npm.prefix, 'package.json'),
+    })))
     t.end()
   })
 
-  t.test('json somewhere else', t => {
-    const dir = t.testdir({
+  t.test('json somewhere else', async t => {
+    const prefixDir = {
       'blerg.json': 'not even slightly json',
-    })
-    const { argv } = process
-    t.teardown(() => {
-      process.argv = argv
-    })
-    process.argv = ['arg', 'v']
+    }
+    const { npm, errorMessage } = await loadMockNpm(t, { prefixDir })
     t.matchSnapshot(errorMessage(Object.assign(new Error('not json'), {
       code: 'EJSONPARSE',
-      path: `${dir}/blerg.json`,
-    }), npm))
+      path: resolve(npm.prefix, 'blerg.json'),
+    })))
     t.end()
   })
 
   t.end()
 })
 
-t.test('eotp/e401', t => {
+t.test('eotp/e401', async t => {
+  const { errorMessage } = await loadMockNpm(t)
+
   t.test('401, no auth headers', t => {
     t.matchSnapshot(errorMessage(Object.assign(new Error('nope'), {
       code: 'E401',
-    }), npm))
+    })))
     t.end()
   })
 
   t.test('401, no message', t => {
     t.matchSnapshot(errorMessage({
       code: 'E401',
-    }, npm))
+    }))
     t.end()
   })
 
   t.test('one-time pass challenge code', t => {
     t.matchSnapshot(errorMessage(Object.assign(new Error('nope'), {
       code: 'EOTP',
-    }), npm))
+    })))
     t.end()
   })
 
@@ -375,7 +277,18 @@ t.test('eotp/e401', t => {
     const message = 'one-time pass'
     t.matchSnapshot(errorMessage(Object.assign(new Error(message), {
       code: 'E401',
-    }), npm))
+    })))
+    t.end()
+  })
+
+  t.test('one-time pass webauth challenge', t => {
+    t.matchSnapshot(errorMessage(Object.assign(new Error('nope'), {
+      code: 'EOTP',
+      body: {
+        authUrl: 'https://registry.npmjs.org/-/auth/login/abc123',
+        doneUrl: 'https://registry.npmjs.org/-/auth/done/abc123',
+      },
+    })))
     t.end()
   })
 
@@ -395,19 +308,19 @@ t.test('eotp/e401', t => {
           },
           code: 'E401',
         })
-        t.matchSnapshot(errorMessage(er, npm))
+        t.matchSnapshot(errorMessage(er))
         t.end()
       })
     }
   })
-
-  t.end()
 })
 
-t.test('404', t => {
+t.test('404', async t => {
+  const { errorMessage } = await loadMockNpm(t)
+
   t.test('no package id', t => {
     const er = Object.assign(new Error('404 not found'), { code: 'E404' })
-    t.matchSnapshot(errorMessage(er, npm))
+    t.matchSnapshot(errorMessage(er))
     t.end()
   })
   t.test('you should publish it', t => {
@@ -415,7 +328,7 @@ t.test('404', t => {
       pkgid: 'yolo',
       code: 'E404',
     })
-    t.matchSnapshot(errorMessage(er, npm))
+    t.matchSnapshot(errorMessage(er))
     t.end()
   })
   t.test('name with warning', t => {
@@ -423,7 +336,7 @@ t.test('404', t => {
       pkgid: new Array(215).fill('x').join(''),
       code: 'E404',
     })
-    t.matchSnapshot(errorMessage(er, npm))
+    t.matchSnapshot(errorMessage(er))
     t.end()
   })
   t.test('name with error', t => {
@@ -431,7 +344,7 @@ t.test('404', t => {
       pkgid: 'node_modules',
       code: 'E404',
     })
-    t.matchSnapshot(errorMessage(er, npm))
+    t.matchSnapshot(errorMessage(er))
     t.end()
   })
   t.test('cleans sensitive info from package id', t => {
@@ -439,13 +352,14 @@ t.test('404', t => {
       pkgid: 'http://evil:password@npmjs.org/not-found',
       code: 'E404',
     })
-    t.matchSnapshot(errorMessage(er, npm))
+    t.matchSnapshot(errorMessage(er))
     t.end()
   })
-  t.end()
 })
 
-t.test('bad platform', t => {
+t.test('bad platform', async t => {
+  const { errorMessage } = await loadMockNpm(t)
+
   t.test('string os/arch', t => {
     const er = Object.assign(new Error('a bad plat'), {
       pkgid: 'lodash@1.0.0',
@@ -459,7 +373,7 @@ t.test('bad platform', t => {
       },
       code: 'EBADPLATFORM',
     })
-    t.matchSnapshot(errorMessage(er, npm))
+    t.matchSnapshot(errorMessage(er))
     t.end()
   })
   t.test('array os/arch', t => {
@@ -471,26 +385,60 @@ t.test('bad platform', t => {
       },
       required: {
         os: ['!yours', 'mine'],
-        cpu: ['x420', 'x69'],
+        cpu: ['x867', 'x5309'],
       },
       code: 'EBADPLATFORM',
     })
-    t.matchSnapshot(errorMessage(er, npm))
+    t.matchSnapshot(errorMessage(er))
     t.end()
   })
-
-  t.end()
+  t.test('omits keys with no required value', t => {
+    const er = Object.assign(new Error('a bad plat'), {
+      pkgid: 'lodash@1.0.0',
+      current: {
+        os: 'posix',
+        cpu: 'x64',
+        libc: 'musl',
+      },
+      required: {
+        os: ['!yours', 'mine'],
+        libc: [], // empty arrays should also lead to a key being removed
+        cpu: undefined, // XXX npm-install-checks sets unused keys to undefined
+      },
+      code: 'EBADPLATFORM',
+    })
+    const msg = errorMessage(er)
+    t.matchSnapshot(msg)
+    t.notMatch(msg, /Valid cpu/, 'omits cpu from message')
+    t.notMatch(msg, /Valid libc/, 'omits libc from message')
+    t.end()
+  })
 })
 
-t.test('explain ERESOLVE errors', t => {
+t.test('explain ERESOLVE errors', async t => {
+  const EXPLAIN_CALLED = []
+
+  const { errorMessage } = await loadMockNpm(t, {
+    errorMocks: {
+      '{LIB}/utils/explain-eresolve.js': {
+        report: (...args) => {
+          EXPLAIN_CALLED.push(...args)
+          return { explanation: 'explanation', file: 'report' }
+        },
+      },
+    },
+    config: {
+      color: 'always',
+    },
+  })
+
   const er = Object.assign(new Error('could not resolve'), {
     code: 'ERESOLVE',
   })
-  t.matchSnapshot(errorMessage(er, npm))
-  t.match(EXPLAIN_CALLED, [[
-    er,
-    false,
-    path.resolve(npm.cache, 'eresolve-report.txt'),
-  ]])
-  t.end()
+
+  t.matchSnapshot(errorMessage(er))
+  t.equal(EXPLAIN_CALLED.length, 3)
+  t.match(EXPLAIN_CALLED, [er, Function, Function])
+  t.not(EXPLAIN_CALLED[1].level, 0, 'color chalk level is not 0')
+  t.equal(EXPLAIN_CALLED[2].level, 0, 'colorless chalk level is 0')
 })

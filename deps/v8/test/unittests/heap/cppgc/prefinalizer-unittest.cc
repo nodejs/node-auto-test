@@ -273,13 +273,13 @@ class RessurectingPrefinalizer
 
  public:
   explicit RessurectingPrefinalizer(RefType<GCed>& ref, GCed* obj)
-      : ref_(ref), obj_(obj) {}
+      : ref_(reinterpret_cast<void*>(&ref)), obj_(obj) {}
   void Trace(Visitor*) const {}
-  void PreFinalizer() { ref_ = obj_; }
+  void PreFinalizer() { *reinterpret_cast<RefType<GCed>*>(ref_) = obj_; }
 
  private:
-  RefType<GCed>& ref_;
-  GCed* obj_;
+  void* const ref_;
+  const UntracedMember<GCed> obj_;
 };
 
 class GCedHolder : public GarbageCollected<GCedHolder> {
@@ -291,10 +291,12 @@ class GCedHolder : public GarbageCollected<GCedHolder> {
 
 }  // namespace
 
-#if V8_ENABLE_CHECKS
-#ifdef CPPGC_CHECK_ASSIGNMENTS_IN_PREFINALIZERS
+#if DEBUG
+#ifdef CPPGC_VERIFY_HEAP
 
-TEST_F(PrefinalizerDeathTest, PrefinalizerCantRewireGraphWithDeadObjects) {
+TEST_F(PrefinalizerDeathTest, PrefinalizerCanRewireGraphWithDeadObjects) {
+  // Prefinalizers are allowed to rewire dead object to dead objects as that
+  // doesn't affect the live object graph.
   Persistent<LinkedNode> root{MakeGarbageCollected<LinkedNode>(
       GetAllocationHandle(),
       MakeGarbageCollected<LinkedNode>(
@@ -305,8 +307,10 @@ TEST_F(PrefinalizerDeathTest, PrefinalizerCantRewireGraphWithDeadObjects) {
   // All LinkedNode objects will die on the following GC. The pre-finalizer may
   // still operate with them but not add them to a live object.
   root.Clear();
-  EXPECT_DEATH_IF_SUPPORTED(PreciseGC(), "");
+  PreciseGC();
 }
+
+#ifdef CPPGC_ENABLE_SLOW_API_CHECKS
 
 TEST_F(PrefinalizerDeathTest, PrefinalizerCantRessurectObjectOnStack) {
   Persistent<GCed> persistent;
@@ -315,6 +319,8 @@ TEST_F(PrefinalizerDeathTest, PrefinalizerCantRessurectObjectOnStack) {
       MakeGarbageCollected<GCed>(GetAllocationHandle()));
   EXPECT_DEATH_IF_SUPPORTED(PreciseGC(), "");
 }
+
+#endif  // CPPGC_ENABLE_SLOW_API_CHECKS
 
 TEST_F(PrefinalizerDeathTest, PrefinalizerCantRessurectObjectOnHeap) {
   Persistent<GCedHolder> persistent(
@@ -325,8 +331,8 @@ TEST_F(PrefinalizerDeathTest, PrefinalizerCantRessurectObjectOnHeap) {
   EXPECT_DEATH_IF_SUPPORTED(PreciseGC(), "");
 }
 
-#endif  // CPPGC_CHECK_ASSIGNMENTS_IN_PREFINALIZERS
-#endif  // V8_ENABLE_CHECKS
+#endif  // CPPGC_VERIFY_HEAP
+#endif  // DEBUG
 
 #ifdef CPPGC_ALLOW_ALLOCATIONS_IN_PREFINALIZERS
 TEST_F(PrefinalizerTest, AllocatingPrefinalizersInMultipleGCCycles) {

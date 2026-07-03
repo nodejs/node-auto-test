@@ -32,8 +32,7 @@ const common = require('../common');
 const http = require('http');
 const assert = require('assert');
 
-
-const server = http.createServer(function(req, res) {
+const server = http.createServer(common.mustCallAtLeast((req, res) => {
   let body = '';
 
   req.setEncoding('utf8');
@@ -41,12 +40,12 @@ const server = http.createServer(function(req, res) {
     body += chunk;
   });
 
-  req.on('end', function() {
+  req.on('end', common.mustCall(() => {
     assert.strictEqual(body, 'PING');
-    res.writeHead(200);
+    res.writeHead(200, { 'Connection': 'close' });
     res.end('PONG');
-  });
-});
+  }));
+}));
 
 
 server.on('listening', pingping);
@@ -107,10 +106,10 @@ function ping() {
   const opt = {
     port: common.PORT,
     path: '/ping',
-    method: 'POST'
+    method: 'POST',
   };
 
-  const req = http.request(opt, function(res) {
+  const req = http.request(opt, common.mustCallAtLeast((res) => {
     let body = '';
 
     res.setEncoding('utf8');
@@ -118,25 +117,28 @@ function ping() {
       body += chunk;
     });
 
-    res.on('end', function() {
+    res.on('end', common.mustCall(() => {
       assert.strictEqual(body, 'PONG');
       assert.ok(!hadError);
       gotEnd = true;
       afterPing('success');
-    });
-  });
+    }));
+  }, 0));
 
   req.end('PING');
 
   let gotEnd = false;
   let hadError = false;
 
-  req.on('error', function(error) {
+  req.on('error', common.mustCallAtLeast((error) => {
     console.log(`Error making ping req: ${error}`);
     hadError = true;
     assert.ok(!gotEnd);
-    afterPing(error.message);
-  });
+
+    // Family autoselection might be skipped if only a single address is returned by DNS.
+    const actualError = Array.isArray(error.errors) ? error.errors[0] : error;
+    afterPing(actualError.message);
+  }, 0));
 }
 
 

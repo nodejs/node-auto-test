@@ -1,7 +1,7 @@
 'use strict';
 
 const { mustCall, mustNotCall } = require('../common');
-const { strictEqual } = require('assert');
+const assert = require('assert');
 const fixtures = require('../common/fixtures');
 const { fork } = require('child_process');
 
@@ -13,14 +13,34 @@ const { fork } = require('child_process');
     signal
   });
   cp.on('exit', mustCall((code, killSignal) => {
-    strictEqual(code, null);
-    strictEqual(killSignal, 'SIGTERM');
+    assert.strictEqual(code, null);
+    assert.strictEqual(killSignal, 'SIGTERM');
   }));
   cp.on('error', mustCall((err) => {
-    strictEqual(err.name, 'AbortError');
+    assert.strictEqual(err.name, 'AbortError');
   }));
   process.nextTick(() => ac.abort());
 }
+
+{
+  // Test aborting with custom error
+  const ac = new AbortController();
+  const { signal } = ac;
+  const cp = fork(fixtures.path('child-process-stay-alive-forever.js'), {
+    signal
+  });
+  cp.on('exit', mustCall((code, killSignal) => {
+    assert.strictEqual(code, null);
+    assert.strictEqual(killSignal, 'SIGTERM');
+  }));
+  cp.on('error', mustCall((err) => {
+    assert.strictEqual(err.name, 'AbortError');
+    assert.strictEqual(err.cause.name, 'Error');
+    assert.strictEqual(err.cause.message, 'boom');
+  }));
+  process.nextTick(() => ac.abort(new Error('boom')));
+}
+
 {
   // Test passing an already aborted signal to a forked child_process
   const signal = AbortSignal.abort();
@@ -28,11 +48,28 @@ const { fork } = require('child_process');
     signal
   });
   cp.on('exit', mustCall((code, killSignal) => {
-    strictEqual(code, null);
-    strictEqual(killSignal, 'SIGTERM');
+    assert.strictEqual(code, null);
+    assert.strictEqual(killSignal, 'SIGTERM');
   }));
   cp.on('error', mustCall((err) => {
-    strictEqual(err.name, 'AbortError');
+    assert.strictEqual(err.name, 'AbortError');
+  }));
+}
+
+{
+  // Test passing an aborted signal with custom error to a forked child_process
+  const signal = AbortSignal.abort(new Error('boom'));
+  const cp = fork(fixtures.path('child-process-stay-alive-forever.js'), {
+    signal
+  });
+  cp.on('exit', mustCall((code, killSignal) => {
+    assert.strictEqual(code, null);
+    assert.strictEqual(killSignal, 'SIGTERM');
+  }));
+  cp.on('error', mustCall((err) => {
+    assert.strictEqual(err.name, 'AbortError');
+    assert.strictEqual(err.cause.name, 'Error');
+    assert.strictEqual(err.cause.message, 'boom');
   }));
 }
 
@@ -44,11 +81,11 @@ const { fork } = require('child_process');
     killSignal: 'SIGKILL',
   });
   cp.on('exit', mustCall((code, killSignal) => {
-    strictEqual(code, null);
-    strictEqual(killSignal, 'SIGKILL');
+    assert.strictEqual(code, null);
+    assert.strictEqual(killSignal, 'SIGKILL');
   }));
   cp.on('error', mustCall((err) => {
-    strictEqual(err.name, 'AbortError');
+    assert.strictEqual(err.name, 'AbortError');
   }));
 }
 

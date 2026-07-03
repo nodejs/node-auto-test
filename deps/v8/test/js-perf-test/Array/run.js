@@ -18,12 +18,32 @@ const max_index_value = `value ${max_index}`;
 // newClosure is a handy function to get a fresh
 // closure unpolluted by IC feedback for a 2nd-order array builtin
 // test.
+
+let cache_break = 0;
+
+var __sequence = 0;
+// Allocate arrays without AllocationSites.
+function make_array_string(literal) {
+  __sequence = __sequence + 1;
+  return "/* " + __sequence + " */  " + literal;
+}
+function make_array(literal) {
+  return eval(make_array_string(literal));
+}
+
 function newClosure(name, generic = false) {
   if (generic) {
     return new Function(
-      `result = Array.prototype.${name}.call(array, func, this_arg);`);
+      `
+      // ${cache_break++}
+      result = Array.prototype.${name}.call(array, func, this_arg);
+      `);
   }
-  return new Function(`result = array.${name}(func, this_arg);`);
+  return new Function(
+      `
+      // ${cache_break++}
+      result = array.${name}(func, this_arg);
+      `);
 }
 
 function MakeHoley(array) {
@@ -34,40 +54,52 @@ function MakeHoley(array) {
 }
 
 function SmiSetup() {
-  array = Array.from({ length: array_size }, (_, i) => i);
+  array = make_array('[]');
+  for (let i = 0; i < array_size; i++) array.push(i);
+  // TODO(v8:10105): May still create holey arrays (allocation sites?).
+  // assert(%HasFastPackedElements(array));
   assert(%HasSmiElements(array));
 }
 
 function HoleySmiSetup() {
-  SmiSetup();
+  array = make_array('[]');
+  for (let i = 0; i < array_size; i++) array.push(i);
   MakeHoley(array);
   assert(%HasSmiElements(array));
 }
 
 function DoubleSetup() {
-  array = Array.from({ length: array_size }, (_, i) => i + 0.5);
+  array = make_array('[]');
+  for (let i = 0; i < array_size; i++) array.push(i + 0.5);
+  // TODO(v8:10105): May still create holey arrays (allocation sites?).
+  // assert(%HasFastPackedElements(array));
   assert(%HasDoubleElements(array));
 }
 
 function HoleyDoubleSetup() {
-  DoubleSetup();
+  array = make_array('[]');
+  for (let i = 0; i < array_size; i++) array.push(i + 0.5);
   MakeHoley(array);
   assert(%HasDoubleElements(array));
 }
 
 function FastSetup() {
-  array = Array.from({ length: array_size }, (_, i) => `value ${i}`);
+  array = make_array('[]');
+  for (let i = 0; i < array_size; i++) array.push(`value ${i}`);
+  // TODO(v8:10105): May still create holey arrays (allocation sites?).
+  // assert(%HasFastPackedElements(array));
   assert(%HasObjectElements(array));
 }
 
 function HoleyFastSetup() {
-  FastSetup();
+  array = make_array('[]');
+  for (let i = 0; i < array_size; i++) array.push(`value ${i}`);
   MakeHoley(array);
   assert(%HasObjectElements(array));
 }
 
 function DictionarySetup() {
-  array = [];
+  array = make_array('[]');
   // Add a large index to force dictionary elements.
   array[2**30] = 10;
   // Spread out {array_size} elements.
@@ -129,6 +161,7 @@ d8.file.execute('join.js');
 d8.file.execute('to-string.js');
 d8.file.execute('slice.js');
 d8.file.execute('copy-within.js');
+d8.file.execute('at.js');
 
 var success = true;
 

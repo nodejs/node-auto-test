@@ -1,7 +1,6 @@
 'use strict';
 const common = require('../common');
 const assert = require('assert');
-const path = require('path');
 const fs = require('fs').promises;
 const tmpdir = require('../common/tmpdir');
 
@@ -12,7 +11,7 @@ const exptectedBuff = Buffer.from(expected);
 
 let cnt = 0;
 function getFileName() {
-  return path.join(tmpdir.path, `readv_promises_${++cnt}.txt`);
+  return tmpdir.resolve(`readv_promises_${++cnt}.txt`);
 }
 
 const allocateEmptyBuffers = (combinedLength) => {
@@ -29,7 +28,6 @@ const allocateEmptyBuffers = (combinedLength) => {
     const filename = getFileName();
     await fs.writeFile(filename, exptectedBuff);
     const handle = await fs.open(filename, 'r');
-    // const buffer = Buffer.from(expected);
     const bufferArr = allocateEmptyBuffers(exptectedBuff.length);
     const expectedLength = exptectedBuff.length;
 
@@ -49,7 +47,6 @@ const allocateEmptyBuffers = (combinedLength) => {
     const filename = getFileName();
     await fs.writeFile(filename, exptectedBuff);
     const handle = await fs.open(filename, 'r');
-    // const buffer = Buffer.from(expected);
     const bufferArr = allocateEmptyBuffers(exptectedBuff.length);
     const expectedLength = exptectedBuff.length;
 

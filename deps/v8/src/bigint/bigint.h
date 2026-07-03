@@ -57,27 +57,39 @@ static_assert(kDigitBits == 8 * sizeof(digit_t), "inconsistent type sizes");
 class Digits {
  public:
   // This is the constructor intended for public consumption.
-  Digits(digit_t* mem, int len) : digits_(mem), len_(len) {
+  Digits(const digit_t* mem, uint32_t len)
+      // The const_cast here is ugly, but we need the digits field to be mutable
+      // for the RWDigits subclass. We pinky swear to not mutate the memory with
+      // this class.
+      : Digits(const_cast<digit_t*>(mem), len) {}
+
+  Digits(digit_t* mem, uint32_t len) : digits_(mem), len_(len) {
     // Require 4-byte alignment (even on 64-bit platforms).
     // TODO(jkummerow): See if we can tighten BigInt alignment in V8 to
     // system pointer size, and raise this requirement to that.
     BIGINT_H_DCHECK((reinterpret_cast<uintptr_t>(mem) & 3) == 0);
   }
+
   // Provides a "slice" view into another Digits object.
-  Digits(Digits src, int offset, int len)
+  Digits(Digits src, uint32_t offset, uint32_t len)
       : digits_(src.digits_ + offset),
-        len_(std::max(0, std::min(src.len_ - offset, len))) {
-    BIGINT_H_DCHECK(offset >= 0);
+        len_(std::min(len, src.len_ > offset ? src.len_ - offset : 0)) {
+    // offset > src.len_ is fine, but if offset looks like an underflow just
+    // happened, that's suspicious.
+    BIGINT_H_DCHECK(offset <= INT32_MAX);
   }
+
+  Digits() : Digits(static_cast<digit_t*>(nullptr), 0) {}
+
   // Alternative way to get a "slice" view into another Digits object.
-  Digits operator+(int i) {
-    BIGINT_H_DCHECK(i >= 0 && i <= len_);
+  Digits operator+(uint32_t i) {
+    BIGINT_H_DCHECK(i <= len_);
     return Digits(digits_ + i, len_ - i);
   }
 
   // Provides access to individual digits.
-  digit_t operator[](int i) {
-    BIGINT_H_DCHECK(i >= 0 && i < len_);
+  digit_t operator[](uint32_t i) {
+    BIGINT_H_DCHECK(i < len_);
     return read_4byte_aligned(i);
   }
   // Convenience accessor for the most significant digit.
@@ -100,24 +112,24 @@ class Digits {
     len_--;
   }
 
-  int len() { return len_; }
+  uint32_t len() { return len_; }
   const digit_t* digits() const { return digits_; }
 
  protected:
   friend class ShiftedDigits;
   digit_t* digits_;
-  int len_;
+  uint32_t len_;
 
  private:
   // We require externally-provided digits arrays to be 4-byte aligned, but
   // not necessarily 8-byte aligned; so on 64-bit platforms we use memcpy
   // to allow unaligned reads.
-  digit_t read_4byte_aligned(int i) {
+  digit_t read_4byte_aligned(uint32_t i) {
     if (sizeof(digit_t) == 4) {
       return digits_[i];
     } else {
       digit_t result;
-      memcpy(&result, digits_ + i, sizeof(result));
+      memcpy(&result, static_cast<const void*>(digits_ + i), sizeof(result));
       return result;
     }
   }
@@ -127,16 +139,17 @@ class Digits {
 // Does not own the memory it points at.
 class RWDigits : public Digits {
  public:
-  RWDigits(digit_t* mem, int len) : Digits(mem, len) {}
-  RWDigits(RWDigits src, int offset, int len) : Digits(src, offset, len) {}
-  RWDigits operator+(int i) {
-    BIGINT_H_DCHECK(i >= 0 && i <= len_);
+  RWDigits(digit_t* mem, uint32_t len) : Digits(mem, len) {}
+  RWDigits(RWDigits src, uint32_t offset, uint32_t len)
+      : Digits(src, offset, len) {}
+  RWDigits operator+(uint32_t i) {
+    BIGINT_H_DCHECK(i <= len_);
     return RWDigits(digits_ + i, len_ - i);
   }
 
 #if UINTPTR_MAX == 0xFFFFFFFF
-  digit_t& operator[](int i) {
-    BIGINT_H_DCHECK(i >= 0 && i < len_);
+  digit_t& operator[](uint32_t i) {
+    BIGINT_H_DCHECK(i < len_);
     return digits_[i];
   }
 #else
@@ -171,14 +184,14 @@ class RWDigits : public Digits {
     uint32_t* ptr_;
   };
 
-  WritableDigitReference operator[](int i) {
-    BIGINT_H_DCHECK(i >= 0 && i < len_);
+  WritableDigitReference operator[](uint32_t i) {
+    BIGINT_H_DCHECK(i < len_);
     return WritableDigitReference(digits_ + i);
   }
 #endif
 
   digit_t* digits() { return digits_; }
-  void set_len(int len) { len_ = len; }
+  void set_len(uint32_t len) { len_ = len; }
 
   void Clear() { memset(digits_, 0, len_ * sizeof(digit_t)); }
 };
@@ -211,9 +224,8 @@ class Platform {
 // Returns r such that r < 0 if A < B; r > 0 if A > B; r == 0 if A == B.
 // Defined here to be inlineable, which helps ia32 a lot (64-bit platforms
 // don't care).
-inline int Compare(Digits A, Digits B) {
-  A.Normalize();
-  B.Normalize();
+inline int CompareNoNormalize(Digits A, Digits B) {
+  BIGINT_H_DCHECK(A.len() < INT32_MAX && B.len() < INT32_MAX);
   int diff = A.len() - B.len();
   if (diff != 0) return diff;
   int i = A.len() - 1;
@@ -221,18 +233,59 @@ inline int Compare(Digits A, Digits B) {
   if (i < 0) return 0;
   return A[i] > B[i] ? 1 : -1;
 }
+inline int Compare(Digits A, Digits B) {
+  A.Normalize();
+  B.Normalize();
+  return CompareNoNormalize(A, B);
+}
 
 // Z := X + Y
 void Add(RWDigits Z, Digits X, Digits Y);
 // Addition of signed integers. Returns true if the result is negative.
 bool AddSigned(RWDigits Z, Digits X, bool x_negative, Digits Y,
                bool y_negative);
+// Z := X + 1
+void AddOne(RWDigits Z, Digits X);
 
 // Z := X - Y. Requires X >= Y.
 void Subtract(RWDigits Z, Digits X, Digits Y);
 // Subtraction of signed integers. Returns true if the result is negative.
 bool SubtractSigned(RWDigits Z, Digits X, bool x_negative, Digits Y,
                     bool y_negative);
+// Z := X - 1
+void SubtractOne(RWDigits Z, Digits X);
+
+// The bitwise operations assume that negative BigInts are represented as
+// sign+magnitude. Their behavior depends on the sign of the inputs: negative
+// inputs perform an implicit conversion to two's complement representation.
+// Z := X & Y
+void BitwiseAnd_PosPos(RWDigits Z, Digits X, Digits Y);
+// Call this for a BigInt x = (magnitude=X, negative=true).
+void BitwiseAnd_NegNeg(RWDigits Z, Digits X, Digits Y);
+// Positive X, negative Y. Callers must swap arguments as needed.
+void BitwiseAnd_PosNeg(RWDigits Z, Digits X, Digits Y);
+void BitwiseOr_PosPos(RWDigits Z, Digits X, Digits Y);
+void BitwiseOr_NegNeg(RWDigits Z, Digits X, Digits Y);
+void BitwiseOr_PosNeg(RWDigits Z, Digits X, Digits Y);
+void BitwiseXor_PosPos(RWDigits Z, Digits X, Digits Y);
+void BitwiseXor_NegNeg(RWDigits Z, Digits X, Digits Y);
+void BitwiseXor_PosNeg(RWDigits Z, Digits X, Digits Y);
+void LeftShift(RWDigits Z, Digits X, digit_t shift);
+// RightShiftState is provided by RightShift_ResultLength and used by the actual
+// RightShift to avoid some recomputation.
+struct RightShiftState {
+  bool must_round_down = false;
+};
+void RightShift(RWDigits Z, Digits X, digit_t shift,
+                const RightShiftState& state);
+
+// Z := (least significant n bits of X, interpreted as a signed n-bit integer).
+// Returns true if the result is negative; Z will hold the absolute value.
+bool AsIntN(RWDigits Z, Digits X, bool x_negative, uint32_t n);
+// Z := (least significant n bits of X).
+void AsUintN_Pos(RWDigits Z, Digits X, uint32_t n);
+// Same, but X is the absolute value of a negative BigInt.
+void AsUintN_Neg(RWDigits Z, Digits X, uint32_t n);
 
 enum class Status { kOk, kInterrupted };
 
@@ -260,48 +313,68 @@ class Processor {
 
   // {out_length} initially contains the allocated capacity of {out}, and
   // upon return will be set to the actual length of the result string.
-  Status ToString(char* out, int* out_length, Digits X, int radix, bool sign);
+  Status ToString(char* out, uint32_t* out_length, Digits X, int radix,
+                  bool sign);
 
   // Z := the contents of {accumulator}.
   // Assume that this leaves {accumulator} in unusable state.
   Status FromString(RWDigits Z, FromStringAccumulator* accumulator);
+
+ protected:
+  // Use {Destroy} or {Destroyer} instead of the destructor directly.
+  ~Processor() = default;
 };
 
-inline int AddResultLength(int x_length, int y_length) {
+inline uint32_t AddResultLength(uint32_t x_length, uint32_t y_length) {
   return std::max(x_length, y_length) + 1;
 }
-inline int AddSignedResultLength(int x_length, int y_length, bool same_sign) {
+inline uint32_t AddSignedResultLength(uint32_t x_length, uint32_t y_length,
+                                      bool same_sign) {
   return same_sign ? AddResultLength(x_length, y_length)
                    : std::max(x_length, y_length);
 }
-inline int SubtractResultLength(int x_length, int y_length) { return x_length; }
-inline int SubtractSignedResultLength(int x_length, int y_length,
-                                      bool same_sign) {
+inline uint32_t SubtractResultLength(uint32_t x_length, uint32_t y_length) {
+  return x_length;
+}
+inline uint32_t SubtractSignedResultLength(uint32_t x_length, uint32_t y_length,
+                                           bool same_sign) {
   return same_sign ? std::max(x_length, y_length)
                    : AddResultLength(x_length, y_length);
 }
-inline int MultiplyResultLength(Digits X, Digits Y) {
+inline uint32_t MultiplyResultLength(Digits X, Digits Y) {
+  BIGINT_H_DCHECK(X.len() <= UINT32_MAX - Y.len());
   return X.len() + Y.len();
 }
-constexpr int kBarrettThreshold = 13310;
-inline int DivideResultLength(Digits A, Digits B) {
+constexpr uint32_t kBarrettThreshold = 13310;
+inline uint32_t DivideResultLength(Digits A, Digits B) {
 #if V8_ADVANCED_BIGINT_ALGORITHMS
   BIGINT_H_DCHECK(kAdvancedAlgorithmsEnabledInLibrary);
   // The Barrett division algorithm needs one extra digit for temporary use.
-  int kBarrettExtraScratch = B.len() >= kBarrettThreshold ? 1 : 0;
+  uint32_t kBarrettExtraScratch = B.len() >= kBarrettThreshold ? 1 : 0;
 #else
   // If this fails, set -DV8_ADVANCED_BIGINT_ALGORITHMS in any compilation unit
   // that #includes this header.
   BIGINT_H_DCHECK(!kAdvancedAlgorithmsEnabledInLibrary);
-  constexpr int kBarrettExtraScratch = 0;
+  constexpr uint32_t kBarrettExtraScratch = 0;
 #endif
   return A.len() - B.len() + 1 + kBarrettExtraScratch;
 }
-inline int ModuloResultLength(Digits B) { return B.len(); }
+inline uint32_t ModuloResultLength(Digits B) { return B.len(); }
 
-int ToStringResultLength(Digits X, int radix, bool sign);
+uint32_t ToStringResultLength(Digits X, int radix, bool sign);
 // In DEBUG builds, the result of {ToString} will be initialized to this value.
 constexpr char kStringZapValue = '?';
+
+uint32_t RightShift_ResultLength(Digits X, bool x_sign, digit_t shift,
+                                 RightShiftState* state);
+
+// Returns -1 if this "asIntN" operation would be a no-op.
+int AsIntNResultLength(Digits X, bool x_negative, uint32_t n);
+// Returns -1 if this "asUintN" operation would be a no-op.
+int AsUintN_Pos_ResultLength(Digits X, uint32_t n);
+inline uint32_t AsUintN_Neg_ResultLength(uint32_t n) {
+  return ((n - 1) / kDigitBits) + 1;
+}
 
 // Support for parsing BigInts from Strings, using an Accumulator object
 // for intermediate state.
@@ -317,7 +390,7 @@ class ProcessorImpl;
 #define ALWAYS_INLINE inline
 #endif
 
-static constexpr int kStackParts = 8;
+static constexpr uint32_t kStackParts = 8;
 
 // A container object for all metadata required for parsing a BigInt from
 // a string.
@@ -337,34 +410,34 @@ class FromStringAccumulator {
   // whereas the final result will be slightly smaller (depending on {radix}).
   // So for sufficiently large N, setting max_digits=N here will not actually
   // allow parsing BigInts with N digits. We can fix that if/when anyone cares.
-  explicit FromStringAccumulator(int max_digits)
+  explicit FromStringAccumulator(uint32_t max_digits)
       : max_digits_(std::max(max_digits, kStackParts)) {}
 
   // Step 2: Call this method to read all characters.
-  // {Char} should be a character type, such as uint8_t or uint16_t.
-  // {end} should be one past the last character (i.e. {start == end} would
-  // indicate an empty string).
-  // Returns the current position when an invalid character is encountered.
-  template <class Char>
-  ALWAYS_INLINE const Char* Parse(const Char* start, const Char* end,
-                                  digit_t radix);
+  // {CharIt} should be a forward iterator and
+  // std::iterator_traits<CharIt>::value_type shall be a character type, such as
+  // uint8_t or uint16_t. {end} should be one past the last character (i.e.
+  // {start == end} would indicate an empty string). Returns the current
+  // position when an invalid character is encountered.
+  template <class CharIt>
+  ALWAYS_INLINE CharIt Parse(CharIt start, CharIt end, digit_t radix);
 
   // Step 3: Check if a result is available, and determine its required
   // allocation size (guaranteed to be <= max_digits passed to the constructor).
   Result result() { return result_; }
-  int ResultLength() {
-    return std::max(stack_parts_used_, static_cast<int>(heap_parts_.size()));
+  uint32_t ResultLength() {
+    return std::max(stack_parts_used_,
+                    static_cast<uint32_t>(heap_parts_.size()));
   }
 
   // Step 4: Use BigIntProcessor::FromString() to retrieve the result into an
-  // {RWDigits} struct allocated for the size returned by step 2.
+  // {RWDigits} struct allocated for the size returned by step 3.
 
  private:
   friend class ProcessorImpl;
 
-  template <class Char>
-  ALWAYS_INLINE const Char* ParsePowerTwo(const Char* start, const Char* end,
-                                          digit_t radix);
+  template <class CharIt>
+  ALWAYS_INLINE CharIt ParsePowerTwo(CharIt start, CharIt end, digit_t radix);
 
   ALWAYS_INLINE bool AddPart(digit_t multiplier, digit_t part, bool is_last);
   ALWAYS_INLINE bool AddPart(digit_t part);
@@ -373,9 +446,9 @@ class FromStringAccumulator {
   std::vector<digit_t> heap_parts_;
   digit_t max_multiplier_{0};
   digit_t last_multiplier_;
-  const int max_digits_;
+  const uint32_t max_digits_;
   Result result_{Result::kOk};
-  int stack_parts_used_{0};
+  uint32_t stack_parts_used_{0};
   bool inline_everything_{false};
   uint8_t radix_{0};
 };
@@ -414,10 +487,9 @@ static constexpr uint8_t kCharValue[] = {
 // A space- and time-efficient way to map {2,4,8,16,32} to {1,2,3,4,5}.
 static constexpr uint8_t kCharBits[] = {1, 2, 3, 0, 4, 0, 0, 0, 5};
 
-template <class Char>
-const Char* FromStringAccumulator::ParsePowerTwo(const Char* current,
-                                                 const Char* end,
-                                                 digit_t radix) {
+template <class CharIt>
+CharIt FromStringAccumulator::ParsePowerTwo(CharIt current, CharIt end,
+                                            digit_t radix) {
   radix_ = static_cast<uint8_t>(radix);
   const int char_bits = kCharBits[radix >> 2];
   int bits_left;
@@ -451,19 +523,20 @@ const Char* FromStringAccumulator::ParsePowerTwo(const Char* current,
   return current;
 }
 
-template <class Char>
-const Char* FromStringAccumulator::Parse(const Char* start, const Char* end,
-                                         digit_t radix) {
+template <class CharIt>
+CharIt FromStringAccumulator::Parse(CharIt start, CharIt end, digit_t radix) {
   BIGINT_H_DCHECK(2 <= radix && radix <= 36);
-  const Char* current = start;
+  CharIt current = start;
 #if !HAVE_BUILTIN_MUL_OVERFLOW
   const digit_t kMaxMultiplier = (~digit_t{0}) / radix;
 #endif
 #if HAVE_TWODIGIT_T  // The inlined path requires twodigit_t availability.
   // The max supported radix is 36, and Math.log2(36) == 5.169..., so we
   // need at most 5.17 bits per char.
-  static constexpr int kInlineThreshold = kStackParts * kDigitBits * 100 / 517;
-  inline_everything_ = (end - start) <= kInlineThreshold;
+  static constexpr uint32_t kInlineThreshold =
+      kStackParts * kDigitBits * 100 / 517;
+  BIGINT_H_DCHECK(end >= start);
+  inline_everything_ = static_cast<uint32_t>(end - start) <= kInlineThreshold;
 #endif
   if (!inline_everything_ && (radix & (radix - 1)) == 0) {
     return ParsePowerTwo(start, end, radix);
@@ -508,7 +581,7 @@ bool FromStringAccumulator::AddPart(digit_t multiplier, digit_t part,
     // Inlined version of {MultiplySingle}.
     digit_t carry = part;
     digit_t high = 0;
-    for (int i = 0; i < stack_parts_used_; i++) {
+    for (uint32_t i = 0; i < stack_parts_used_; i++) {
       twodigit_t result = twodigit_t{stack_parts_[i]} * multiplier;
       digit_t new_high = result >> bigint::kDigitBits;
       digit_t low = static_cast<digit_t>(result);
@@ -517,7 +590,9 @@ bool FromStringAccumulator::AddPart(digit_t multiplier, digit_t part,
       stack_parts_[i] = static_cast<digit_t>(result);
       high = new_high;
     }
-    stack_parts_[stack_parts_used_++] = carry + high;
+    high += carry;
+    if (high != 0) stack_parts_[stack_parts_used_++] = high;
+    BIGINT_H_DCHECK(stack_parts_used_ <= kStackParts);
     return true;
   }
 #else
@@ -540,11 +615,11 @@ bool FromStringAccumulator::AddPart(digit_t part) {
   if (heap_parts_.size() == 0) {
     // Initialize heap storage. Copy the stack part to make things easier later.
     heap_parts_.reserve(kStackParts * 2);
-    for (int i = 0; i < kStackParts; i++) {
+    for (uint32_t i = 0; i < kStackParts; i++) {
       heap_parts_.push_back(stack_parts_[i]);
     }
   }
-  if (static_cast<int>(heap_parts_.size()) >= max_digits_) {
+  if (static_cast<uint32_t>(heap_parts_.size()) >= max_digits_) {
     result_ = Result::kMaxSizeExceeded;
     return false;
   }

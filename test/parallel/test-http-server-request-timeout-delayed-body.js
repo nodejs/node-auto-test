@@ -10,7 +10,13 @@ const { connect } = require('net');
 // pauses before start sending the body.
 
 let sendDelayedRequestBody;
-const server = createServer(common.mustCall((req, res) => {
+const requestTimeout = common.platformTimeout(2000);
+const server = createServer({
+  headersTimeout: 0,
+  requestTimeout,
+  keepAliveTimeout: 0,
+  connectionsCheckingInterval: requestTimeout / 4,
+}, common.mustCall((req, res) => {
   let body = '';
   req.setEncoding('utf-8');
 
@@ -28,41 +34,41 @@ const server = createServer(common.mustCall((req, res) => {
   sendDelayedRequestBody();
 }));
 
-// 0 seconds is the default
-assert.strictEqual(server.requestTimeout, 0);
-const requestTimeout = common.platformTimeout(1000);
-server.requestTimeout = requestTimeout;
 assert.strictEqual(server.requestTimeout, requestTimeout);
 
 server.listen(0, common.mustCall(() => {
   const client = connect(server.address().port);
   let response = '';
 
+  client.setEncoding('utf8');
   client.on('data', common.mustCall((chunk) => {
-    response += chunk.toString('utf-8');
+    response += chunk;
   }));
 
-  client.resume();
-  client.write('POST / HTTP/1.1\r\n');
-  client.write('Content-Length: 20\r\n');
-  client.write('Connection: close\r\n');
-  client.write('\r\n');
-
-  sendDelayedRequestBody = common.mustCall(() => {
-    setTimeout(() => {
-      client.write('12345678901234567890\r\n\r\n');
-    }, common.platformTimeout(2000)).unref();
+  client.on('error', () => {
+    // Ignore errors like 'write EPIPE' that might occur while the request is
+    // sent.
   });
 
-  const errOrEnd = common.mustCall(function(err) {
-    console.log(err);
+  client.on('close', common.mustCall(() => {
     assert.strictEqual(
       response,
       'HTTP/1.1 408 Request Timeout\r\nConnection: close\r\n\r\n'
     );
     server.close();
-  });
+  }));
 
-  client.on('end', errOrEnd);
-  client.on('error', errOrEnd);
+  client.resume();
+  client.write(
+    'POST / HTTP/1.1\r\n' +
+    'Host: example.com\r\n' +
+    'Content-Length: 20\r\n' +
+    'Connection: close\r\n\r\n'
+  );
+
+  sendDelayedRequestBody = common.mustCall(() => {
+    setTimeout(() => {
+      client.write('12345678901234567890\r\n\r\n');
+    }, common.platformTimeout(requestTimeout * 2)).unref();
+  });
 }));

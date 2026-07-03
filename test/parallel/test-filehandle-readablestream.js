@@ -80,8 +80,50 @@ const check = readFileSync(__filename, { encoding: 'utf8' });
   const mc = new MessageChannel();
   mc.port1.onmessage = common.mustNotCall();
   assert.throws(() => mc.port2.postMessage(file, [file]), {
-    code: 25  // DataCloneError
+    code: 25,
+    name: 'DataCloneError',
   });
   mc.port1.close();
+  await file.close();
+})().then(common.mustCall());
+
+// Make sure 'byob' reader works
+(async () => {
+  const file = await open(__filename);
+  const dec = new TextDecoder();
+  const readable = file.readableWebStream();
+  const reader = readable.getReader({ mode: 'byob' });
+
+  let data = '';
+  let result;
+  do {
+    const buff = new ArrayBuffer(100);
+    result = await reader.read(new DataView(buff));
+    if (result.value !== undefined) {
+      data += dec.decode(result.value);
+      assert.ok(result.value.byteLength <= 100);
+    }
+  } while (!result.done);
+
+  assert.strictEqual(check, data);
+
+  assert.throws(() => file.readableWebStream(), {
+    code: 'ERR_INVALID_STATE',
+  });
+
+  await file.close();
+})().then(common.mustCall());
+
+// Make sure a warning is logged if a non-'bytes' type is passed.
+(async () => {
+  const file = await open(__filename);
+  common.expectWarning({
+    ExperimentalWarning: [
+      'A non-"bytes" options.type has no effect. A byte-oriented steam is ' +
+      'always created.',
+    ],
+  });
+  const stream = file.readableWebStream({ type: 'foobar' });
+  await stream.cancel();
   await file.close();
 })().then(common.mustCall());

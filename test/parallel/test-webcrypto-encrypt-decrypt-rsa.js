@@ -6,7 +6,7 @@ if (!common.hasCrypto)
   common.skip('missing crypto');
 
 const assert = require('assert');
-const { subtle } = require('crypto').webcrypto;
+const { subtle } = globalThis.crypto;
 
 const {
   passing
@@ -127,7 +127,7 @@ async function testEncryptionLongPlaintext({ algorithm,
 
   return assert.rejects(
     subtle.encrypt(algorithm, publicKey, newplaintext), {
-      message: /data too large/
+      name: 'OperationError'
     });
 }
 
@@ -147,7 +147,7 @@ async function testEncryptionWrongKey({ algorithm,
     ['decrypt']);
   return assert.rejects(
     subtle.encrypt(algorithm, privateKey, plaintext), {
-      message: /The requested operation is not valid/
+      message: /Unable to use this key to encrypt/
     });
 }
 
@@ -167,7 +167,7 @@ async function testEncryptionBadUsage({ algorithm,
     ['decrypt']);
   return assert.rejects(
     subtle.encrypt(algorithm, publicKey, plaintext), {
-      message: /The requested operation is not valid/
+      message: /Unable to use this key to encrypt/
     });
 }
 
@@ -191,7 +191,7 @@ async function testDecryptionWrongKey({ ciphertext,
 
   return assert.rejects(
     subtle.decrypt(algorithm, publicKey, ciphertext), {
-      message: /The requested operation is not valid/
+      message: /Unable to use this key to decrypt/
     });
 }
 
@@ -215,7 +215,7 @@ async function testDecryptionBadUsage({ ciphertext,
 
   return assert.rejects(
     subtle.decrypt(algorithm, publicKey, ciphertext), {
-      message: /The requested operation is not valid/
+      message: /Unable to use this key to decrypt/
     });
 }
 

@@ -116,7 +116,7 @@ class ElapsedTimer final {
 
  private:
   static V8_INLINE TimeTicks Now() {
-    TimeTicks now = TimeTicks::HighResolutionNow();
+    TimeTicks now = TimeTicks::Now();
     DCHECK(!now.IsNull());
     return now;
   }
@@ -151,6 +151,24 @@ class ElapsedTimer final {
   bool started_ = false;
   bool paused_ = false;
 #endif
+};
+
+// Helper that times a scoped region and records the elapsed time.
+struct ScopedTimer {
+  explicit ScopedTimer(TimeDelta* location) : location_(location) {
+    if (location_) {
+      timer_.Start();
+    }
+  }
+
+  ~ScopedTimer() {
+    if (location_) {
+      *location_ += timer_.Elapsed();
+    }
+  }
+
+  ElapsedTimer timer_;
+  TimeDelta* location_;
 };
 
 }  // namespace base

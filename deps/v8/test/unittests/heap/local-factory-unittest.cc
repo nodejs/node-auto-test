@@ -55,13 +55,13 @@ class LocalFactoryTest : public TestWithIsolateAndZone {
  public:
   LocalFactoryTest()
       : TestWithIsolateAndZone(),
-        state_(isolate()),
+        reusable_state_(isolate()),
         parse_info_(
             isolate(),
             UnoptimizedCompileFlags::ForToplevelCompile(
-                isolate(), true, construct_language_mode(FLAG_use_strict),
-                REPLMode::kNo, ScriptType::kClassic, FLAG_lazy),
-            &state_),
+                isolate(), true, construct_language_mode(v8_flags.use_strict),
+                REPLMode::kNo, ScriptType::kClassic, v8_flags.lazy),
+            &state_, &reusable_state_),
         local_isolate_(isolate()->main_thread_local_isolate()) {}
 
   FunctionLiteral* ParseProgram(const char* source) {
@@ -73,36 +73,32 @@ class LocalFactoryTest : public TestWithIsolateAndZone {
                          ->NewStringFromUtf8(base::CStrVector(source))
                          .ToHandleChecked();
 
-    parse_info_.set_character_stream(
-        ScannerStream::ForTesting(utf16_source.data(), utf16_source.size()));
-
-    {
-      DisallowGarbageCollection no_gc;
-      DisallowHeapAccess no_heap_access;
-
-      Parser parser(parse_info());
-      parser.InitializeEmptyScopeChain(parse_info());
-      parser.ParseOnBackground(parse_info(), 0, 0, kFunctionLiteralIdTopLevel);
-    }
-
-    parse_info()->ast_value_factory()->Internalize(local_isolate());
-    DeclarationScope::AllocateScopeInfos(parse_info(), local_isolate());
-
     script_ = parse_info_.CreateScript(local_isolate(),
                                        local_factory()->empty_string(),
                                        kNullMaybeHandle, ScriptOriginOptions());
 
+    parse_info_.set_character_stream(
+        ScannerStream::ForTesting(utf16_source.data(), utf16_source.size()));
+
+    Parser parser(local_isolate(), parse_info());
+    parser.InitializeEmptyScopeChain(parse_info());
+    parser.ParseOnBackground(local_isolate(), parse_info(), script_, 0, 0,
+                             kFunctionLiteralIdTopLevel);
+
+    DeclarationScope::AllocateScopeInfos(parse_info(), script_,
+                                         local_isolate());
+
     // Create the SFI list on the script so that SFI SetScript works.
-    Handle<WeakFixedArray> infos = local_factory()->NewWeakFixedArray(
-        parse_info()->max_function_literal_id() + 1, AllocationType::kOld);
-    script_->set_shared_function_infos(*infos);
+    DirectHandle<WeakFixedArray> infos = local_factory()->NewWeakFixedArray(
+        parse_info()->max_info_id() + 1, AllocationType::kOld);
+    script_->set_infos(*infos);
 
     return parse_info()->literal();
   }
 
   ParseInfo* parse_info() { return &parse_info_; }
 
-  Handle<Script> script() { return script_; }
+  DirectHandle<Script> script() { return script_; }
 
   LocalIsolate* local_isolate() { return local_isolate_; }
   LocalFactory* local_factory() { return local_isolate()->factory(); }
@@ -110,6 +106,7 @@ class LocalFactoryTest : public TestWithIsolateAndZone {
  private:
   SaveFlags save_flags_;
   UnoptimizedCompileState state_;
+  ReusableUnoptimizedCompileState reusable_state_;
   ParseInfo parse_info_;
   LocalIsolate* local_isolate_;
   Handle<String> source_string_;
@@ -119,7 +116,7 @@ class LocalFactoryTest : public TestWithIsolateAndZone {
 TEST_F(LocalFactoryTest, OneByteInternalizedString_IsAddedToStringTable) {
   base::Vector<const uint8_t> string_vector = base::StaticOneByteVector("foo");
 
-  Handle<String> string;
+  DirectHandle<String> string;
   {
     LocalHandleScope handle_scope(local_isolate());
 
@@ -130,16 +127,16 @@ TEST_F(LocalFactoryTest, OneByteInternalizedString_IsAddedToStringTable) {
   }
 
   EXPECT_TRUE(string->IsOneByteEqualTo(base::CStrVector("foo")));
-  EXPECT_TRUE(string->IsInternalizedString());
+  EXPECT_TRUE(IsInternalizedString(*string));
 
   Handle<String> same_string = isolate()
                                    ->factory()
                                    ->NewStringFromOneByte(string_vector)
                                    .ToHandleChecked();
   EXPECT_NE(*string, *same_string);
-  EXPECT_FALSE(same_string->IsInternalizedString());
+  EXPECT_FALSE(IsInternalizedString(*same_string));
 
-  Handle<String> internalized_string =
+  DirectHandle<String> internalized_string =
       isolate()->factory()->InternalizeString(same_string);
   EXPECT_EQ(*string, *internalized_string);
 }
@@ -147,8 +144,8 @@ TEST_F(LocalFactoryTest, OneByteInternalizedString_IsAddedToStringTable) {
 TEST_F(LocalFactoryTest, OneByteInternalizedString_DuplicateIsDeduplicated) {
   base::Vector<const uint8_t> string_vector = base::StaticOneByteVector("foo");
 
-  Handle<String> string_1;
-  Handle<String> string_2;
+  DirectHandle<String> string_1;
+  DirectHandle<String> string_2;
   {
     LocalHandleScope handle_scope(local_isolate());
 
@@ -162,7 +159,7 @@ TEST_F(LocalFactoryTest, OneByteInternalizedString_DuplicateIsDeduplicated) {
   }
 
   EXPECT_TRUE(string_1->IsOneByteEqualTo(base::CStrVector("foo")));
-  EXPECT_TRUE(string_1->IsInternalizedString());
+  EXPECT_TRUE(IsInternalizedString(*string_1));
   EXPECT_EQ(*string_1, *string_2);
 }
 
@@ -172,7 +169,7 @@ TEST_F(LocalFactoryTest, AstRawString_IsInternalized) {
 
   const AstRawString* raw_string = ast_value_factory.GetOneByteString("foo");
 
-  Handle<String> string;
+  DirectHandle<String> string;
   {
     LocalHandleScope handle_scope(local_isolate());
 
@@ -182,14 +179,14 @@ TEST_F(LocalFactoryTest, AstRawString_IsInternalized) {
   }
 
   EXPECT_TRUE(string->IsOneByteEqualTo(base::CStrVector("foo")));
-  EXPECT_TRUE(string->IsInternalizedString());
+  EXPECT_TRUE(IsInternalizedString(*string));
 }
 
 TEST_F(LocalFactoryTest, AstConsString_CreatesConsString) {
   AstValueFactory ast_value_factory(zone(), isolate()->ast_string_constants(),
                                     HashSeed(isolate()));
 
-  Handle<String> string;
+  DirectHandle<String> string;
   {
     LocalHandleScope handle_scope(local_isolate());
 
@@ -205,7 +202,7 @@ TEST_F(LocalFactoryTest, AstConsString_CreatesConsString) {
         foobar_string->GetString(local_isolate()));
   }
 
-  EXPECT_TRUE(string->IsConsString());
+  EXPECT_TRUE(IsConsString(*string));
   EXPECT_TRUE(string->Equals(*isolate()->factory()->NewStringFromStaticChars(
       "foobar-plus-padding-for-length")));
 }
@@ -213,7 +210,7 @@ TEST_F(LocalFactoryTest, AstConsString_CreatesConsString) {
 TEST_F(LocalFactoryTest, EmptyScript) {
   FunctionLiteral* program = ParseProgram("");
 
-  Handle<SharedFunctionInfo> shared;
+  DirectHandle<SharedFunctionInfo> shared;
   {
     LocalHandleScope handle_scope(local_isolate());
 
@@ -221,9 +218,9 @@ TEST_F(LocalFactoryTest, EmptyScript) {
         local_factory()->NewSharedFunctionInfoForLiteral(program, script(),
                                                          true));
   }
-  Handle<SharedFunctionInfo> root_sfi = shared;
+  DirectHandle<SharedFunctionInfo> root_sfi = shared;
 
-  EXPECT_EQ(root_sfi->function_literal_id(), 0);
+  EXPECT_EQ(root_sfi->function_literal_id(kRelaxedLoad), 0);
 }
 
 TEST_F(LocalFactoryTest, LazyFunction) {
@@ -234,19 +231,19 @@ TEST_F(LocalFactoryTest, LazyFunction) {
                               ->AsFunctionDeclaration()
                               ->fun();
 
-  Handle<SharedFunctionInfo> shared;
+  DirectHandle<SharedFunctionInfo> shared;
   {
     LocalHandleScope handle_scope(local_isolate());
 
     shared = local_isolate()->heap()->NewPersistentHandle(
         local_factory()->NewSharedFunctionInfoForLiteral(lazy, script(), true));
   }
-  Handle<SharedFunctionInfo> lazy_sfi = shared;
+  DirectHandle<SharedFunctionInfo> lazy_sfi = shared;
 
-  EXPECT_EQ(lazy_sfi->function_literal_id(), 1);
-  EXPECT_TRUE(lazy_sfi->Name().IsOneByteEqualTo(base::CStrVector("lazy")));
+  EXPECT_EQ(lazy_sfi->function_literal_id(kRelaxedLoad), 1);
+  EXPECT_TRUE(lazy_sfi->Name()->IsOneByteEqualTo(base::CStrVector("lazy")));
   EXPECT_FALSE(lazy_sfi->is_compiled());
-  EXPECT_TRUE(lazy_sfi->HasUncompiledDataWithoutPreparseData());
+  EXPECT_TRUE(lazy_sfi->HasUncompiledDataWithoutPreparseData(local_isolate()));
 }
 
 TEST_F(LocalFactoryTest, EagerFunction) {
@@ -260,7 +257,7 @@ TEST_F(LocalFactoryTest, EagerFunction) {
                                ->value()
                                ->AsFunctionLiteral();
 
-  Handle<SharedFunctionInfo> shared;
+  DirectHandle<SharedFunctionInfo> shared;
   {
     LocalHandleScope handle_scope(local_isolate());
 
@@ -268,11 +265,11 @@ TEST_F(LocalFactoryTest, EagerFunction) {
         local_factory()->NewSharedFunctionInfoForLiteral(eager, script(),
                                                          true));
   }
-  Handle<SharedFunctionInfo> eager_sfi = shared;
+  DirectHandle<SharedFunctionInfo> eager_sfi = shared;
 
-  EXPECT_EQ(eager_sfi->function_literal_id(), 1);
-  EXPECT_TRUE(eager_sfi->Name().IsOneByteEqualTo(base::CStrVector("eager")));
-  EXPECT_FALSE(eager_sfi->HasUncompiledData());
+  EXPECT_EQ(eager_sfi->function_literal_id(kRelaxedLoad), 1);
+  EXPECT_TRUE(eager_sfi->Name()->IsOneByteEqualTo(base::CStrVector("eager")));
+  EXPECT_FALSE(eager_sfi->HasUncompiledData(local_isolate()));
   // TODO(leszeks): Add compilation support and enable these checks.
   // EXPECT_TRUE(eager_sfi->is_compiled());
   // EXPECT_TRUE(eager_sfi->HasBytecodeArray());
@@ -291,7 +288,7 @@ TEST_F(LocalFactoryTest, ImplicitNameFunction) {
                                        ->value()
                                        ->AsFunctionLiteral();
 
-  Handle<SharedFunctionInfo> shared;
+  DirectHandle<SharedFunctionInfo> shared;
   {
     LocalHandleScope handle_scope(local_isolate());
 
@@ -299,10 +296,10 @@ TEST_F(LocalFactoryTest, ImplicitNameFunction) {
         local_factory()->NewSharedFunctionInfoForLiteral(implicit_name,
                                                          script(), true));
   }
-  Handle<SharedFunctionInfo> implicit_name_sfi = shared;
+  DirectHandle<SharedFunctionInfo> implicit_name_sfi = shared;
 
-  EXPECT_EQ(implicit_name_sfi->function_literal_id(), 1);
-  EXPECT_TRUE(implicit_name_sfi->Name().IsOneByteEqualTo(
+  EXPECT_EQ(implicit_name_sfi->function_literal_id(kRelaxedLoad), 1);
+  EXPECT_TRUE(implicit_name_sfi->Name()->IsOneByteEqualTo(
       base::CStrVector("implicit_name")));
 }
 
@@ -319,7 +316,7 @@ TEST_F(LocalFactoryTest, GCDuringPublish) {
                                        ->value()
                                        ->AsFunctionLiteral();
 
-  Handle<SharedFunctionInfo> shared;
+  DirectHandle<SharedFunctionInfo> shared;
   {
     LocalHandleScope handle_scope(local_isolate());
 
@@ -327,10 +324,10 @@ TEST_F(LocalFactoryTest, GCDuringPublish) {
         local_factory()->NewSharedFunctionInfoForLiteral(implicit_name,
                                                          script(), true));
   }
-  Handle<SharedFunctionInfo> implicit_name_sfi = shared;
+  DirectHandle<SharedFunctionInfo> implicit_name_sfi = shared;
 
-  EXPECT_EQ(implicit_name_sfi->function_literal_id(), 1);
-  EXPECT_TRUE(implicit_name_sfi->Name().IsOneByteEqualTo(
+  EXPECT_EQ(implicit_name_sfi->function_literal_id(kRelaxedLoad), 1);
+  EXPECT_TRUE(implicit_name_sfi->Name()->IsOneByteEqualTo(
       base::CStrVector("implicit_name")));
 }
 

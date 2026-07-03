@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Copyright 2014 the V8 project authors. All rights reserved.
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
@@ -234,13 +234,13 @@ class GitRecipesMixin(object):
     # base files were uploaded, if not retry.
     self.Git(MakeArgs(args), pipe=False, **kwargs)
 
-  def GitCommit(self, message="", file_name="", author=None, **kwargs):
+  def GitCommit(self, message="", file_name="", author=None, prefix=None, **kwargs):
     assert message or file_name
-    args = ["commit"]
+    args = (prefix or []) + ["commit"]
     if file_name:
       args += ["-aF", Quoted(file_name)]
     if message:
-      args += ["-am", Quoted(message)]
+      args += ["-m", Quoted(message)]
     if author:
       args += ["--author", "\"%s <%s>\"" % (author, author)]
     self.Git(MakeArgs(args), **kwargs)

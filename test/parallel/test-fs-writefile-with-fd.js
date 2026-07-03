@@ -7,14 +7,13 @@
 const common = require('../common');
 const assert = require('assert');
 const fs = require('fs');
-const join = require('path').join;
 
 const tmpdir = require('../common/tmpdir');
 tmpdir.refresh();
 
 {
   /* writeFileSync() test. */
-  const filename = join(tmpdir.path, 'test.txt');
+  const filename = tmpdir.resolve('test.txt');
 
   /* Open the file descriptor. */
   const fd = fs.openSync(filename, 'w');
@@ -46,7 +45,7 @@ process.on('beforeExit', common.mustCall(() => {
 
 {
   /* writeFile() test. */
-  const file = join(tmpdir.path, 'test1.txt');
+  const file = tmpdir.resolve('test1.txt');
 
   /* Open the file descriptor. */
   fs.open(file, 'w', common.mustSucceed((fd) => {
@@ -68,14 +67,11 @@ process.on('beforeExit', common.mustCall(() => {
 
 // Test read-only file descriptor
 {
-  // TODO(pd4d10): https://github.com/nodejs/node/issues/38607
-  const expectedError = common.isWindows ? /EPERM/ : /EBADF/;
-
-  const file = join(tmpdir.path, 'test.txt');
+  const file = tmpdir.resolve('test.txt');
 
   fs.open(file, 'r', common.mustSucceed((fd) => {
     fdsToCloseOnExit.push(fd);
-    fs.writeFile(fd, 'World', common.expectsError(expectedError));
+    fs.writeFile(fd, 'World', common.expectsError(/EBADF/));
   }));
 }
 
@@ -83,7 +79,7 @@ process.on('beforeExit', common.mustCall(() => {
 {
   const controller = new AbortController();
   const signal = controller.signal;
-  const file = join(tmpdir.path, 'test.txt');
+  const file = tmpdir.resolve('test.txt');
 
   fs.open(file, 'w', common.mustSucceed((fd) => {
     fdsToCloseOnExit.push(fd);

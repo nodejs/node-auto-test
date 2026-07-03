@@ -1,20 +1,14 @@
 {
   'conditions': [
-    ['target_arch=="ppc" and OS=="aix"', {
-      'includes': ['config/archs/aix-gcc/asm/openssl.gypi'],
-    }, 'target_arch=="ppc" and OS=="linux"', {
-      'includes': ['config/archs/linux-ppc/asm/openssl.gypi'],
-    }, 'target_arch=="ppc64" and OS=="aix"', {
+    ['target_arch=="ppc64" and OS in ("aix", "os400")', {
       'includes': ['config/archs/aix64-gcc-as/asm/openssl.gypi'],
     }, 'target_arch=="ppc64" and OS=="linux" and node_byteorder =="little"', {
       'includes': ['config/archs/linux-ppc64le/asm/openssl.gypi'],
-    }, 'target_arch=="ppc64" and OS=="linux"', {
-      'includes': ['config/archs/linux-ppc64/asm/openssl.gypi'],
     }, 'target_arch=="s390x" and OS=="linux"', {
       'includes': ['config/archs/linux64-s390x/asm/openssl.gypi'],
     }, 'target_arch=="arm" and OS=="linux"', {
       'includes': ['config/archs/linux-armv4/asm/openssl.gypi'],
-    }, 'target_arch=="arm64" and OS=="linux"', {
+    }, 'target_arch=="arm64" and OS in "linux openharmony"', {
       'includes': ['config/archs/linux-aarch64/asm/openssl.gypi'],
     }, 'target_arch=="arm64" and OS=="mac"', {
       'includes': ['config/archs/darwin64-arm64-cc/asm/openssl.gypi'],

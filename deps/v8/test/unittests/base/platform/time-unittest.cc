@@ -4,7 +4,7 @@
 
 #include "src/base/platform/time.h"
 
-#if V8_OS_MACOSX
+#if V8_OS_DARWIN
 #include <mach/mach_time.h>
 #endif
 #if V8_OS_POSIX
@@ -13,8 +13,6 @@
 
 #if V8_OS_WIN
 #include <windows.h>
-
-#include "src/base/win32-headers.h"
 #endif
 
 #include <vector>
@@ -201,8 +199,7 @@ TEST(TimeDelta, FromAndIn) {
             TimeDelta::FromMicroseconds(13).InMicroseconds());
 }
 
-
-#if V8_OS_MACOSX
+#if V8_OS_DARWIN
 TEST(TimeDelta, MachTimespec) {
   TimeDelta null = TimeDelta();
   EXPECT_EQ(null, TimeDelta::FromMachTimespec(null.ToMachTimespec()));
@@ -363,19 +360,14 @@ TEST(TimeTicks, NowResolution) {
 }
 
 TEST(TimeTicks, IsMonotonic) {
-  TimeTicks previous_normal_ticks;
-  TimeTicks previous_highres_ticks;
+  TimeTicks previous_ticks;
   ElapsedTimer timer;
   timer.Start();
   while (!timer.HasExpired(TimeDelta::FromMilliseconds(100))) {
-    TimeTicks normal_ticks = TimeTicks::Now();
-    TimeTicks highres_ticks = TimeTicks::HighResolutionNow();
-    EXPECT_GE(normal_ticks, previous_normal_ticks);
-    EXPECT_GE((normal_ticks - previous_normal_ticks).InMicroseconds(), 0);
-    EXPECT_GE(highres_ticks, previous_highres_ticks);
-    EXPECT_GE((highres_ticks - previous_highres_ticks).InMicroseconds(), 0);
-    previous_normal_ticks = normal_ticks;
-    previous_highres_ticks = highres_ticks;
+    TimeTicks ticks = TimeTicks::Now();
+    EXPECT_GE(ticks, previous_ticks);
+    EXPECT_GE((ticks - previous_ticks).InMicroseconds(), 0);
+    previous_ticks = ticks;
   }
 }
 
@@ -391,7 +383,7 @@ void Sleep(TimeDelta wait_time) {
 
 TEST(ElapsedTimer, StartStop) {
   TimeDelta wait_time = TimeDelta::FromMilliseconds(100);
-  TimeDelta noise = TimeDelta::FromMilliseconds(100);
+  TimeDelta noise = TimeDelta::FromMilliseconds(200);
   ElapsedTimer timer;
   DCHECK(!timer.IsStarted());
 
@@ -437,14 +429,14 @@ TEST(ElapsedTimer, StartStopArgs) {
   DCHECK(!timer1.IsStarted());
   DCHECK(!timer2.IsStarted());
 
-  TimeTicks now = TimeTicks::HighResolutionNow();
+  TimeTicks now = TimeTicks::Now();
   timer1.Start(now);
   timer2.Start(now);
   DCHECK(timer1.IsStarted());
   DCHECK(timer2.IsStarted());
 
   Sleep(wait_time);
-  now = TimeTicks::HighResolutionNow();
+  now = TimeTicks::Now();
   TimeDelta delta1 = timer1.Elapsed(now);
   Sleep(wait_time);
   TimeDelta delta2 = timer2.Elapsed(now);
@@ -454,20 +446,20 @@ TEST(ElapsedTimer, StartStopArgs) {
   Sleep(wait_time);
   EXPECT_NE(delta1, timer2.Elapsed());
 
-  TimeTicks now2 = TimeTicks::HighResolutionNow();
+  TimeTicks now2 = TimeTicks::Now();
   EXPECT_NE(timer1.Elapsed(now), timer1.Elapsed(now2));
   EXPECT_NE(delta1, timer1.Elapsed(now2));
   EXPECT_NE(delta2, timer2.Elapsed(now2));
   EXPECT_GE(timer1.Elapsed(now2), timer2.Elapsed(now2));
 
-  now = TimeTicks::HighResolutionNow();
+  now = TimeTicks::Now();
   timer1.Pause(now);
   timer2.Pause(now);
   DCHECK(timer1.IsPaused());
   DCHECK(timer2.IsPaused());
   Sleep(wait_time);
 
-  now = TimeTicks::HighResolutionNow();
+  now = TimeTicks::Now();
   timer1.Resume(now);
   DCHECK(!timer1.IsPaused());
   DCHECK(timer2.IsPaused());
@@ -504,29 +496,39 @@ TEST(ThreadTicks, MAYBE_ThreadNow) {
     EXPECT_GT(begin_thread, ThreadTicks());
     int iterations_count = 0;
 
+#if V8_OS_WIN && V8_HOST_ARCH_ARM64
+    // The implementation of ThreadTicks::Now() is quite imprecise on arm64
+    // Windows, so the following test often fails with the default 10ms. By
+    // increasing to 100ms, we can make the test reliable.
+    const int limit_ms = 100;
+#else
+    const int limit_ms = 10;
+#endif
+    const int limit_us = limit_ms * 1000;
+
     // Some systems have low resolution thread timers, this code makes sure
     // that thread time has progressed by at least one tick.
     // Limit waiting to 10ms to prevent infinite loops.
     while (ThreadTicks::Now() == begin_thread &&
-           ((TimeTicks::Now() - begin).InMicroseconds() < 10000)) {
+           ((TimeTicks::Now() - begin).InMicroseconds() < limit_us)) {
     }
     EXPECT_GT(ThreadTicks::Now(), begin_thread);
 
     do {
       // Sleep for 10 milliseconds to get the thread de-scheduled.
-      OS::Sleep(base::TimeDelta::FromMilliseconds(10));
+      OS::Sleep(base::TimeDelta::FromMilliseconds(limit_ms));
       end_thread = ThreadTicks::Now();
       end = TimeTicks::Now();
       delta = end - begin;
       EXPECT_LE(++iterations_count, 2);  // fail after 2 attempts.
     } while (delta.InMicroseconds() <
-             10000);  // Make sure that the OS did sleep for at least 10 ms.
+             limit_us);  // Make sure that the OS did sleep for at least 10 ms.
     TimeDelta delta_thread = end_thread - begin_thread;
     // Make sure that some thread time have elapsed.
     EXPECT_GT(delta_thread.InMicroseconds(), 0);
     // But the thread time is at least 9ms less than clock time.
     TimeDelta difference = delta - delta_thread;
-    EXPECT_GE(difference.InMicroseconds(), 9000);
+    EXPECT_GE(difference.InMicroseconds(), limit_us * 9 / 10);
   }
 }
 

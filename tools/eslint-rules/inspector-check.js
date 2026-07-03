@@ -1,6 +1,6 @@
 /**
- * @fileoverview Check that common.skipIfInspectorDisabled is used if
- *               the inspector module is required.
+ * @file Check that common.skipIfInspectorDisabled is used if
+ *   the inspector module is required.
  * @author Daniel Bevenius <daniel.bevenius@gmail.com>
  */
 'use strict';
@@ -48,10 +48,10 @@ module.exports = {
               if (commonModuleNode) {
                 return fixer.insertTextAfter(
                   commonModuleNode,
-                  '\ncommon.skipIfInspectorDisabled();'
+                  '\ncommon.skipIfInspectorDisabled();',
                 );
               }
-            }
+            },
           });
         });
       }
@@ -60,7 +60,7 @@ module.exports = {
     return {
       'CallExpression': (node) => testInspectorUsage(context, node),
       'MemberExpression': (node) => checkMemberExpression(context, node),
-      'Program:exit': () => reportIfMissing(context)
+      'Program:exit': () => reportIfMissing(context),
     };
-  }
+  },
 };

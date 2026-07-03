@@ -27,7 +27,7 @@
 
 #ifdef HAVE_CONFIG_H
 #  include <config.h>
-#endif /* HAVE_CONFIG_H */
+#endif /* defined(HAVE_CONFIG_H) */
 
 #include <ngtcp2/ngtcp2.h>
 
@@ -36,7 +36,7 @@ typedef struct ngtcp2_buf {
   uint8_t *begin;
   /* end points to the one beyond of the last byte of the buffer */
   uint8_t *end;
-  /* pos pointers to the start of data.  Typically, this points to the
+  /* pos points to the start of data.  Typically, this points to the
      point that next data should be read.  Initially, it points to
      |begin|. */
   uint8_t *pos;
@@ -62,13 +62,15 @@ void ngtcp2_buf_reset(ngtcp2_buf *buf);
  * written to the underlying buffer.  In other words, it returns
  * buf->end - buf->last.
  */
-size_t ngtcp2_buf_left(const ngtcp2_buf *buf);
+static inline size_t ngtcp2_buf_left(const ngtcp2_buf *buf) {
+  return (size_t)(buf->end - buf->last);
+}
 
 /*
  * ngtcp2_buf_len returns the number of bytes left to read.  In other
  * words, it returns buf->last - buf->pos.
  */
-size_t ngtcp2_buf_len(const ngtcp2_buf *buf);
+#define ngtcp2_buf_len(BUF) (size_t)((BUF)->last - (BUF)->pos)
 
 /*
  * ngtcp2_buf_cap returns the capacity of the buffer.  In other words,
@@ -76,4 +78,40 @@ size_t ngtcp2_buf_len(const ngtcp2_buf *buf);
  */
 size_t ngtcp2_buf_cap(const ngtcp2_buf *buf);
 
-#endif /* NGTCP2_BUF_H */
+/*
+ * ngtcp2_buf_trunc truncates the number of bytes to read to at most
+ * |len|.  In other words, it sets buf->last = buf->pos + len if
+ * ngtcp2_buf_len(buf) > len.
+ */
+void ngtcp2_buf_trunc(ngtcp2_buf *buf, size_t len);
+
+/*
+ * ngtcp2_buf_chain is a linked list of ngtcp2_buf.
+ */
+typedef struct ngtcp2_buf_chain ngtcp2_buf_chain;
+
+struct ngtcp2_buf_chain {
+  ngtcp2_buf_chain *next;
+  ngtcp2_buf buf;
+};
+
+/*
+ * ngtcp2_buf_chain_new creates new ngtcp2_buf_chain and initializes
+ * the internal buffer with |len| bytes space.
+ *
+ * This function returns 0 if it succeeds, or one of the following
+ * negative error codes:
+ *
+ * NGTCP2_ERR_NOMEM
+ *     Out of memory
+ */
+int ngtcp2_buf_chain_new(ngtcp2_buf_chain **pbufchain, size_t len,
+                         const ngtcp2_mem *mem);
+
+/*
+ * ngtcp2_buf_chain_del deletes the resource allocated by |bufchain|.
+ * It also deletes the memory pointed by |bufchain|.
+ */
+void ngtcp2_buf_chain_del(ngtcp2_buf_chain *bufchain, const ngtcp2_mem *mem);
+
+#endif /* !defined(NGTCP2_BUF_H) */

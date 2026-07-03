@@ -1,14 +1,8 @@
-[![GitHub Workflow Status (branch)](https://img.shields.io/github/workflow/status/npm/cli/Node%20CI/latest)](https://github.com/npm/cli/actions?query=workflow%3A%22Node+CI%22+branch%3Alatest) [![Coveralls github branch](https://img.shields.io/coveralls/github/npm/cli/latest)](https://coveralls.io/github/npm/cli?branch=latest)
-
 # npm - a JavaScript package manager
 
 ### Requirements
 
-One of the following versions of [Node.js](https://nodejs.org/en/download/) must be installed to run **`npm`**:
-
-* `12.x.x` >= `12.13.0`
-* `14.x.x` >= `14.15.0`
-* `16.0.0` or higher
+You should be running a currently supported version of [Node.js](https://nodejs.org/en/download/) to run **`npm`**.  For a list of which versions of Node.js are currently supported, please see the [Node.js releases](https://nodejs.org/en/about/previous-releases) page.
 
 ### Installation
 
@@ -24,16 +18,7 @@ curl -qL https://www.npmjs.com/install.sh | sh
 
 #### Node Version Managers
 
-If you're looking to manage multiple versions of **`node`** &/or **`npm`**, consider using a "Node Version Manager" such as:
-
-* [**`nvm`**](https://github.com/nvm-sh/nvm)
-* [**`nvs`**](https://github.com/jasongin/nvs)
-* [**`nave`**](https://github.com/isaacs/nave)
-* [**`n`**](https://github.com/tj/n)
-* [**`volta`**](https://github.com/volta-cli/volta)
-* [**`nodenv`**](https://github.com/nodenv/nodenv)
-* [**`asdf-nodejs`**](https://github.com/asdf-vm/asdf-nodejs)
-* [**`nvm-windows`**](https://github.com/coreybutler/nvm-windows)
+If you're looking to manage multiple versions of **`Node.js`** &/or **`npm`**, consider using a [node version manager](https://github.com/search?q=node+version+manager+archived%3Afalse&type=repositories&ref=advsearch)
 
 ### Usage
 
@@ -46,18 +31,16 @@ npm <command>
 * [**Documentation**](https://docs.npmjs.com/) - Official docs & how-tos for all things **npm**
     * Note: you can also search docs locally with `npm help-search <query>`
 * [**Bug Tracker**](https://github.com/npm/cli/issues) - Search or submit bugs against the CLI
-* [**Roadmap**](https://github.com/npm/roadmap) - Track & follow along with our public roadmap
-* [**Feedback**](https://github.com/npm/feedback) - Contribute ideas & discussion around the npm registry, website & CLI
+* [**Community Feedback and Discussions**](https://github.com/orgs/community/discussions/categories/npm) - Contribute ideas & discussion around the npm registry, website & CLI
 * [**RFCs**](https://github.com/npm/rfcs) - Contribute ideas & specifications for the API/design of the npm CLI
 * [**Service Status**](https://status.npmjs.org/) - Monitor the current status & see incident reports for the website & registry
 * [**Project Status**](https://npm.github.io/statusboard/) - See the health of all our maintained OSS projects in one view
-* [**Events Calendar**](https://calendar.google.com/calendar/u/0/embed?src=npmjs.com_oonluqt8oftrt0vmgrfbg6q6go@group.calendar.google.com) - Keep track of our Open RFC calls, releases, meetups, conferences & more
-* [**Support**](https://www.npmjs.com/support) - Experiencing problems with the **npm** [website](https://npmjs.com) or [registry](https://registry.npmjs.org)? File a ticket [here](https://www.npmjs.com/support)
+* [**Support**](https://www.npmjs.com/support) - Experiencing problems with the **npm** [website](https://npmjs.com) or [registry](https://registry.npmjs.org)? [File a ticket](https://www.npmjs.com/support)
 
 ### Acknowledgments
 
 * `npm` is configured to use the **npm Public Registry** at [https://registry.npmjs.org](https://registry.npmjs.org) by default; Usage of this registry is subject to **Terms of Use** available at [https://npmjs.com/policies/terms](https://npmjs.com/policies/terms)
-* You can configure `npm` to use any other compatible registry you prefer. You can read more about configuring third-party registries [here](https://docs.npmjs.com/cli/v7/using-npm/registry)
+* You can configure `npm` to use any other compatible registry you prefer. You can read more about [configuring third-party registries](https://docs.npmjs.com/cli/v7/using-npm/registry)
 
 ### FAQ on Branding
 
@@ -67,4 +50,4 @@ npm <command>
 
 #### Is "npm" an acronym for "Node Package Manager"?
 
-Contrary to popular belief, **`npm`** **is not** in fact an acronym for "Node Package Manager"; It is a recursive bacronymic abbreviation for **"npm is not an acronym"** (if the project was named "ninaa", then it would be an acronym). The precursor to **`npm`** was actually a bash utility named **"pm"**, which was the shortform name of **"pkgmakeinst"** - a bash function that installed various things on various platforms. If **`npm`** were to ever have been considered an acronym, it would be as "node pm" or, potentially "new pm".
+Contrary to popular belief, **`npm`** **is not** an acronym for "Node Package Manager." It is a recursive backronymic abbreviation for **"npm is not an acronym"** (if the project were named "ninaa," then it would be an acronym). The precursor to **`npm`** was actually a bash utility named **"pm"**, which was the shortform name of **"pkgmakeinst"** - a bash function that installed various things on various platforms. If **`npm`** were ever considered an acronym, it would be as "node pm" or, potentially, "new pm".

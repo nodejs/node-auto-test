@@ -27,7 +27,7 @@
 
 #ifdef HAVE_CONFIG_H
 #  include <config.h>
-#endif /* HAVE_CONFIG_H */
+#endif /* defined(HAVE_CONFIG_H) */
 
 #include <ngtcp2/ngtcp2.h>
 
@@ -46,10 +46,10 @@ typedef struct ngtcp2_log ngtcp2_log;
 typedef struct ngtcp2_frame_chain ngtcp2_frame_chain;
 
 /* NGTCP2_PV_ENTRY_FLAG_NONE indicates that no flag is set. */
-#define NGTCP2_PV_ENTRY_FLAG_NONE 0x00
+#define NGTCP2_PV_ENTRY_FLAG_NONE 0x00U
 /* NGTCP2_PV_ENTRY_FLAG_UNDERSIZED indicates that UDP datagram which
    contains PATH_CHALLENGE is undersized (< 1200 bytes) */
-#define NGTCP2_PV_ENTRY_FLAG_UNDERSIZED 0x01
+#define NGTCP2_PV_ENTRY_FLAG_UNDERSIZED 0x01U
 
 typedef struct ngtcp2_pv_entry {
   /* expiry is the timestamp when this PATH_CHALLENGE expires. */
@@ -57,32 +57,36 @@ typedef struct ngtcp2_pv_entry {
   /* flags is zero or more of NGTCP2_PV_ENTRY_FLAG_*. */
   uint8_t flags;
   /* data is a byte string included in PATH_CHALLENGE. */
-  uint8_t data[8];
+  ngtcp2_path_challenge_data data;
 } ngtcp2_pv_entry;
 
-void ngtcp2_pv_entry_init(ngtcp2_pv_entry *pvent, const uint8_t *data,
+void ngtcp2_pv_entry_init(ngtcp2_pv_entry *pvent,
+                          const ngtcp2_path_challenge_data *data,
                           ngtcp2_tstamp expiry, uint8_t flags);
 
 /* NGTCP2_PV_FLAG_NONE indicates no flag is set. */
-#define NGTCP2_PV_FLAG_NONE 0x00
+#define NGTCP2_PV_FLAG_NONE 0x00U
 /* NGTCP2_PV_FLAG_DONT_CARE indicates that the outcome of path
    validation should be ignored entirely. */
-#define NGTCP2_PV_FLAG_DONT_CARE 0x01
+#define NGTCP2_PV_FLAG_DONT_CARE 0x01U
 /* NGTCP2_PV_FLAG_CANCEL_TIMER indicates that the expiry timer is
    cancelled. */
-#define NGTCP2_PV_FLAG_CANCEL_TIMER 0x02
-/* NGTCP2_PV_FLAG_FALLBACK_ON_FAILURE indicates that fallback DCID is
-   available in ngtcp2_pv.  If path validation fails, fallback to the
-   fallback DCID.  If path validation succeeds, fallback DCID is
-   retired if it does not equal to the current DCID. */
-#define NGTCP2_PV_FLAG_FALLBACK_ON_FAILURE 0x04
-/* NGTCP2_PV_FLAG_MTU_PROBE indicates that a validation must probe
-   least MTU that QUIC requires, which is 1200 bytes.  If it fails, a
-   path is not viable. */
-#define NGTCP2_PV_FLAG_MTU_PROBE 0x08
+#define NGTCP2_PV_FLAG_CANCEL_TIMER 0x02U
+/* NGTCP2_PV_FLAG_FALLBACK_PRESENT indicates that a fallback
+   Destination Connection ID and PTO are available in ngtcp2_pv.  If
+   path validation fails, then fallback to them.  If path validation
+   succeeds, the fallback Destination Connection ID is retired if it
+   is not zero length, and does not equal to the current Destination
+   Connection ID. */
+#define NGTCP2_PV_FLAG_FALLBACK_PRESENT 0x04U
+/* NGTCP2_PV_FLAG_PREFERRED_ADDR indicates that client is migrating to
+   server's preferred address.  This flag is only used by client. */
+#define NGTCP2_PV_FLAG_PREFERRED_ADDR 0x10U
 
 typedef struct ngtcp2_pv ngtcp2_pv;
 
+ngtcp2_static_ringbuf_def(pv_ents, NGTCP2_PV_MAX_ENTRIES,
+                          sizeof(ngtcp2_pv_entry))
 /*
  * ngtcp2_pv is the context of a single path validation.
  */
@@ -95,7 +99,7 @@ struct ngtcp2_pv {
      fallback if this path validation fails. */
   ngtcp2_dcid fallback_dcid;
   /* ents is the ring buffer of ngtcp2_pv_entry */
-  ngtcp2_ringbuf ents;
+  ngtcp2_static_ringbuf_pv_ents ents;
   /* timeout is the duration within which this path validation should
      succeed. */
   ngtcp2_duration timeout;
@@ -138,7 +142,7 @@ void ngtcp2_pv_del(ngtcp2_pv *pv);
  * ngtcp2_pv_add_entry adds new entry with |data|.  |expiry| is the
  * expiry time of the entry.
  */
-void ngtcp2_pv_add_entry(ngtcp2_pv *pv, const uint8_t *data,
+void ngtcp2_pv_add_entry(ngtcp2_pv *pv, const ngtcp2_path_challenge_data *data,
                          ngtcp2_tstamp expiry, uint8_t flags, ngtcp2_tstamp ts);
 
 /*
@@ -161,7 +165,8 @@ int ngtcp2_pv_full(ngtcp2_pv *pv);
  * NGTCP2_ERR_INVALID_ARGUMENT
  *     |pv| does not have an entry which has |data| and |path|
  */
-int ngtcp2_pv_validate(ngtcp2_pv *pv, uint8_t *pflags, const uint8_t *data);
+int ngtcp2_pv_validate(ngtcp2_pv *pv, uint8_t *pflags,
+                       const ngtcp2_path_challenge_data *data);
 
 /*
  * ngtcp2_pv_handle_entry_expiry checks expiry of existing entries.
@@ -190,4 +195,10 @@ ngtcp2_tstamp ngtcp2_pv_next_expiry(ngtcp2_pv *pv);
  */
 void ngtcp2_pv_cancel_expired_timer(ngtcp2_pv *pv, ngtcp2_tstamp ts);
 
-#endif /* NGTCP2_PV_H */
+/*
+ * ngtcp2_pv_set_fallback sets |dcid| and |pto| as fallback.
+ */
+void ngtcp2_pv_set_fallback(ngtcp2_pv *pv, const ngtcp2_dcid *dcid,
+                            ngtcp2_duration pto);
+
+#endif /* !defined(NGTCP2_PV_H) */

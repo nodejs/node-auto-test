@@ -1,12 +1,12 @@
 /**
- * @fileoverview Iterating over arrays should be avoided because it relies on
- *               user-mutable global methods (`Array.prototype[Symbol.iterator]`
- *               and `%ArrayIteratorPrototype%.next`), we should instead use
- *               other alternatives. This file defines a rule that disallow
- *               array destructuring syntax in favor of object destructuring
- *               syntax. Note that you can ignore this rule if you are using
- *               the array destructuring syntax over a safe iterable, or
- *               actually want to iterate over a user-provided object.
+ * @file Iterating over arrays should be avoided because it relies on
+ *   user-mutable global methods (`Array.prototype[Symbol.iterator]`
+ *   and `%ArrayIteratorPrototype%.next`), we should instead use
+ *   other alternatives. This file defines a rule that disallow
+ *   array destructuring syntax in favor of object destructuring
+ *   syntax. Note that you can ignore this rule if you are using
+ *   the array destructuring syntax over a safe iterable, or
+ *   actually want to iterate over a user-provided object.
  * @author aduh95 <duhamelantoine1995@gmail.com>
  */
 'use strict';
@@ -30,7 +30,7 @@ const findComma = (sourceCode, elements, i, start) => {
     element = elements[--i];
   }
   let token = sourceCode.getTokenAfter(
-    element ?? sourceCode.getTokenByRangeStart(start)
+    element ?? sourceCode.getTokenByRangeStart(start),
   );
   for (; i < originalIndex; i++) {
     token = sourceCode.getTokenAfter(token);
@@ -43,7 +43,7 @@ const createFix = (fixer, sourceCode, { range: [start, end], elements }) => [
   ...elements.map((node, i) =>
     (node === null ?
       fixer.remove(findComma(sourceCode, elements, i, start)) :
-      fixer.insertTextBefore(node, i + ':'))
+      fixer.insertTextBefore(node, i + ':')),
   ),
 ];
 const arrayPatternContainsRestOperator = ({ elements }) =>
@@ -56,7 +56,7 @@ module.exports = {
     schema: [],
   },
   create(context) {
-    const sourceCode = context.getSourceCode();
+    const sourceCode = context.sourceCode;
 
     return {
       ArrayPattern(node) {

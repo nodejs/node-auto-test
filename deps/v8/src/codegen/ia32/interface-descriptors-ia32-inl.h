@@ -14,7 +14,26 @@ namespace internal {
 
 constexpr auto CallInterfaceDescriptor::DefaultRegisterArray() {
   auto registers = RegisterArray(eax, ecx, edx, edi);
-  STATIC_ASSERT(registers.size() == kMaxBuiltinRegisterParams);
+  static_assert(registers.size() == kMaxBuiltinRegisterParams);
+  return registers;
+}
+
+constexpr auto CallInterfaceDescriptor::DefaultDoubleRegisterArray() {
+  // xmm7 isn't allocatable.
+  auto registers =
+      DoubleRegisterArray(xmm0, xmm1, xmm2, xmm3, xmm4, xmm5, xmm6);
+  return registers;
+}
+
+constexpr auto CallInterfaceDescriptor::DefaultReturnRegisterArray() {
+  auto registers =
+      RegisterArray(kReturnRegister0, kReturnRegister1, kReturnRegister2);
+  return registers;
+}
+
+constexpr auto CallInterfaceDescriptor::DefaultReturnDoubleRegisterArray() {
+  // Padding to have as many double return registers as GP return registers.
+  auto registers = DoubleRegisterArray(kFPReturnRegister0, no_dreg, no_dreg);
   return registers;
 }
 
@@ -24,8 +43,8 @@ void StaticCallInterfaceDescriptor<DerivedDescriptor>::
     VerifyArgumentRegisterCount(CallInterfaceDescriptorData* data,
                                 int nof_expected_args) {
   RegList allocatable_regs = data->allocatable_registers();
-  if (nof_expected_args >= 1) DCHECK(allocatable_regs | esi.bit());
-  if (nof_expected_args >= 2) DCHECK(allocatable_regs | edi.bit());
+  if (nof_expected_args >= 1) DCHECK(allocatable_regs.has(esi));
+  if (nof_expected_args >= 2) DCHECK(allocatable_regs.has(edi));
   // Additional arguments are passed on the stack.
 }
 #endif  // DEBUG
@@ -33,20 +52,6 @@ void StaticCallInterfaceDescriptor<DerivedDescriptor>::
 // static
 constexpr auto WriteBarrierDescriptor::registers() {
   return RegisterArray(edi, ecx, edx, esi, kReturnRegister0);
-}
-
-// static
-constexpr auto DynamicCheckMapsDescriptor::registers() {
-  STATIC_ASSERT(esi == kContextRegister);
-  STATIC_ASSERT(eax == kReturnRegister0);
-  return RegisterArray(eax, ecx, edx, edi, esi);
-}
-
-// static
-constexpr auto DynamicCheckMapsWithFeedbackVectorDescriptor::registers() {
-  STATIC_ASSERT(esi == kContextRegister);
-  STATIC_ASSERT(eax == kReturnRegister0);
-  return RegisterArray(eax, ecx, edx, edi, esi);
 }
 
 // static
@@ -58,6 +63,51 @@ constexpr Register LoadDescriptor::SlotRegister() { return eax; }
 
 // static
 constexpr Register LoadWithVectorDescriptor::VectorRegister() { return no_reg; }
+
+// static
+constexpr Register KeyedLoadBaselineDescriptor::ReceiverRegister() {
+  return edx;
+}
+// static
+constexpr Register KeyedLoadBaselineDescriptor::NameRegister() {
+  return kInterpreterAccumulatorRegister;
+}
+// static
+constexpr Register KeyedLoadBaselineDescriptor::SlotRegister() { return ecx; }
+
+// static
+constexpr Register KeyedLoadWithVectorDescriptor::VectorRegister() {
+  return no_reg;
+}
+
+// static
+constexpr Register EnumeratedKeyedLoadBaselineDescriptor::EnumIndexRegister() {
+  return ecx;
+}
+
+// static
+constexpr Register EnumeratedKeyedLoadBaselineDescriptor::CacheTypeRegister() {
+  return no_reg;
+}
+
+// static
+constexpr Register EnumeratedKeyedLoadBaselineDescriptor::SlotRegister() {
+  return no_reg;
+}
+
+// static
+constexpr Register KeyedHasICBaselineDescriptor::ReceiverRegister() {
+  return kInterpreterAccumulatorRegister;
+}
+// static
+constexpr Register KeyedHasICBaselineDescriptor::NameRegister() { return edx; }
+// static
+constexpr Register KeyedHasICBaselineDescriptor::SlotRegister() { return ecx; }
+
+// static
+constexpr Register KeyedHasICWithVectorDescriptor::VectorRegister() {
+  return no_reg;
+}
 
 // static
 constexpr Register
@@ -80,12 +130,15 @@ constexpr Register StoreWithVectorDescriptor::VectorRegister() {
 }
 
 // static
+constexpr Register DefineKeyedOwnDescriptor::FlagsRegister() { return no_reg; }
+
+// static
 constexpr Register StoreTransitionDescriptor::MapRegister() { return edi; }
 
 // static
-constexpr Register ApiGetterDescriptor::HolderRegister() { return ecx; }
+constexpr Register CallApiGetterDescriptor::NameRegister() { return edi; }
 // static
-constexpr Register ApiGetterDescriptor::CallbackRegister() { return eax; }
+constexpr Register CallApiGetterDescriptor::CallbackRegister() { return eax; }
 
 // static
 constexpr Register GrowArrayElementsDescriptor::ObjectRegister() { return eax; }
@@ -105,7 +158,7 @@ constexpr Register BaselineLeaveFrameDescriptor::WeightRegister() {
 constexpr Register TypeConversionDescriptor::ArgumentRegister() { return eax; }
 
 // static
-constexpr auto TypeofDescriptor::registers() { return RegisterArray(ecx); }
+constexpr auto TypeofDescriptor::registers() { return RegisterArray(eax); }
 
 // static
 constexpr auto CallTrampolineDescriptor::registers() {
@@ -115,8 +168,24 @@ constexpr auto CallTrampolineDescriptor::registers() {
 }
 
 // static
+constexpr auto CopyDataPropertiesWithExcludedPropertiesDescriptor::registers() {
+  // edi : the source
+  // eax : the excluded property count
+  return RegisterArray(edi, eax);
+}
+
+// static
+constexpr auto
+CopyDataPropertiesWithExcludedPropertiesOnStackDescriptor::registers() {
+  // edi : the source
+  // eax : the excluded property count
+  // ecx : the excluded property base
+  return RegisterArray(edi, eax, ecx);
+}
+
+// static
 constexpr auto CallVarargsDescriptor::registers() {
-  // eax : number of arguments (on the stack, not including receiver)
+  // eax : number of arguments (on the stack)
   // edi : the target to call
   // ecx : arguments list length (untagged)
   // On the stack : arguments list (FixedArray)
@@ -134,13 +203,21 @@ constexpr auto CallForwardVarargsDescriptor::registers() {
 // static
 constexpr auto CallFunctionTemplateDescriptor::registers() {
   // edx : function template info
-  // ecx : number of arguments (on the stack, not including receiver)
+  // ecx : number of arguments (on the stack)
   return RegisterArray(edx, ecx);
 }
 
 // static
+constexpr auto CallFunctionTemplateGenericDescriptor::registers() {
+  // edx: the function template info
+  // ecx: number of arguments (on the stack)
+  // edi: topmost script-having context
+  return RegisterArray(edx, ecx, edi);
+}
+
+// static
 constexpr auto CallWithSpreadDescriptor::registers() {
-  // eax : number of arguments (on the stack, not including receiver)
+  // eax : number of arguments (on the stack)
   // edi : the target to call
   // ecx : the object to spread
   return RegisterArray(edi, eax, ecx);
@@ -155,7 +232,7 @@ constexpr auto CallWithArrayLikeDescriptor::registers() {
 
 // static
 constexpr auto ConstructVarargsDescriptor::registers() {
-  // eax : number of arguments (on the stack, not including receiver)
+  // eax : number of arguments (on the stack)
   // edi : the target to call
   // edx : the new target
   // ecx : arguments list length (untagged)
@@ -174,7 +251,7 @@ constexpr auto ConstructForwardVarargsDescriptor::registers() {
 
 // static
 constexpr auto ConstructWithSpreadDescriptor::registers() {
-  // eax : number of arguments (on the stack, not including receiver)
+  // eax : number of arguments (on the stack)
   // edi : the target to call
   // edx : the new target
   // ecx : the object to spread
@@ -194,9 +271,7 @@ constexpr auto ConstructStubDescriptor::registers() {
   // eax : number of arguments
   // edx : the new target
   // edi : the target to call
-  // ecx : allocation site or undefined
-  // TODO(jgruber): Remove the unused allocation site parameter.
-  return RegisterArray(edi, edx, eax, ecx);
+  return RegisterArray(edi, edx, eax);
 }
 
 // static
@@ -213,6 +288,11 @@ constexpr auto Compare_BaselineDescriptor::registers() {
 }
 
 // static
+constexpr auto Compare_WithEmbeddedFeedbackOffsetDescriptor::registers() {
+  return RegisterArray(edx, eax, ecx);
+}
+
+// static
 constexpr auto BinaryOpDescriptor::registers() {
   return RegisterArray(edx, eax);
 }
@@ -223,11 +303,40 @@ constexpr auto BinaryOp_BaselineDescriptor::registers() {
 }
 
 // static
-constexpr auto ApiCallbackDescriptor::registers() {
-  return RegisterArray(edx,   // kApiFunctionAddress
-                       ecx,   // kArgc
-                       eax,   // kCallData
-                       edi);  // kHolder
+constexpr auto BinarySmiOp_BaselineDescriptor::registers() {
+  return RegisterArray(eax, edx, ecx);
+}
+
+// static
+constexpr Register
+CallApiCallbackOptimizedDescriptor::ApiFunctionAddressRegister() {
+  return eax;
+}
+// static
+constexpr Register
+CallApiCallbackOptimizedDescriptor::ActualArgumentsCountRegister() {
+  return ecx;
+}
+// static
+constexpr Register
+CallApiCallbackOptimizedDescriptor::FunctionTemplateInfoRegister() {
+  return edx;
+}
+
+// static
+constexpr Register
+CallApiCallbackGenericDescriptor::ActualArgumentsCountRegister() {
+  return ecx;
+}
+// static
+constexpr Register
+CallApiCallbackGenericDescriptor::TopmostScriptHavingContextRegister() {
+  return eax;
+}
+// static
+constexpr Register
+CallApiCallbackGenericDescriptor::FunctionTemplateInfoRegister() {
+  return edx;
 }
 
 // static
@@ -239,15 +348,21 @@ constexpr auto InterpreterDispatchDescriptor::registers() {
 
 // static
 constexpr auto InterpreterPushArgsThenCallDescriptor::registers() {
-  return RegisterArray(eax,   // argument count (not including receiver)
+  return RegisterArray(eax,   // argument count
                        ecx,   // address of first argument
                        edi);  // the target callable to be call
 }
 
 // static
 constexpr auto InterpreterPushArgsThenConstructDescriptor::registers() {
-  return RegisterArray(eax,   // argument count (not including receiver)
+  return RegisterArray(eax,   // argument count
                        ecx);  // address of first argument
+}
+
+// static
+constexpr auto ConstructForwardAllArgsDescriptor::registers() {
+  return RegisterArray(edi,   // the constructor
+                       edx);  // the new target
 }
 
 // static
@@ -261,20 +376,10 @@ constexpr auto RunMicrotasksEntryDescriptor::registers() {
   return RegisterArray();
 }
 
-// static
-constexpr auto WasmFloat32ToNumberDescriptor::registers() {
-  // Work around using eax, whose register code is 0, and leads to the FP
-  // parameter being passed via xmm0, which is not allocatable on ia32.
-  return RegisterArray(ecx);
+constexpr auto WasmJSToWasmWrapperDescriptor::registers() {
+  // Arbitrarily picked register.
+  return RegisterArray(edi);
 }
-
-// static
-constexpr auto WasmFloat64ToNumberDescriptor::registers() {
-  // Work around using eax, whose register code is 0, and leads to the FP
-  // parameter being passed via xmm0, which is not allocatable on ia32.
-  return RegisterArray(ecx);
-}
-
 }  // namespace internal
 }  // namespace v8
 

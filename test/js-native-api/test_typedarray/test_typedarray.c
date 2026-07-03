@@ -1,7 +1,8 @@
 #include <js_native_api.h>
-#include <string.h>
 #include <stdlib.h>
+#include <string.h>
 #include "../common.h"
+#include "../entry_point.h"
 
 static napi_value Multiply(napi_env env, napi_callback_info info) {
   size_t argc = 2;
@@ -74,10 +75,9 @@ static napi_value Multiply(napi_env env, napi_callback_info info) {
   return output_array;
 }
 
-static void FinalizeCallback(napi_env env,
+static void FinalizeCallback(node_api_basic_env env,
                              void* finalize_data,
-                             void* finalize_hint)
-{
+                             void* finalize_hint) {
   free(finalize_data);
 }
 

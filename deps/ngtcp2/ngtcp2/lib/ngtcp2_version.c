@@ -24,14 +24,14 @@
  */
 #ifdef HAVE_CONFIG_H
 #  include <config.h>
-#endif /* HAVE_CONFIG_H */
+#endif /* defined(HAVE_CONFIG_H) */
 
 #include <ngtcp2/ngtcp2.h>
 
 static ngtcp2_info version = {NGTCP2_VERSION_AGE, NGTCP2_VERSION_NUM,
                               NGTCP2_VERSION};
 
-ngtcp2_info *ngtcp2_version(int least_version) {
+const ngtcp2_info *ngtcp2_version(int least_version) {
   if (least_version > NGTCP2_VERSION_NUM) {
     return NULL;
   }

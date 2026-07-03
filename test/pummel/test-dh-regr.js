@@ -26,16 +26,17 @@ if (!common.hasCrypto) {
   common.skip('missing crypto');
 }
 
-if (process.config.variables.arm_version === '7') {
-  common.skip('Too slow for armv7 bots');
+if (common.isPi()) {
+  common.skip('Too slow for Raspberry Pi devices');
 }
 
 const assert = require('assert');
 const crypto = require('crypto');
+const { hasOpenSSL3 } = require('../common/crypto');
 
 // FIPS requires length >= 1024 but we use 512/256 in this test to keep it from
 // taking too long and timing out in CI.
-const length = (common.hasFipsCrypto) ? 1024 : common.hasOpenSSL3 ? 512 : 256;
+const length = crypto.getFips() ? 1024 : hasOpenSSL3 ? 512 : 256;
 
 const p = crypto.createDiffieHellman(length).getPrime();
 
@@ -54,6 +55,6 @@ for (let i = 0; i < 2000; i++) {
     bSecret,
     'Secrets should be equal.\n' +
     `aSecret: ${aSecret.toString('base64')}\n` +
-    `bSecret: ${bSecret.toString('base64')}`
+    `bSecret: ${bSecret.toString('base64')}`,
   );
 }

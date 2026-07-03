@@ -5,9 +5,8 @@
 #include "src/base/page-allocator.h"
 
 #include "src/base/platform/platform.h"
-#include "src/base/platform/wrappers.h"
 
-#if V8_OS_MACOSX
+#if V8_OS_DARWIN
 #include <sys/mman.h>  // For MAP_JIT.
 #endif
 
@@ -45,7 +44,7 @@ void* PageAllocator::GetRandomMmapAddr() {
 
 void* PageAllocator::AllocatePages(void* hint, size_t size, size_t alignment,
                                    PageAllocator::Permission access) {
-#if !V8_HAS_PTHREAD_JIT_WRITE_PROTECT
+#if !V8_HAS_PTHREAD_JIT_WRITE_PROTECT && !V8_HAS_BECORE_JIT_WRITE_PROTECT
   // kNoAccessWillJitLater is only used on Apple Silicon. Map it to regular
   // kNoAccess on other platforms, so code doesn't have to handle both enum
   // values.
@@ -132,18 +131,26 @@ void* PageAllocator::RemapShared(void* old_address, void* new_address,
 }
 
 bool PageAllocator::FreePages(void* address, size_t size) {
-  return base::OS::Free(address, size);
+  base::OS::Free(address, size);
+  return true;
 }
 
 bool PageAllocator::ReleasePages(void* address, size_t size, size_t new_size) {
   DCHECK_LT(new_size, size);
-  return base::OS::Release(reinterpret_cast<uint8_t*>(address) + new_size,
-                           size - new_size);
+  base::OS::Release(reinterpret_cast<uint8_t*>(address) + new_size,
+                    size - new_size);
+  return true;
 }
 
 bool PageAllocator::SetPermissions(void* address, size_t size,
                                    PageAllocator::Permission access) {
   return base::OS::SetPermissions(
+      address, size, static_cast<base::OS::MemoryPermission>(access));
+}
+
+bool PageAllocator::RecommitPages(void* address, size_t size,
+                                  PageAllocator::Permission access) {
+  return base::OS::RecommitPages(
       address, size, static_cast<base::OS::MemoryPermission>(access));
 }
 
@@ -153,6 +160,10 @@ bool PageAllocator::DiscardSystemPages(void* address, size_t size) {
 
 bool PageAllocator::DecommitPages(void* address, size_t size) {
   return base::OS::DecommitPages(address, size);
+}
+
+bool PageAllocator::SealPages(void* address, size_t size) {
+  return base::OS::SealPages(address, size);
 }
 
 }  // namespace base

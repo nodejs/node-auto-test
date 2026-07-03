@@ -4,6 +4,8 @@
 #              | (_|_____| (_| | | |  __/\__ \
 #               \___|     \__,_|_|  \___||___/
 #
+# Copyright (C) The c-ares project and its contributors
+# SPDX-License-Identifier: MIT
 prefix=@CMAKE_INSTALL_PREFIX@
 exec_prefix=${prefix}/@CMAKE_INSTALL_BINDIR@
 libdir=${prefix}/@CMAKE_INSTALL_LIBDIR@
@@ -15,6 +17,7 @@ Description: asynchronous DNS lookup library
 Version: @CARES_VERSION@
 Requires: 
 Requires.private: 
-Cflags: -I${includedir} @CPPFLAG_CARES_STATICLIB@
+Cflags: -I${includedir}
+Cflags.private: -DCARES_STATICLIB
 Libs: -L${libdir} -lcares
 Libs.private: @CARES_PRIVATE_LIBS@

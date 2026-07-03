@@ -2,8 +2,6 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --experimental-wasm-threads
-
 (function TestPostMessageUnsharedMemory() {
   let worker = new Worker('', {type: 'string'});
   let memory = new WebAssembly.Memory({initial: 1, maximum: 2});
@@ -15,7 +13,13 @@
   let worker = new Worker('', {type: 'string'});
   let memory = new WebAssembly.Memory({initial: 1, maximum: 2});
 
-  assertThrows(() => worker.postMessage(memory.buffer), Error);
+  worker.postMessage(memory.buffer);
+  assertThrows(() => {
+    worker.postMessage(memory.buffer, [memory.buffer])
+  }, Error)
+  assertThrows(() => {
+    worker.postMessage(undefined, [memory.buffer])
+  }, Error)
 })();
 
 // Can't use assert in a worker.
@@ -44,7 +48,7 @@ let workerHelpers = "(" + workerHelpersHelper.toString() + ")()";
 (function TestPostMessageSharedMemory() {
   function workerCode(workerHelpers) {
     eval(workerHelpers);
-    onmessage = function(memory) {
+    onmessage = function({data:memory}) {
       assertIsWasmMemory(memory, 65536);
       postMessage("OK");
     };
@@ -61,7 +65,7 @@ let workerHelpers = "(" + workerHelpersHelper.toString() + ")()";
 (function TestPostMessageComplexObjectWithSharedMemory() {
   function workerCode(workerHelpers) {
     eval(workerHelpers);
-    onmessage = function(obj) {
+    onmessage = function({data:obj}) {
        assertIsWasmMemory(obj.memories[0], 65536);
        assertIsWasmMemory(obj.memories[1], 65536);
        assertTrue(obj.buffer instanceof SharedArrayBuffer,
@@ -86,7 +90,7 @@ let workerHelpers = "(" + workerHelpersHelper.toString() + ")()";
 (function TestTwoWorkers() {
   function workerCode(workerHelpers) {
     eval(workerHelpers);
-    onmessage = function(memory) {
+    onmessage = function({data:memory}) {
        assertIsWasmMemory(memory, 65536);
        postMessage("OK");
     };

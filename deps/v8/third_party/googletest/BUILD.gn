@@ -51,6 +51,7 @@ config("gmock_config") {
 source_set("gtest") {
   testonly = true
   sources = [
+    "src/googletest/include/gtest/gtest-assertion-result.h",
     "src/googletest/include/gtest/gtest-death-test.h",
     "src/googletest/include/gtest/gtest-matchers.h",
     "src/googletest/include/gtest/gtest-message.h",
@@ -70,6 +71,7 @@ source_set("gtest") {
     "src/googletest/include/gtest/internal/gtest-type-util.h",
 
     #"src/googletest/src/gtest-all.cc",  # Not needed by our build.
+    "src/googletest/src/gtest-assertion-result.cc",
     "src/googletest/src/gtest-death-test.cc",
     "src/googletest/src/gtest-filepath.cc",
     "src/googletest/src/gtest-internal-inl.h",
@@ -92,8 +94,7 @@ source_set("gtest") {
   # V8-only workaround for http://crbug.com/chromium/1191946. Ensures that
   # googletest is compiled with the same visibility such as the rest of V8, see
   # https://source.chromium.org/chromium/chromium/src/+/master:v8/gni/v8.gni
-  if ((is_posix || is_fuchsia) &&
-      (v8_enable_backtrace || v8_monolithic || v8_expose_symbols)) {
+  if ((is_posix || is_fuchsia) && (v8_enable_backtrace || v8_monolithic)) {
     configs -= [ "//build/config/gcc:symbol_visibility_hidden" ]
     configs += [ "//build/config/gcc:symbol_visibility_default" ]
   }
@@ -145,8 +146,7 @@ source_set("gmock") {
   # V8-only workaround for http://crbug.com/chromium/1191946. Ensures that
   # googletest is compiled with the same visibility such as the rest of V8, see
   # https://source.chromium.org/chromium/chromium/src/+/master:v8/gni/v8.gni
-  if ((is_posix || is_fuchsia) &&
-      (v8_enable_backtrace || v8_monolithic || v8_expose_symbols)) {
+  if ((is_posix || is_fuchsia) && (v8_enable_backtrace || v8_monolithic)) {
     configs -= [ "//build/config/gcc:symbol_visibility_hidden" ]
     configs += [ "//build/config/gcc:symbol_visibility_default" ]
   }

@@ -29,11 +29,15 @@ struct ScriptDetails {
   int column_offset;
   MaybeHandle<Object> name_obj;
   MaybeHandle<Object> source_map_url;
-  MaybeHandle<FixedArray> host_defined_options;
+  MaybeHandle<Object> host_defined_options;
+  MaybeHandle<FixedArray> wrapped_arguments;
   REPLMode repl_mode;
   const ScriptOriginOptions origin_options;
 };
 
+void SetScriptFieldsFromDetails(Isolate* isolate, Tagged<Script> script,
+                                const ScriptDetails& script_details,
+                                DisallowGarbageCollection* no_gc);
 }  // namespace internal
 }  // namespace v8
 

@@ -48,15 +48,15 @@ my $makefile = $is_win ? "../config/Makefile_$arch": "Makefile";
 # Generate arch dependent header files with Makefile
 my $buildinf = "crypto/buildinf.h";
 my $progs = "apps/progs.h";
-my $prov_headers = "providers/common/include/prov/der_dsa.h providers/common/include/prov/der_wrap.h providers/common/include/prov/der_rsa.h providers/common/include/prov/der_ecx.h providers/common/include/prov/der_sm2.h providers/common/include/prov/der_ec.h providers/common/include/prov/der_digests.h";
+my $prov_headers = "providers/common/include/prov/der_dsa.h providers/common/include/prov/der_ml_dsa.h providers/common/include/prov/der_slh_dsa.h providers/common/include/prov/der_wrap.h providers/common/include/prov/der_rsa.h providers/common/include/prov/der_ecx.h providers/common/include/prov/der_sm2.h providers/common/include/prov/der_ec.h providers/common/include/prov/der_digests.h";
 my $fips_ld = ($arch =~ m/linux/ ? "providers/fips.ld" : "");
 my $cmd1 = "cd ../openssl; make -f $makefile clean build_generated $buildinf $progs $prov_headers $fips_ld;";
 system($cmd1) == 0 or die "Error in system($cmd1)";
 
 # Copy and move all arch dependent header files into config/archs
 make_path("$base_dir/crypto/include/internal", "$base_dir/include/openssl",
-	  "$base_dir/include/crypto", "$base_dir/providers/common/include/prov",
-	  "$base_dir/apps",
+	  "$base_dir/include/crypto", "$base_dir/include/internal",
+	  "$base_dir/providers/common/include/prov", "$base_dir/apps",
           {
            error => \my $make_path_err});
 if (@$make_path_err) {
@@ -73,6 +73,9 @@ copy_headers(@openssl_dir_headers, 'openssl');
 my @crypto_dir_headers = shift @ARGV;
 copy_headers(@crypto_dir_headers, 'crypto');
 
+my @internal_dir_headers = shift @ARGV;
+copy_headers(@internal_dir_headers, 'internal');
+
 move("$src_dir/include/crypto/bn_conf.h",
      "$base_dir/include/crypto/bn_conf.h") or die "Move failed: $!";
 move("$src_dir/include/crypto/dso_conf.h",
@@ -85,7 +88,14 @@ move("$src_dir/$progs",
 copy("$src_dir/apps/progs.c",
      "$base_dir/apps") or die "Copy failed: $!";
 
+move("$src_dir/include/internal/param_names.h",
+     "$base_dir/include/internal/param_names.h") or die "Move failed: $!";
+
 copy("$src_dir/providers/common/include/prov/der_dsa.h",
+     "$base_dir/providers/common/include/prov/") or die "Copy failed: $!";
+copy("$src_dir/providers/common/include/prov/der_ml_dsa.h",
+     "$base_dir/providers/common/include/prov/") or die "Copy failed: $!";
+copy("$src_dir/providers/common/include/prov/der_slh_dsa.h",
      "$base_dir/providers/common/include/prov/") or die "Copy failed: $!";
 copy("$src_dir/providers/common/include/prov/der_wrap.h",
      "$base_dir/providers/common/include/prov/") or die "Copy failed: $!";
@@ -102,7 +112,7 @@ copy("$src_dir/providers/common/include/prov/der_digests.h",
 
 my $linker_script_dir = "<(PRODUCT_DIR)/../../deps/openssl/config/archs/$arch/$asm/providers";
 my $fips_linker_script = "";
-if ($fips_ld ne "") {
+if ($fips_ld ne "" and not $is_win) {
   $fips_linker_script = "$linker_script_dir/fips.ld";
   copy("$src_dir/providers/fips.ld",
        "$base_dir/providers/fips.ld") or die "Copy failed: $!";
@@ -195,7 +205,7 @@ foreach my $obj (@{$unified_info{sources}->{'providers/liblegacy.a'}}) {
 }
 
 foreach my $obj (@{$unified_info{sources}->{'providers/legacy'}}) {
-  if ($obj eq 'providers/legacy.ld') {
+  if ($obj eq 'providers/legacy.ld' and not $is_win) {
     push(@generated_srcs, $obj);
   } else {
     my $src = ${$unified_info{sources}->{$obj}}[0];
@@ -238,7 +248,7 @@ foreach my $obj (@{$unified_info{sources}->{'providers/libcommon.a'}}) {
 }
 
 foreach my $obj (@{$unified_info{sources}->{'providers/fips'}}) {
-  if ($obj eq 'providers/fips.ld') {
+  if ($obj eq 'providers/fips.ld' and not $is_win) {
     push(@generated_srcs, $obj);
   } else {
     my $src = ${$unified_info{sources}->{$obj}}[0];
@@ -275,6 +285,21 @@ foreach my $src (@generated_srcs) {
 $target{'lib_cppflags'} =~ s/-D//g;
 my @lib_cppflags = split(/ /, $target{'lib_cppflags'});
 
+# Strip library flags for deps provided via GYP dependencies.
+# zlib, brotli, and zstd are bundled in deps/ with proper GYP targets,
+# so we must not link against system shared libraries.
+$target{ex_libs} =~ s/-l(?:z|brotlienc|brotlidec|brotlicommon|zstd)\b//g;
+$target{ex_libs} =~ s/\s+/ /g;
+$target{ex_libs} =~ s/^\s+|\s+$//g;
+
+# Filter out bare ZLIB/BROTLI/ZSTD defines added by Configure for compression
+# support. These are internal to OpenSSL and clash with identifiers in
+# Node.js source (e.g. ZLIB in async_wrap.h) when propagated via
+# direct_dependent_settings. They are kept in the main defines for OpenSSL's
+# own compilation but excluded from the exported defines.
+my @config_defines_exported = grep { $_ !~ /^(?:ZLIB|BROTLI|ZSTD)$/ } @{$config{defines}};
+my @target_defines_exported = grep { $_ !~ /^(?:ZLIB|BROTLI|ZSTD)$/ } @{$target{defines}};
+
 my @cflags = ();
 push(@cflags, @{$config{'cflags'}});
 push(@cflags, @{$config{'CFLAGS'}});
@@ -305,6 +330,8 @@ my $gypi = $template->fill_in(
         arch => \$arch,
         lib_cppflags => \@lib_cppflags,
         is_win => \$is_win,
+        config_defines_exported => \@config_defines_exported,
+        target_defines_exported => \@target_defines_exported,
     });
 
 open(GYPI, "> ./archs/$arch/$asm/openssl.gypi");
@@ -363,7 +390,7 @@ close(CLGYPI);
 
 # Clean Up
 my $cmd2 ="cd $src_dir; make -f $makefile clean; make -f $makefile distclean;" .
-    "git clean -f $src_dir/crypto";
+    "git clean -f $src_dir";
 system($cmd2) == 0 or die "Error in system($cmd2)";
 
 

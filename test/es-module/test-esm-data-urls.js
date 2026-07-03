@@ -1,6 +1,6 @@
-// Flags: --experimental-json-modules
 'use strict';
 const common = require('../common');
+const fixtures = require('../common/fixtures');
 const assert = require('assert');
 function createURL(mime, body) {
   return `data:${mime},${body}`;
@@ -60,52 +60,55 @@ function createBase64URL(mime, body) {
   }
   {
     const ns = await import('data:application/json;foo="test,"this"',
-      { assert: { type: 'json' } });
+      { with: { type: 'json' } });
     assert.deepStrictEqual(Object.keys(ns), ['default']);
     assert.strictEqual(ns.default, 'this');
   }
   {
     const ns = await import(`data:application/json;foo=${
       encodeURIComponent('test,')
-    },0`, { assert: { type: 'json' } });
+    },0`, { with: { type: 'json' } });
     assert.deepStrictEqual(Object.keys(ns), ['default']);
     assert.strictEqual(ns.default, 0);
   }
   {
     await assert.rejects(async () =>
       import('data:application/json;foo="test,",0',
-        { assert: { type: 'json' } }), {
+        { with: { type: 'json' } }), {
       name: 'SyntaxError',
-      message: /Unexpected end of JSON input/
+      message: /Unterminated string in JSON at position 3/,
     });
   }
   {
     const body = '{"x": 1}';
     const plainESMURL = createURL('application/json', body);
-    const ns = await import(plainESMURL, { assert: { type: 'json' } });
+    const ns = await import(plainESMURL, { with: { type: 'json' } });
     assert.deepStrictEqual(Object.keys(ns), ['default']);
     assert.strictEqual(ns.default.x, 1);
   }
   {
     const body = '{"default": 2}';
     const plainESMURL = createURL('application/json', body);
-    const ns = await import(plainESMURL, { assert: { type: 'json' } });
+    const ns = await import(plainESMURL, { with: { type: 'json' } });
     assert.deepStrictEqual(Object.keys(ns), ['default']);
     assert.strictEqual(ns.default.default, 2);
   }
   {
     const body = 'null';
     const plainESMURL = createURL('invalid', body);
-    try {
-      await import(plainESMURL);
-      common.mustNotCall()();
-    } catch (e) {
-      assert.strictEqual(e.code, 'ERR_INVALID_URL');
-    }
+    await assert.rejects(import(plainESMURL), { code: 'ERR_UNKNOWN_MODULE_FORMAT' });
   }
   {
     const plainESMURL = 'data:text/javascript,export%20default%202';
     const module = await import(plainESMURL);
     assert.strictEqual(module.default, 2);
+  }
+  {
+    const plainESMURL = `data:text/javascript,${encodeURIComponent(`import ${JSON.stringify(fixtures.fileURL('es-module-url', 'empty.js'))}`)}`;
+    await import(plainESMURL);
+  }
+  {
+    const plainESMURL = 'data:text/javascript,var x = "hello world?"';
+    await import(plainESMURL);
   }
 })().then(common.mustCall());

@@ -2,7 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --allow-natives-syntax --opt --no-always-opt
+// Flags: --allow-natives-syntax --turbofan
+// Flags: --turboshaft-enable-debug-features
 
 var expect_interpreted = true;
 
@@ -55,5 +56,5 @@ var g = new G;
 foo();
 foo();
 expect_interpreted = false;
-%OptimizeFunctionForTopTier(foo);
+%OptimizeFunctionOnNextCall(foo);
 foo();

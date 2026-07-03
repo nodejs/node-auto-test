@@ -6,20 +6,21 @@
 
 <!-- source_link=lib/cluster.js -->
 
-A single instance of Node.js runs in a single thread. To take advantage of
-multi-core systems, the user will sometimes want to launch a cluster of Node.js
-processes to handle the load.
+Clusters of Node.js processes can be used to run multiple instances of Node.js
+that can distribute workloads among their application threads. When process
+isolation is not needed, use the [`worker_threads`][] module instead, which
+allows running multiple application threads within a single Node.js instance.
 
 The cluster module allows easy creation of child processes that all share
 server ports.
 
 ```mjs
-import cluster from 'cluster';
-import http from 'http';
-import { cpus } from 'os';
-import process from 'process';
+import cluster from 'node:cluster';
+import http from 'node:http';
+import { availableParallelism } from 'node:os';
+import process from 'node:process';
 
-const numCPUs = cpus().length;
+const numCPUs = availableParallelism();
 
 if (cluster.isPrimary) {
   console.log(`Primary ${process.pid} is running`);
@@ -45,10 +46,9 @@ if (cluster.isPrimary) {
 ```
 
 ```cjs
-const cluster = require('cluster');
-const http = require('http');
-const numCPUs = require('os').cpus().length;
-const process = require('process');
+const cluster = require('node:cluster');
+const http = require('node:http');
+const numCPUs = require('node:os').availableParallelism();
 
 if (cluster.isPrimary) {
   console.log(`Primary ${process.pid} is running`);
@@ -97,7 +97,7 @@ handles back and forth.
 The cluster module supports two methods of distributing incoming
 connections.
 
-The first one (and the default one on all platforms except Windows),
+The first one (and the default one on all platforms except Windows)
 is the round-robin approach, where the primary process listens on a
 port, accepts new connections and distributes them across the workers
 in a round-robin fashion, with some built-in smarts to avoid
@@ -130,7 +130,7 @@ Node.js process and a cluster worker differs:
    port is random the first time, but predictable thereafter. To listen
    on a unique port, generate a port number based on the cluster worker ID.
 
-Node.js does not provide routing logic. It is, therefore important to design an
+Node.js does not provide routing logic. It is therefore important to design an
 application such that it does not rely too heavily on in-memory data objects for
 things like sessions and login.
 
@@ -142,7 +142,7 @@ will be dropped and new connections will be refused. Node.js does not
 automatically manage the number of workers, however. It is the application's
 responsibility to manage the worker pool based on its own needs.
 
-Although a primary use case for the `cluster` module is networking, it can
+Although a primary use case for the `node:cluster` module is networking, it can
 also be used for other use cases requiring worker processes.
 
 ## Class: `Worker`
@@ -194,33 +194,37 @@ added: v0.11.2
 Similar to the `cluster.on('exit')` event, but specific to this worker.
 
 ```mjs
-import cluster from 'cluster';
+import cluster from 'node:cluster';
 
-const worker = cluster.fork();
-worker.on('exit', (code, signal) => {
-  if (signal) {
-    console.log(`worker was killed by signal: ${signal}`);
-  } else if (code !== 0) {
-    console.log(`worker exited with error code: ${code}`);
-  } else {
-    console.log('worker success!');
-  }
-});
+if (cluster.isPrimary) {
+  const worker = cluster.fork();
+  worker.on('exit', (code, signal) => {
+    if (signal) {
+      console.log(`worker was killed by signal: ${signal}`);
+    } else if (code !== 0) {
+      console.log(`worker exited with error code: ${code}`);
+    } else {
+      console.log('worker success!');
+    }
+  });
+}
 ```
 
 ```cjs
-const cluster = require('cluster');
+const cluster = require('node:cluster');
 
-const worker = cluster.fork();
-worker.on('exit', (code, signal) => {
-  if (signal) {
-    console.log(`worker was killed by signal: ${signal}`);
-  } else if (code !== 0) {
-    console.log(`worker exited with error code: ${code}`);
-  } else {
-    console.log('worker success!');
-  }
-});
+if (cluster.isPrimary) {
+  const worker = cluster.fork();
+  worker.on('exit', (code, signal) => {
+    if (signal) {
+      console.log(`worker was killed by signal: ${signal}`);
+    } else if (code !== 0) {
+      console.log(`worker exited with error code: ${code}`);
+    } else {
+      console.log('worker success!');
+    }
+  });
+}
 ```
 
 ### Event: `'listening'`
@@ -234,16 +238,12 @@ added: v0.7.0
 Similar to the `cluster.on('listening')` event, but specific to this worker.
 
 ```mjs
-import cluster from 'cluster';
-
 cluster.fork().on('listening', (address) => {
   // Worker is listening
 });
 ```
 
 ```cjs
-const cluster = require('cluster');
-
 cluster.fork().on('listening', (address) => {
   // Worker is listening
 });
@@ -270,10 +270,10 @@ Here is an example using the message system. It keeps a count in the primary
 process of the number of HTTP requests received by the workers:
 
 ```mjs
-import cluster from 'cluster';
-import http from 'http';
-import { cpus } from 'os';
-import process from 'process';
+import cluster from 'node:cluster';
+import http from 'node:http';
+import { availableParallelism } from 'node:os';
+import process from 'node:process';
 
 if (cluster.isPrimary) {
 
@@ -291,7 +291,7 @@ if (cluster.isPrimary) {
   }
 
   // Start workers and listen for messages containing notifyRequest
-  const numCPUs = cpus().length;
+  const numCPUs = availableParallelism();
   for (let i = 0; i < numCPUs; i++) {
     cluster.fork();
   }
@@ -314,9 +314,9 @@ if (cluster.isPrimary) {
 ```
 
 ```cjs
-const cluster = require('cluster');
-const http = require('http');
-const process = require('process');
+const cluster = require('node:cluster');
+const http = require('node:http');
+const numCPUs = require('node:os').availableParallelism();
 
 if (cluster.isPrimary) {
 
@@ -334,7 +334,6 @@ if (cluster.isPrimary) {
   }
 
   // Start workers and listen for messages containing notifyRequest
-  const numCPUs = require('os').cpus().length;
   for (let i = 0; i < numCPUs; i++) {
     cluster.fork();
   }
@@ -428,7 +427,7 @@ if (cluster.isPrimary) {
   });
 
 } else if (cluster.isWorker) {
-  const net = require('net');
+  const net = require('node:net');
   const server = net.createServer((socket) => {
     // Connections never end
   });
@@ -449,10 +448,10 @@ if (cluster.isPrimary) {
 added: v6.0.0
 -->
 
-* {boolean}
+* Type: {boolean}
 
-This property is `true` if the worker exited due to `.kill()` or
-`.disconnect()`. If the worker exited any other way, it is `false`. If the
+This property is `true` if the worker exited due to `.disconnect()`.
+If the worker exited any other way, it is `false`. If the
 worker has not exited, it is `undefined`.
 
 The boolean [`worker.exitedAfterDisconnect`][] allows distinguishing between
@@ -476,7 +475,7 @@ worker.kill();
 added: v0.8.0
 -->
 
-* {number}
+* Type: {integer}
 
 Each new worker is given its own unique id, this id is stored in the
 `id`.
@@ -504,12 +503,12 @@ This function returns `true` if the worker's process has terminated (either
 because of exiting or being signaled). Otherwise, it returns `false`.
 
 ```mjs
-import cluster from 'cluster';
-import http from 'http';
-import { cpus } from 'os';
-import process from 'process';
+import cluster from 'node:cluster';
+import http from 'node:http';
+import { availableParallelism } from 'node:os';
+import process from 'node:process';
 
-const numCPUs = cpus().length;
+const numCPUs = availableParallelism();
 
 if (cluster.isPrimary) {
   console.log(`Primary ${process.pid} is running`);
@@ -537,10 +536,9 @@ if (cluster.isPrimary) {
 ```
 
 ```cjs
-const cluster = require('cluster');
-const http = require('http');
-const numCPUs = require('os').cpus().length;
-const process = require('process');
+const cluster = require('node:cluster');
+const http = require('node:http');
+const numCPUs = require('node:os').availableParallelism();
 
 if (cluster.isPrimary) {
   console.log(`Primary ${process.pid} is running`);
@@ -576,19 +574,14 @@ added: v0.9.12
 * `signal` {string} Name of the kill signal to send to the worker
   process. **Default:** `'SIGTERM'`
 
-This function will kill the worker. In the primary, it does this
-by disconnecting the `worker.process`, and once disconnected, killing
-with `signal`. In the worker, it does it by disconnecting the channel,
-and then exiting with code `0`.
+This function will kill the worker. In the primary worker, it does this by
+disconnecting the `worker.process`, and once disconnected, killing with
+`signal`. In the worker, it does it by killing the process with `signal`.
 
-Because `kill()` attempts to gracefully disconnect the worker process, it is
-susceptible to waiting indefinitely for the disconnect to complete. For example,
-if the worker enters an infinite loop, a graceful disconnect will never occur.
-If the graceful disconnect behavior is not needed, use `worker.process.kill()`.
+The `kill()` function kills the worker process without waiting for a graceful
+disconnect, it has the same behavior as `worker.process.kill()`.
 
-Causes `.exitedAfterDisconnect` to be set.
-
-This method is aliased as `worker.destroy()` for backward compatibility.
+This method is aliased as `worker.destroy()` for backwards compatibility.
 
 In a worker, `process.kill()` exists, but it is not this function;
 it is [`kill()`][].
@@ -599,7 +592,7 @@ it is [`kill()`][].
 added: v0.7.0
 -->
 
-* {ChildProcess}
+* Type: {ChildProcess}
 
 All workers are created using [`child_process.fork()`][], the returned object
 from this function is stored as `.process`. In a worker, the global `process`
@@ -634,10 +627,10 @@ changes:
 
 Send a message to a worker or primary, optionally with a handle.
 
-In the primary this sends a message to a specific worker. It is identical to
+In the primary, this sends a message to a specific worker. It is identical to
 [`ChildProcess.send()`][].
 
-In a worker this sends a message to the primary. It is identical to
+In a worker, this sends a message to the primary. It is identical to
 `process.send()`.
 
 This example will echo back all messages from the primary:
@@ -740,12 +733,12 @@ added: v0.7.0
 * `address` {Object}
 
 After calling `listen()` from a worker, when the `'listening'` event is emitted
-on the server a `'listening'` event will also be emitted on `cluster` in the
+on the server, a `'listening'` event will also be emitted on `cluster` in the
 primary.
 
 The event handler is executed with two arguments, the `worker` contains the
 worker object and the `address` object contains the following connection
-properties: `address`, `port` and `addressType`. This is very useful if the
+properties: `address`, `port`, and `addressType`. This is very useful if the
 worker is listening on more than one address.
 
 ```js
@@ -760,7 +753,7 @@ The `addressType` is one of:
 * `4` (TCPv4)
 * `6` (TCPv6)
 * `-1` (Unix domain socket)
-* `'udp4'` or `'udp6'` (UDP v4 or v6)
+* `'udp4'` or `'udp6'` (UDPv4 or UDPv6)
 
 ## Event: `'message'`
 
@@ -854,8 +847,9 @@ added: v0.8.1
 deprecated: v16.0.0
 -->
 
+> Stability: 0 - Deprecated
+
 Deprecated alias for [`cluster.isPrimary`][].
-details.
 
 ## `cluster.isPrimary`
 
@@ -863,7 +857,7 @@ details.
 added: v16.0.0
 -->
 
-* {boolean}
+* Type: {boolean}
 
 True if the process is a primary. This is determined
 by the `process.env.NODE_UNIQUE_ID`. If `process.env.NODE_UNIQUE_ID` is
@@ -875,7 +869,7 @@ undefined, then `isPrimary` is `true`.
 added: v0.6.0
 -->
 
-* {boolean}
+* Type: {boolean}
 
 True if the process is not a primary (it is the negation of `cluster.isPrimary`).
 
@@ -922,7 +916,7 @@ changes:
     description: The `stdio` option is supported now.
 -->
 
-* {Object}
+* Type: {Object}
   * `execArgv` {string\[]} List of string arguments passed to the Node.js
     executable. **Default:** `process.execArgv`.
   * `exec` {string} File path to worker file. **Default:** `process.argv[1]`.
@@ -938,7 +932,8 @@ changes:
     **Default:** `false`.
   * `stdio` {Array} Configures the stdio of forked processes. Because the
     cluster module relies on IPC to function, this configuration must contain an
-    `'ipc'` entry. When this option is provided, it overrides `silent`.
+    `'ipc'` entry. When this option is provided, it overrides `silent`. See
+    [`child_process.spawn()`][]'s [`stdio`][].
   * `uid` {number} Sets the user identity of the process. (See setuid(2).)
   * `gid` {number} Sets the group identity of the process. (See setgid(2).)
   * `inspectPort` {number|Function} Sets inspector port of worker.
@@ -964,6 +959,8 @@ changes:
     description: The `stdio` option is supported now.
 -->
 
+> Stability: 0 - Deprecated
+
 Deprecated alias for [`.setupPrimary()`][].
 
 ## `cluster.setupPrimary([settings])`
@@ -987,33 +984,33 @@ The defaults above apply to the first call only; the defaults for later
 calls are the current values at the time of `cluster.setupPrimary()` is called.
 
 ```mjs
-import cluster from 'cluster';
+import cluster from 'node:cluster';
 
 cluster.setupPrimary({
   exec: 'worker.js',
   args: ['--use', 'https'],
-  silent: true
+  silent: true,
 });
 cluster.fork(); // https worker
 cluster.setupPrimary({
   exec: 'worker.js',
-  args: ['--use', 'http']
+  args: ['--use', 'http'],
 });
 cluster.fork(); // http worker
 ```
 
 ```cjs
-const cluster = require('cluster');
+const cluster = require('node:cluster');
 
 cluster.setupPrimary({
   exec: 'worker.js',
   args: ['--use', 'https'],
-  silent: true
+  silent: true,
 });
 cluster.fork(); // https worker
 cluster.setupPrimary({
   exec: 'worker.js',
-  args: ['--use', 'http']
+  args: ['--use', 'http'],
 });
 cluster.fork(); // http worker
 ```
@@ -1026,12 +1023,12 @@ This can only be called from the primary process.
 added: v0.7.0
 -->
 
-* {Object}
+* Type: {Object}
 
 A reference to the current worker object. Not available in the primary process.
 
 ```mjs
-import cluster from 'cluster';
+import cluster from 'node:cluster';
 
 if (cluster.isPrimary) {
   console.log('I am primary');
@@ -1043,7 +1040,7 @@ if (cluster.isPrimary) {
 ```
 
 ```cjs
-const cluster = require('cluster');
+const cluster = require('node:cluster');
 
 if (cluster.isPrimary) {
   console.log('I am primary');
@@ -1060,51 +1057,31 @@ if (cluster.isPrimary) {
 added: v0.7.0
 -->
 
-* {Object}
+* Type: {Object}
 
-A hash that stores the active worker objects, keyed by `id` field. Makes it
+A hash that stores the active worker objects, keyed by `id` field. This makes it
 easy to loop through all the workers. It is only available in the primary
 process.
 
 A worker is removed from `cluster.workers` after the worker has disconnected
 _and_ exited. The order between these two events cannot be determined in
 advance. However, it is guaranteed that the removal from the `cluster.workers`
-list happens before last `'disconnect'` or `'exit'` event is emitted.
+list happens before the last `'disconnect'` or `'exit'` event is emitted.
 
 ```mjs
-import cluster from 'cluster';
+import cluster from 'node:cluster';
 
-// Go through all workers
-function eachWorker(callback) {
-  for (const id in cluster.workers) {
-    callback(cluster.workers[id]);
-  }
-}
-eachWorker((worker) => {
+for (const worker of Object.values(cluster.workers)) {
   worker.send('big announcement to all workers');
-});
+}
 ```
 
 ```cjs
-const cluster = require('cluster');
+const cluster = require('node:cluster');
 
-// Go through all workers
-function eachWorker(callback) {
-  for (const id in cluster.workers) {
-    callback(cluster.workers[id]);
-  }
-}
-eachWorker((worker) => {
+for (const worker of Object.values(cluster.workers)) {
   worker.send('big announcement to all workers');
-});
-```
-
-Using the worker's unique id is the easiest way to locate the worker.
-
-```js
-socket.on('data', (id) => {
-  const worker = cluster.workers[id];
-});
+}
 ```
 
 [Advanced serialization for `child_process`]: child_process.md#advanced-serialization
@@ -1113,6 +1090,7 @@ socket.on('data', (id) => {
 [`.setupPrimary()`]: #clustersetupprimarysettings
 [`ChildProcess.send()`]: child_process.md#subprocesssendmessage-sendhandle-options-callback
 [`child_process.fork()`]: child_process.md#child_processforkmodulepath-args-options
+[`child_process.spawn()`]: child_process.md#child_processspawncommand-args-options
 [`child_process` event: `'exit'`]: child_process.md#event-exit
 [`child_process` event: `'message'`]: child_process.md#event-message
 [`cluster.isPrimary`]: #clusterisprimary
@@ -1121,4 +1099,6 @@ socket.on('data', (id) => {
 [`kill()`]: process.md#processkillpid-signal
 [`process` event: `'message'`]: process.md#event-message
 [`server.close()`]: net.md#event-close
+[`stdio`]: child_process.md#optionsstdio
 [`worker.exitedAfterDisconnect`]: #workerexitedafterdisconnect
+[`worker_threads`]: worker_threads.md

@@ -2,6 +2,15 @@ declare namespace InternalHttpParserBinding {
   type Buffer = Uint8Array;
   type Stream = object;
 
+  class ConnectionsList {
+    constructor();
+
+    all(): HTTPParser[];
+    idle(): HTTPParser[];
+    active(): HTTPParser[];
+    expired(): HTTPParser[];
+  }
+
   class HTTPParser {
     static REQUEST: 1;
     static RESPONSE: 2;
@@ -18,10 +27,18 @@ declare namespace InternalHttpParserBinding {
     static kLenientHeaders: number;
     static kLenientChunkedLength: number;
     static kLenientKeepAlive: number;
+    static kLenientTransferEncoding: number;
+    static kLenientVersion: number;
+    static kLenientDataAfterClose: number;
+    static kLenientOptionalLFAfterCR: number;
+    static kLenientOptionalCRLFAfterChunk: number;
+    static kLenientOptionalCRBeforeLF: number;
+    static kLenientSpacesAfterChunkSize: number;
     static kLenientAll: number;
 
     close(): void;
     free(): void;
+    remove(): void;
     execute(buffer: Buffer): Error | Buffer;
     finish(): Error | Buffer;
     initialize(
@@ -39,7 +56,9 @@ declare namespace InternalHttpParserBinding {
   }
 }
 
-declare function InternalBinding(binding: 'http_parser'): {
-  methods: string[];
+export interface HttpParserBinding {
+  ConnectionsList: typeof InternalHttpParserBinding.ConnectionsList;
   HTTPParser: typeof InternalHttpParserBinding.HTTPParser;
-};
+  allMethods: string[];
+  methods: string[];
+}

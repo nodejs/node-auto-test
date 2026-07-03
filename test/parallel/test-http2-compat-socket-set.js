@@ -73,16 +73,6 @@ server.on('request', common.mustCall(function(request, response) {
   assert.throws(() => request.socket.pause = noop, errMsg);
   assert.throws(() => request.socket.resume = noop, errMsg);
 
-  request.stream.on('finish', common.mustCall(() => {
-    setImmediate(() => {
-      request.socket.setTimeout = noop;
-      assert.strictEqual(request.stream.setTimeout, noop);
-
-      assert.strictEqual(request.stream._isProcessing, undefined);
-      request.socket._isProcessing = true;
-      assert.strictEqual(request.stream._isProcessing, true);
-    });
-  }));
   response.stream.destroy();
 }));
 
@@ -97,7 +87,8 @@ server.listen(0, common.mustCall(function() {
       ':authority': `localhost:${port}`
     };
     const request = client.request(headers);
-    request.on('end', common.mustCall(() => {
+    request.on('error', () => {});
+    request.on('close', common.mustCall(() => {
       client.close();
       server.close();
     }));

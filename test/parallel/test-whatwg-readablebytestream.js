@@ -65,6 +65,9 @@ const {
   defaultReader.releaseLock();
   const byobReader = r.getReader({ mode: 'byob' });
   assert(byobReader instanceof ReadableStreamBYOBReader);
+  assert.match(
+    inspect(byobReader, { depth: 0 }),
+    /ReadableStreamBYOBReader/);
 }
 
 class Source {
@@ -77,8 +80,13 @@ class Source {
     this.controller = controller;
   }
 
+  async cancel() {
+    await this.file.close();
+  }
+
   async pull(controller) {
     const byobRequest = controller.byobRequest;
+    // eslint-disable-next-line node-core/must-call-assert
     assert.match(inspect(byobRequest), /ReadableStreamBYOBRequest/);
 
     const view = byobRequest.view;
@@ -95,15 +103,18 @@ class Source {
       this.controller.close();
     }
 
+    // eslint-disable-next-line node-core/must-call-assert
     assert.throws(() => byobRequest.respondWithNewView({}), {
       code: 'ERR_INVALID_ARG_TYPE',
     });
 
     byobRequest.respond(bytesRead);
 
+    // eslint-disable-next-line node-core/must-call-assert
     assert.throws(() => byobRequest.respond(bytesRead), {
       code: 'ERR_INVALID_STATE',
     });
+    // eslint-disable-next-line node-core/must-call-assert
     assert.throws(() => byobRequest.respondWithNewView(view), {
       code: 'ERR_INVALID_STATE',
     });
@@ -181,7 +192,7 @@ class Source {
       throw error;
   }
 
-  assert.rejects(read(stream), error);
+  assert.rejects(read(stream), error).then(common.mustCall());
 }
 
 {
@@ -209,10 +220,10 @@ class Source {
   reader.releaseLock();
   assert.rejects(reader.read(new Uint8Array(10)), {
     code: 'ERR_INVALID_STATE',
-  });
+  }).then(common.mustCall());
   assert.rejects(reader.cancel(), {
     code: 'ERR_INVALID_STATE',
-  });
+  }).then(common.mustCall());
 }
 
 {
@@ -234,5 +245,44 @@ class Source {
 }
 
 {
+  let controller;
+  new ReadableStream({
+    type: 'bytes',
+    start(c) { controller = c; }
+  });
+  controller.enqueue(new Uint8Array(10));
+  controller.close();
+  assert.throws(() => controller.enqueue(new Uint8Array(10)), {
+    code: 'ERR_INVALID_STATE',
+  });
+}
 
+{
+  const stream = new ReadableStream({
+    type: 'bytes',
+    pull(c) {
+      const v = new Uint8Array(c.byobRequest.view.buffer, 0, 3);
+      v.set([20, 21, 22]);
+      c.byobRequest.respondWithNewView(v);
+    },
+  });
+  const buffer = new ArrayBuffer(10);
+  const view = new Uint8Array(buffer, 0, 3);
+  view.set([10, 11, 12]);
+  const reader = stream.getReader({ mode: 'byob' });
+  reader.read(view);
+}
+
+{
+  const stream = new ReadableStream({
+    type: 'bytes',
+    autoAllocateChunkSize: 10,
+    pull(c) {
+      const v = new Uint8Array(c.byobRequest.view.buffer, 0, 3);
+      v.set([20, 21, 22]);
+      c.byobRequest.respondWithNewView(v);
+    },
+  });
+  const reader = stream.getReader();
+  reader.read();
 }

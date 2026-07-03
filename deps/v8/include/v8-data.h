@@ -28,6 +28,16 @@ class V8_EXPORT Data {
   bool IsModule() const;
 
   /**
+   * Returns true if this data is a |v8::ModuleRequest|.
+   */
+  bool IsModuleRequest() const;
+
+  /**
+   * Returns tru if this data is a |v8::FixedArray|
+   */
+  bool IsFixedArray() const;
+
+  /**
    * Returns true if this data is a |v8::Private|.
    */
   bool IsPrivate() const;
@@ -43,12 +53,22 @@ class V8_EXPORT Data {
   bool IsFunctionTemplate() const;
 
   /**
+   * Returns true if this data is a |v8::DictionaryTemplate|.
+   */
+  bool IsDictionaryTemplate() const;
+
+  /**
    * Returns true if this data is a |v8::Context|.
    */
   bool IsContext() const;
 
+  /**
+   * Returns true if this value is a `CppHeapExternal` object.
+   */
+  bool IsCppHeapExternal() const;
+
  private:
-  Data();
+  Data() = delete;
 };
 
 /**
@@ -57,7 +77,18 @@ class V8_EXPORT Data {
 class V8_EXPORT FixedArray : public Data {
  public:
   int Length() const;
-  Local<Data> Get(Local<Context> context, int i) const;
+
+  Local<Data> Get(int i) const;
+
+  V8_INLINE static FixedArray* Cast(Data* data) {
+#ifdef V8_ENABLE_CHECKS
+    CheckCast(data);
+#endif
+    return reinterpret_cast<FixedArray*>(data);
+  }
+
+ private:
+  static void CheckCast(Data* obj);
 };
 
 }  // namespace v8

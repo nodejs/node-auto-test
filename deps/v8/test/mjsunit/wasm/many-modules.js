@@ -2,8 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// No reason to stress-opt this; save some time.
-// Flags: --no-stress-opt
+// Flags: --memory-pool-release-on-malloc-failures
 
 d8.file.execute('test/mjsunit/wasm/wasm-module-builder.js');
 

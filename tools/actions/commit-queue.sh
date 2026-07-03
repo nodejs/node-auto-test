@@ -7,14 +7,10 @@ REPOSITORY=$2
 shift 2
 
 UPSTREAM=origin
-DEFAULT_BRANCH=master
+DEFAULT_BRANCH=main
 
 COMMIT_QUEUE_LABEL="commit-queue"
 COMMIT_QUEUE_FAILED_LABEL="commit-queue-failed"
-
-mergeUrl() {
-  echo "repos/${OWNER}/${REPOSITORY}/pulls/${1}/merge"
-}
 
 commit_queue_failed() {
   pr=$1
@@ -23,7 +19,7 @@ commit_queue_failed() {
 
   # shellcheck disable=SC2154
   cqurl="${GITHUB_SERVER_URL}/${OWNER}/${REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
-  body="<details><summary>Commit Queue failed</summary><pre>$(cat output)</pre><a href='$cqurl'>$cqurl</a></details>"
+  body="<details><summary>Commit Queue failed</summary><pre>$(sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' output)</pre><a href='$cqurl'>$cqurl</a></details>"
   echo "$body"
 
   gh pr comment "$pr" --body "$body"
@@ -44,7 +40,7 @@ for pr in "$@"; do
   fi
 
   # Skip PR if CI is still running
-  if ncu-ci url "https://github.com/${OWNER}/${REPOSITORY}/pull/${pr}" 2>&1 | grep "^Result *PENDING"; then
+  if gh pr checks "$pr" | grep -q "\spending\s"; then
     echo "pr ${pr} skipped, CI still running"
     continue
   fi
@@ -61,7 +57,7 @@ for pr in "$@"; do
   fi
 
   git node land --autorebase --yes $MULTIPLE_COMMIT_POLICY "$pr" >output 2>&1 || echo "Failed to land #${pr}"
-  # cat here otherwise we'll be supressing the output of git node land
+  # cat here otherwise we'll be suppressing the output of git node land
   cat output
 
   # TODO(mmarchini): workaround for ncu not returning the expected status code,
@@ -76,7 +72,9 @@ for pr in "$@"; do
   fi
 
   if [ -z "$MULTIPLE_COMMIT_POLICY" ]; then
-    commits="$(git rev-parse $UPSTREAM/$DEFAULT_BRANCH)...$(git rev-parse HEAD)"
+    start_sha=$(git rev-parse $UPSTREAM/$DEFAULT_BRANCH)
+    end_sha=$(git rev-parse HEAD)
+    commits="${start_sha}...${end_sha}"
 
     if ! git push $UPSTREAM $DEFAULT_BRANCH >> output 2>&1; then
       commit_queue_failed "$pr"
@@ -85,22 +83,22 @@ for pr in "$@"; do
   else
     # If there's only one commit, we can use the Squash and Merge feature from GitHub.
     # TODO: use `gh pr merge` when the GitHub CLI allows to customize the commit title (https://github.com/cli/cli/issues/1023).
-    jq -n \
-      --arg title "$(git log -1 --pretty='format:%s')" \
-      --arg body "$(git log -1 --pretty='format:%b')" \
-      --arg head "$(grep 'Fetched commits as' output | cut -d. -f3 | xargs git rev-parse)" \
-      '{merge_method:"squash",commit_title:$title,commit_message:$body,sha:$head}' > output.json
-    cat output.json
-    if ! gh api -X PUT "$(mergeUrl "$pr")" --input output.json > output; then
+    commit_title=$(git log -1 --pretty='format:%s')
+    commit_body=$(git log -1 --pretty='format:%b')
+    commit_head=$(grep 'Fetched commits as' output | cut -d. -f3 | xargs git rev-parse)
+
+    if ! commits="$(
+      jq -cn \
+        --arg title "${commit_title}" \
+        --arg body "${commit_body}" \
+        --arg head "${commit_head}" \
+        '{merge_method:"squash",commit_title:$title,commit_message:$body,sha:$head}' |\
+      gh api -X PUT "repos/${OWNER}/${REPOSITORY}/pulls/${pr}/merge" --input -\
+        --jq 'if .merged then .sha else halt_error end'
+    )"; then
       commit_queue_failed "$pr"
       continue
     fi
-    cat output
-    if ! commits="$(jq -r 'if .merged then .sha else error("not merged") end' < output)"; then
-      commit_queue_failed "$pr"
-      continue
-    fi
-    rm output.json
   fi
 
   rm output

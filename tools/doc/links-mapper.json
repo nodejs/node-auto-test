@@ -1,6 +1,0 @@
-{
-  "doc/api/synopsis.md": {
-    "command line options": "cli.html#command-line-options",
-    "web server": "http.html"
-  }
-}

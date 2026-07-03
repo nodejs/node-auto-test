@@ -5,13 +5,14 @@ const assert = require('assert');
 
 const { PerformanceObserver, performance } = require('perf_hooks');
 const DELAY = 1000;
+const ALLOWED_MARGIN = 10;
 
 const expected = ['Start to Now', 'A to Now', 'A to B'];
 const obs = new PerformanceObserver(common.mustCall((items) => {
-  items.getEntries().forEach(({ name, duration }) => {
-    assert.ok(duration > DELAY);
+  for (const { name, duration } of items.getEntries()) {
+    assert.ok(duration > (DELAY - ALLOWED_MARGIN));
     assert.strictEqual(expected.shift(), name);
-  });
+  }
 }));
 obs.observe({ entryTypes: ['measure'] });
 

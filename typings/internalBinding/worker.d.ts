@@ -1,3 +1,5 @@
+import { InternalMessagingBinding } from './messaging';
+
 declare namespace InternalWorkerBinding {
   class Worker {
     constructor(
@@ -9,20 +11,37 @@ declare namespace InternalWorkerBinding {
     );
     startThread(): void;
     stopThread(): void;
+    hasRef(): boolean;
     ref(): void;
     unref(): void;
     getResourceLimits(): Float64Array;
     takeHeapSnapshot(): object;
+    getHeapStatistics(): Promise<object>;
+    cpuUsage(): Promise<object>;
+    startCpuProfile(): Promise<CPUProfileHandle>;
+    startHeapProfile(): Promise<HeapProfileHandle>;
     loopIdleTime(): number;
     loopStartTime(): number;
   }
 }
 
-declare function InternalBinding(binding: 'worker'): {
+export interface CPUProfileHandle {
+  stop(): Promise<string>;
+  [Symbol.asyncDispose](): Promise<void>;
+}
+
+export interface HeapProfileHandle {
+  stop(): Promise<string>;
+  [Symbol.asyncDispose](): Promise<void>;
+}
+
+export interface WorkerBinding {
   Worker: typeof InternalWorkerBinding.Worker;
   getEnvMessagePort(): InternalMessagingBinding.MessagePort;
   threadId: number;
+  threadName: string;
   isMainThread: boolean;
+  isInternalThread: boolean;
   ownsProcessState: boolean;
   resourceLimits?: Float64Array;
   kMaxYoungGenerationSizeMb: number;
@@ -30,4 +49,4 @@ declare function InternalBinding(binding: 'worker'): {
   kCodeRangeSizeMb: number;
   kStackSizeMb: number;
   kTotalResourceLimitCount: number;
-};
+}

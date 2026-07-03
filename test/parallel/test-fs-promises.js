@@ -27,6 +27,7 @@ const {
   rename,
   rmdir,
   stat,
+  statfs,
   symlink,
   truncate,
   unlink,
@@ -56,31 +57,44 @@ assert.strictEqual(
     {
       code: 'ENOENT',
       name: 'Error',
-      message: /^ENOENT: no such file or directory, access/
+      message: /^ENOENT: no such file or directory, access/,
+      stack: /at async assert\.rejects/
     }
-  );
+  ).then(common.mustCall());
 
   assert.rejects(
     access(__filename, 8),
     {
       code: 'ERR_OUT_OF_RANGE',
-      message: /"mode".*must be an integer >= 0 && <= 7\. Received 8$/
     }
-  );
+  ).then(common.mustCall());
 
   assert.rejects(
     access(__filename, { [Symbol.toPrimitive]() { return 5; } }),
     {
       code: 'ERR_INVALID_ARG_TYPE',
-      message: /"mode" argument.+integer\. Received an instance of Object$/
     }
-  );
+  ).then(common.mustCall());
 }
 
 function verifyStatObject(stat) {
   assert.strictEqual(typeof stat, 'object');
   assert.strictEqual(typeof stat.dev, 'number');
   assert.strictEqual(typeof stat.mode, 'number');
+}
+
+function verifyStatFsObject(stat, isBigint = false) {
+  const valueType = isBigint ? 'bigint' : 'number';
+
+  assert.strictEqual(typeof stat, 'object');
+  assert.strictEqual(typeof stat.type, valueType);
+  assert.strictEqual(typeof stat.bsize, valueType);
+  assert.strictEqual(typeof stat.frsize, valueType);
+  assert.strictEqual(typeof stat.blocks, valueType);
+  assert.strictEqual(typeof stat.bfree, valueType);
+  assert.strictEqual(typeof stat.bavail, valueType);
+  assert.strictEqual(typeof stat.files, valueType);
+  assert.strictEqual(typeof stat.ffree, valueType);
 }
 
 async function getHandle(dest) {
@@ -110,14 +124,14 @@ async function executeOnHandle(dest, func) {
 
     // handle is object
     {
-      await executeOnHandle(dest, async (handle) => {
+      await executeOnHandle(dest, common.mustCall(async (handle) => {
         assert.strictEqual(typeof handle, 'object');
-      });
+      }));
     }
 
     // file stats
     {
-      await executeOnHandle(dest, async (handle) => {
+      await executeOnHandle(dest, common.mustCall(async (handle) => {
         let stats = await handle.stat();
         verifyStatObject(stats);
         assert.strictEqual(stats.size, 35);
@@ -136,13 +150,31 @@ async function executeOnHandle(dest, func) {
 
         await handle.datasync();
         await handle.sync();
-      });
+      }));
+    }
+
+    // File stats throwIfNoEntry: false
+    {
+      const stats = await stat('meow.js', { throwIfNoEntry: false });
+      assert.strictEqual(stats, undefined);
+    }
+
+    // File system stats
+    {
+      const statFs = await statfs(dest);
+      verifyStatFsObject(statFs);
+    }
+
+    // File system stats bigint
+    {
+      const statFs = await statfs(dest, { bigint: true });
+      verifyStatFsObject(statFs, true);
     }
 
     // Test fs.read promises when length to read is zero bytes
     {
       const dest = path.resolve(tmpDir, 'test1.js');
-      await executeOnHandle(dest, async (handle) => {
+      await executeOnHandle(dest, common.mustCall(async (handle) => {
         const buf = Buffer.from('DAWGS WIN');
         const bufLen = buf.length;
         await handle.write(buf);
@@ -150,32 +182,42 @@ async function executeOnHandle(dest, func) {
         assert.strictEqual(ret.bytesRead, 0);
 
         await unlink(dest);
-      });
+      }));
     }
 
-    // Use fallback buffer allocation when input not buffer
+    // Use fallback buffer allocation when first argument is null
     {
-      await executeOnHandle(dest, async (handle) => {
-        const ret = await handle.read(0, 0, 0, 0);
+      await executeOnHandle(dest, common.mustCall(async (handle) => {
+        const ret = await handle.read(null, 0, 0, 0);
         assert.strictEqual(ret.buffer.length, 16384);
-      });
+      }));
+    }
+
+    // TypeError if buffer is not ArrayBufferView or nullable object
+    {
+      await executeOnHandle(dest, common.mustCall(async (handle) => {
+        await assert.rejects(
+          async () => handle.read(0, 0, 0, 0),
+          { code: 'ERR_INVALID_ARG_TYPE' }
+        );
+      }));
     }
 
     // Bytes written to file match buffer
     {
-      await executeOnHandle(dest, async (handle) => {
+      await executeOnHandle(dest, common.mustCall(async (handle) => {
         const buf = Buffer.from('hello fsPromises');
         const bufLen = buf.length;
         await handle.write(buf);
         const ret = await handle.read(Buffer.alloc(bufLen), 0, bufLen, 0);
         assert.strictEqual(ret.bytesRead, bufLen);
         assert.deepStrictEqual(ret.buffer, buf);
-      });
+      }));
     }
 
     // Truncate file to specified length
     {
-      await executeOnHandle(dest, async (handle) => {
+      await executeOnHandle(dest, common.mustCall(async (handle) => {
         const buf = Buffer.from('hello FileHandle');
         const bufLen = buf.length;
         await handle.write(buf, 0, bufLen, 0);
@@ -184,12 +226,12 @@ async function executeOnHandle(dest, func) {
         assert.deepStrictEqual(ret.buffer, buf);
         await truncate(dest, 5);
         assert.strictEqual((await readFile(dest)).toString(), 'hello');
-      });
+      }));
     }
 
     // Invalid change of ownership
     {
-      await executeOnHandle(dest, async (handle) => {
+      await executeOnHandle(dest, common.mustCall(async (handle) => {
         await chmod(dest, 0o666);
         await handle.chmod(0o666);
 
@@ -222,7 +264,7 @@ async function executeOnHandle(dest, func) {
             message: 'The value of "gid" is out of range. ' +
                       'It must be >= -1 && <= 4294967295. Received -2'
           });
-      });
+      }));
     }
 
     // Set modification times
@@ -279,7 +321,7 @@ async function executeOnHandle(dest, func) {
                            (await readlink(newLink)).toLowerCase());
 
         const newMode = 0o666;
-        if (common.isOSX) {
+        if (common.isMacOS) {
           // `lchmod` is only available on macOS.
           await lchmod(newLink, newMode);
           stats = await lstat(newLink);
@@ -373,7 +415,7 @@ async function executeOnHandle(dest, func) {
       const dir = path.join(tmpDir, nextdir(), nextdir());
       await mkdir(path.dirname(dir));
       await writeFile(dir, '');
-      assert.rejects(
+      await assert.rejects(
         mkdir(dir, { recursive: true }),
         {
           code: 'EEXIST',
@@ -390,7 +432,7 @@ async function executeOnHandle(dest, func) {
       const dir = path.join(file, nextdir(), nextdir());
       await mkdir(path.dirname(file));
       await writeFile(file, '');
-      assert.rejects(
+      await assert.rejects(
         mkdir(dir, { recursive: true }),
         {
           code: 'ENOTDIR',
@@ -429,14 +471,14 @@ async function executeOnHandle(dest, func) {
             code: 'ERR_INVALID_ARG_TYPE',
             name: 'TypeError'
           }
-        );
+        ).then(common.mustCall());
       });
     }
 
     // `mkdtemp` with invalid numeric prefix
     {
       await mkdtemp(path.resolve(tmpDir, 'FOO'));
-      assert.rejects(
+      await assert.rejects(
         // mkdtemp() expects to get a string prefix.
         async () => mkdtemp(1),
         {
@@ -448,7 +490,7 @@ async function executeOnHandle(dest, func) {
 
     // Regression test for https://github.com/nodejs/node/issues/38168
     {
-      await executeOnHandle(dest, async (handle) => {
+      await executeOnHandle(dest, common.mustCall(async (handle) => {
         await assert.rejects(
           async () => handle.write('abc', 0, 'hex'),
           {
@@ -459,17 +501,17 @@ async function executeOnHandle(dest, func) {
 
         const ret = await handle.write('abcd', 0, 'hex');
         assert.strictEqual(ret.bytesWritten, 2);
-      });
+      }));
     }
 
     // Test prototype methods calling with contexts other than FileHandle
     {
-      await executeOnHandle(dest, async (handle) => {
+      await executeOnHandle(dest, common.mustCall(async (handle) => {
         await assert.rejects(() => handle.stat.call({}), {
           code: 'ERR_INTERNAL_ASSERTION',
           message: /handle must be an instance of FileHandle/
         });
-      });
+      }));
     }
   }
 

@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// Flags: --allow-natives-syntax
+// Flags: --allow-natives-syntax --turboshaft-enable-debug-features
 
 class C {
   bla() {};
@@ -25,5 +25,5 @@ new class extends C { constructor() { super(); this.c = 1 } }
 new class extends C { constructor() { super(); this.d = 1 } }
 
 foo();
-%OptimizeFunctionForTopTier(foo);
+%OptimizeFunctionOnNextCall(foo);
 foo();

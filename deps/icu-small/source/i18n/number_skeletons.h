@@ -13,8 +13,7 @@
 #include "string_segment.h"
 
 U_NAMESPACE_BEGIN
-namespace number {
-namespace impl {
+namespace number::impl {
 
 // Forward-declaration
 struct SeenMacroProps;
@@ -92,6 +91,7 @@ enum StemEnum {
     STEM_ROUNDING_MODE_HALF_DOWN,
     STEM_ROUNDING_MODE_HALF_UP,
     STEM_ROUNDING_MODE_UNNECESSARY,
+    STEM_INTEGER_WIDTH_TRUNC,
     STEM_GROUP_OFF,
     STEM_GROUP_MIN2,
     STEM_GROUP_AUTO,
@@ -285,7 +285,7 @@ bool parseTrailingZeroOption(const StringSegment& segment, MacroProps& macros, U
 void parseIncrementOption(const StringSegment& segment, MacroProps& macros, UErrorCode& status);
 
 void
-generateIncrementOption(double increment, int32_t trailingZeros, UnicodeString& sb, UErrorCode& status);
+generateIncrementOption(uint32_t increment, digits_t incrementMagnitude, int32_t minFrac, UnicodeString& sb, UErrorCode& status);
 
 void parseIntegerWidthOption(const StringSegment& segment, MacroProps& macros, UErrorCode& status);
 
@@ -384,8 +384,7 @@ UPRV_BLOCK_MACRO_BEGIN { \
 
 } // namespace
 
-} // namespace impl
-} // namespace number
+} // namespace number::impl
 U_NAMESPACE_END
 
 #endif //__SOURCE_NUMBER_SKELETONS_H__

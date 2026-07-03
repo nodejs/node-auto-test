@@ -6,6 +6,7 @@
 #define V8_TORQUE_IMPLEMENTATION_VISITOR_H_
 
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "src/base/macros.h"
@@ -18,9 +19,7 @@
 #include "src/torque/types.h"
 #include "src/torque/utils.h"
 
-namespace v8 {
-namespace internal {
-namespace torque {
+namespace v8::internal::torque {
 
 template <typename T>
 class Binding;
@@ -37,7 +36,7 @@ class LocationReference {
   // An assignable stack range.
   static LocationReference VariableAccess(
       VisitResult variable,
-      base::Optional<Binding<LocalValue>*> binding = base::nullopt) {
+      std::optional<Binding<LocalValue>*> binding = std::nullopt) {
     DCHECK(variable.IsOnStack());
     LocationReference result;
     result.variable_ = std::move(variable);
@@ -54,10 +53,13 @@ class LocationReference {
   }
   // A heap reference, that is, a tagged value and an offset to encode an inner
   // pointer.
-  static LocationReference HeapReference(VisitResult heap_reference) {
+  static LocationReference HeapReference(
+      VisitResult heap_reference,
+      FieldSynchronization synchronization = FieldSynchronization::kNone) {
     LocationReference result;
     DCHECK(TypeOracle::MatchReferenceGeneric(heap_reference.type()));
     result.heap_reference_ = std::move(heap_reference);
+    result.heap_reference_synchronization_ = synchronization;
     return result;
   }
   // A reference to an array on the heap. That is, a tagged value, an offset to
@@ -121,6 +123,10 @@ class LocationReference {
     DCHECK(IsHeapReference());
     return *heap_reference_;
   }
+  FieldSynchronization heap_reference_synchronization() const {
+    DCHECK(IsHeapReference());
+    return heap_reference_synchronization_;
+  }
   bool IsHeapSlice() const { return heap_slice_.has_value(); }
   const VisitResult& heap_slice() const {
     DCHECK(IsHeapSlice());
@@ -140,7 +146,7 @@ class LocationReference {
     return *bit_field_;
   }
 
-  base::Optional<const Type*> ReferencedType() const {
+  std::optional<const Type*> ReferencedType() const {
     if (IsHeapReference()) {
       return *TypeOracle::MatchReferenceGeneric(heap_reference().type());
     }
@@ -158,7 +164,7 @@ class LocationReference {
     if (IsVariableAccess() || IsHeapSlice() || IsTemporary()) {
       return GetVisitResult().type();
     }
-    return base::nullopt;
+    return std::nullopt;
   }
 
   const VisitResult& GetVisitResult() const {
@@ -191,28 +197,30 @@ class LocationReference {
     DCHECK(IsCallAccess());
     return *assign_function_;
   }
-  base::Optional<Binding<LocalValue>*> binding() const {
+  std::optional<Binding<LocalValue>*> binding() const {
     DCHECK(IsVariableAccess());
     return binding_;
   }
 
  private:
-  base::Optional<VisitResult> variable_;
-  base::Optional<VisitResult> temporary_;
-  base::Optional<std::string> temporary_description_;
-  base::Optional<VisitResult> heap_reference_;
-  base::Optional<VisitResult> heap_slice_;
-  base::Optional<std::string> eval_function_;
-  base::Optional<std::string> assign_function_;
+  std::optional<VisitResult> variable_;
+  std::optional<VisitResult> temporary_;
+  std::optional<std::string> temporary_description_;
+  std::optional<VisitResult> heap_reference_;
+  FieldSynchronization heap_reference_synchronization_ =
+      FieldSynchronization::kNone;
+  std::optional<VisitResult> heap_slice_;
+  std::optional<std::string> eval_function_;
+  std::optional<std::string> assign_function_;
   VisitResultVector call_arguments_;
-  base::Optional<Binding<LocalValue>*> binding_;
+  std::optional<Binding<LocalValue>*> binding_;
 
   // The location of the bitfield struct that contains this bitfield, if this
   // reference is a bitfield access. Uses a shared_ptr so that LocationReference
   // is copyable, allowing us to set this field equal to a copy of a
   // stack-allocated LocationReference.
   std::shared_ptr<const LocationReference> bit_field_struct_;
-  base::Optional<BitField> bit_field_;
+  std::optional<BitField> bit_field_;
 
   LocationReference() = default;
 };
@@ -228,13 +236,15 @@ struct LayoutForInitialization {
   VisitResult size;
 };
 
+extern uint64_t next_unique_binding_index;
+
 template <class T>
 class Binding;
 
 template <class T>
 class BindingsManager {
  public:
-  base::Optional<Binding<T>*> TryLookup(const std::string& name) {
+  std::optional<Binding<T>*> TryLookup(const std::string& name) {
     if (StartsWithSingleUnderscore(name)) {
       Error("Trying to reference '", name, "' which is marked as unused.")
           .Throw();
@@ -248,8 +258,7 @@ class BindingsManager {
 
  private:
   friend class Binding<T>;
-  std::unordered_map<std::string, base::Optional<Binding<T>*>>
-      current_bindings_;
+  std::unordered_map<std::string, std::optional<Binding<T>*>> current_bindings_;
 };
 
 template <class T>
@@ -262,7 +271,8 @@ class Binding : public T {
         name_(name),
         previous_binding_(this),
         used_(false),
-        written_(false) {
+        written_(false),
+        unique_index_(next_unique_binding_index++) {
     std::swap(previous_binding_, manager_->current_bindings_[name]);
   }
   template <class... Args>
@@ -300,35 +310,42 @@ class Binding : public T {
   bool Written() const { return written_; }
   void SetWritten() { written_ = true; }
 
+  uint64_t unique_index() const { return unique_index_; }
+
  private:
   bool SkipLintCheck() const { return name_.length() > 0 && name_[0] == '_'; }
 
   BindingsManager<T>* manager_;
   const std::string name_;
-  base::Optional<Binding*> previous_binding_;
+  std::optional<Binding*> previous_binding_;
   SourcePosition declaration_position_ = CurrentSourcePosition::Get();
   bool used_;
   bool written_;
+  uint64_t unique_index_;
 };
 
 template <class T>
 class BlockBindings {
  public:
   explicit BlockBindings(BindingsManager<T>* manager) : manager_(manager) {}
-  void Add(std::string name, T value, bool mark_as_used = false) {
+  Binding<T>* Add(std::string name, T value, bool mark_as_used = false) {
     ReportErrorIfAlreadyBound(name);
     auto binding =
         std::make_unique<Binding<T>>(manager_, name, std::move(value));
+    Binding<T>* result = binding.get();
     if (mark_as_used) binding->SetUsed();
     bindings_.push_back(std::move(binding));
+    return result;
   }
 
-  void Add(const Identifier* name, T value, bool mark_as_used = false) {
+  Binding<T>* Add(const Identifier* name, T value, bool mark_as_used = false) {
     ReportErrorIfAlreadyBound(name->value);
     auto binding =
         std::make_unique<Binding<T>>(manager_, name, std::move(value));
+    Binding<T>* result = binding.get();
     if (mark_as_used) binding->SetUsed();
     bindings_.push_back(std::move(binding));
+    return result;
   }
 
   std::vector<Binding<T>*> bindings() const {
@@ -384,8 +401,8 @@ class LocalValue {
   bool IsAccessibleNonLazy() const { return value.has_value(); }
 
  private:
-  base::Optional<LocationReference> value;
-  base::Optional<std::function<LocationReference()>> lazy;
+  std::optional<LocationReference> value;
+  std::optional<std::function<LocationReference()>> lazy;
   std::string inaccessible_explanation;
 };
 
@@ -433,7 +450,7 @@ class ImplementationVisitor {
  public:
   void GenerateBuiltinDefinitionsAndInterfaceDescriptors(
       const std::string& output_directory);
-  void GenerateClassFieldOffsets(const std::string& output_directory);
+  void GenerateVisitorLists(const std::string& output_directory);
   void GenerateBitFields(const std::string& output_directory);
   void GeneratePrintDefinitions(const std::string& output_directory);
   void GenerateClassDefinitions(const std::string& output_directory);
@@ -506,7 +523,7 @@ class ImplementationVisitor {
   LocationReference GenerateFieldAccess(
       LocationReference reference, const std::string& fieldname,
       bool ignore_stuct_field_constness = false,
-      base::Optional<SourcePosition> pos = {});
+      std::optional<SourcePosition> pos = {});
   LocationReference GetLocationReference(ElementAccessExpression* expr);
   LocationReference GenerateReferenceToItemInHeapSlice(LocationReference slice,
                                                        VisitResult index);
@@ -519,12 +536,12 @@ class ImplementationVisitor {
   VisitResult Visit(FieldAccessExpression* expr);
 
   void VisitAllDeclarables();
-  void Visit(Declarable* delarable, base::Optional<SourceId> file = {});
+  void Visit(Declarable* delarable, std::optional<SourceId> file = {});
   void Visit(TypeAlias* decl);
   VisitResult InlineMacro(Macro* macro,
-                          base::Optional<LocationReference> this_reference,
+                          std::optional<LocationReference> this_reference,
                           const std::vector<VisitResult>& arguments,
-                          const std::vector<Block*> label_blocks);
+                          const std::vector<Block*>& label_blocks);
   void VisitMacroCommon(Macro* macro);
   void Visit(ExternMacro* macro) {}
   void Visit(TorqueMacro* macro);
@@ -545,7 +562,8 @@ class ImplementationVisitor {
   VisitResult Visit(IncrementDecrementExpression* expr);
   VisitResult Visit(AssignmentExpression* expr);
   VisitResult Visit(StringLiteralExpression* expr);
-  VisitResult Visit(NumberLiteralExpression* expr);
+  VisitResult Visit(FloatingPointLiteralExpression* expr);
+  VisitResult Visit(IntegerLiteralExpression* expr);
   VisitResult Visit(AssumeTypeImpossibleExpression* expr);
   VisitResult Visit(TryLabelExpression* expr);
   VisitResult Visit(StatementExpression* expr);
@@ -566,6 +584,10 @@ class ImplementationVisitor {
   const Type* Visit(ExpressionStatement* stmt);
   const Type* Visit(DebugStatement* stmt);
   const Type* Visit(AssertStatement* stmt);
+  const Type* Visit(TypeswitchStatement* stmt) {
+    // This should have been desugared before.
+    UNREACHABLE();
+  }
 
   void BeginGeneratedFiles();
   void EndGeneratedFiles();
@@ -581,7 +603,7 @@ class ImplementationVisitor {
   DECLARE_CONTEXTUAL_VARIABLE(CurrentCallable, Callable*);
   DECLARE_CONTEXTUAL_VARIABLE(CurrentFileStreams,
                               GlobalContext::PerFileStreams*);
-  DECLARE_CONTEXTUAL_VARIABLE(CurrentReturnValue, base::Optional<VisitResult>);
+  DECLARE_CONTEXTUAL_VARIABLE(CurrentReturnValue, std::optional<VisitResult>);
 
   // A BindingsManagersScope has to be active for local bindings to be created.
   // Shadowing an existing BindingsManagersScope by creating a new one hides all
@@ -594,8 +616,8 @@ class ImplementationVisitor {
   void SetDryRun(bool is_dry_run) { is_dry_run_ = is_dry_run; }
 
  private:
-  base::Optional<Block*> GetCatchBlock();
-  void GenerateCatchBlock(base::Optional<Block*> catch_block);
+  std::optional<Block*> GetCatchBlock();
+  void GenerateCatchBlock(std::optional<Block*> catch_block);
 
   // {StackScope} records the stack height at creation time and reconstructs it
   // when being destructed by emitting a {DeleteRangeInstruction}, except for
@@ -673,9 +695,9 @@ class ImplementationVisitor {
     Binding<LocalLabel> continue_binding_;
   };
 
-  base::Optional<Binding<LocalValue>*> TryLookupLocalValue(
+  std::optional<Binding<LocalValue>*> TryLookupLocalValue(
       const std::string& name);
-  base::Optional<Binding<LocalLabel>*> TryLookupLabel(const std::string& name);
+  std::optional<Binding<LocalLabel>*> TryLookupLabel(const std::string& name);
   Binding<LocalLabel>* LookupLabel(const std::string& name);
   Block* LookupSimpleLabel(const std::string& name);
   template <class Container>
@@ -718,7 +740,7 @@ class ImplementationVisitor {
                         bool inline_macro);
 
   VisitResult GenerateCall(Callable* callable,
-                           base::Optional<LocationReference> this_parameter,
+                           std::optional<LocationReference> this_parameter,
                            Arguments parameters,
                            const TypeVector& specialization_types = {},
                            bool tail_call = false);
@@ -754,7 +776,7 @@ class ImplementationVisitor {
                                       VisitResult source);
 
   StackRange GenerateLabelGoto(LocalLabel* label,
-                               base::Optional<StackRange> arguments = {});
+                               std::optional<StackRange> arguments = {});
 
   VisitResult GenerateSetBitField(const Type* bitfield_struct_type,
                                   const BitField& bitfield,
@@ -810,7 +832,7 @@ class ImplementationVisitor {
   CfgAssembler& assembler() { return *assembler_; }
 
   void SetReturnValue(VisitResult return_value) {
-    base::Optional<VisitResult>& current_return_value =
+    std::optional<VisitResult>& current_return_value =
         CurrentReturnValue::Get();
     DCHECK_IMPLIES(current_return_value, *current_return_value == return_value);
     current_return_value = std::move(return_value);
@@ -818,7 +840,7 @@ class ImplementationVisitor {
 
   VisitResult GetAndClearReturnValue() {
     VisitResult return_value = *CurrentReturnValue::Get();
-    CurrentReturnValue::Get() = base::nullopt;
+    CurrentReturnValue::Get() = std::nullopt;
     return return_value;
   }
 
@@ -844,7 +866,7 @@ class ImplementationVisitor {
 
   class MacroInliningScope;
 
-  base::Optional<CfgAssembler> assembler_;
+  std::optional<CfgAssembler> assembler_;
   NullOStream null_stream_;
   bool is_dry_run_;
 
@@ -870,8 +892,6 @@ class ImplementationVisitor {
 
 void ReportAllUnusedMacros();
 
-}  // namespace torque
-}  // namespace internal
-}  // namespace v8
+}  // namespace v8::internal::torque
 
 #endif  // V8_TORQUE_IMPLEMENTATION_VISITOR_H_

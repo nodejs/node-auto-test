@@ -30,6 +30,40 @@ assert.throws(() => new TransformStream({ writableType: 1 }), {
   code: 'ERR_INVALID_ARG_VALUE',
 });
 
+{
+  new TransformStream({});
+  new TransformStream([]);
+  new TransformStream({}, null);
+  new TransformStream({}, {});
+  new TransformStream({}, []);
+  new TransformStream({}, {}, null);
+  new TransformStream({}, {}, {});
+  new TransformStream({}, {}, []);
+}
+
+['a', false, 1, null].forEach((transform) => {
+  assert.throws(() => {
+    new TransformStream(transform);
+  }, {
+    code: 'ERR_INVALID_ARG_TYPE',
+  });
+});
+
+['a', false, 1].forEach((writableStrategy) => {
+  assert.throws(() => {
+    new TransformStream({}, writableStrategy);
+  }, {
+    code: 'ERR_INVALID_ARG_TYPE',
+  });
+});
+
+['a', false, 1].forEach((readableStrategy) => {
+  assert.throws(() => {
+    new TransformStream({}, {}, readableStrategy);
+  }, {
+    code: 'ERR_INVALID_ARG_TYPE',
+  });
+});
 
 {
   const stream = new TransformStream();
@@ -185,4 +219,23 @@ class Source {
   assert.match(
     inspect(controller, { depth: 0 }),
     /TransformStreamDefaultController \[/);
+}
+
+{
+  Object.defineProperty(Object.prototype, 'type', {
+    get: common.mustNotCall('get %Object.prototype%.type'),
+    set: common.mustNotCall('set %Object.prototype%.type'),
+    configurable: true,
+  });
+
+  new TransformStream({
+    transform(chunk, controller) {
+      controller.enqueue(chunk);
+    },
+    flush(controller) {
+      controller.terminate();
+    }
+  });
+
+  delete Object.prototype.type;
 }

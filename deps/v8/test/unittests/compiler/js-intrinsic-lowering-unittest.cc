@@ -2,15 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "src/compiler/access-builder.h"
-#include "src/compiler/diamond.h"
-#include "src/compiler/js-graph.h"
 #include "src/compiler/js-intrinsic-lowering.h"
-#include "src/compiler/js-operator.h"
-#include "test/unittests/compiler/graph-unittest.h"
-#include "test/unittests/compiler/node-test-utils.h"
-#include "testing/gmock-support.h"
 
+#include "src/compiler/js-graph.h"
+#include "src/compiler/js-operator.h"
+#include "src/compiler/simplified-operator.h"
+#include "test/unittests/compiler/graph-unittest.h"
+#include "testing/gmock-support.h"
 
 using testing::_;
 using testing::AllOf;
@@ -45,24 +43,6 @@ class JSIntrinsicLoweringTest : public GraphTest {
  private:
   JSOperatorBuilder javascript_;
 };
-
-
-// -----------------------------------------------------------------------------
-// %_CreateJSGeneratorObject
-
-TEST_F(JSIntrinsicLoweringTest, InlineCreateJSGeneratorObject) {
-  Node* const function = Parameter(0);
-  Node* const receiver = Parameter(1);
-  Node* const context = Parameter(2);
-  Node* const effect = graph()->start();
-  Node* const control = graph()->start();
-  Reduction const r = Reduce(graph()->NewNode(
-      javascript()->CallRuntime(Runtime::kInlineCreateJSGeneratorObject, 2),
-      function, receiver, context, effect, control));
-  ASSERT_TRUE(r.Changed());
-  EXPECT_EQ(IrOpcode::kJSCreateGeneratorObject,
-            r.replacement()->op()->opcode());
-}
 
 }  // namespace compiler
 }  // namespace internal

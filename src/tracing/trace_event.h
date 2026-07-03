@@ -6,7 +6,7 @@
 #define SRC_TRACING_TRACE_EVENT_H_
 
 #include "v8-platform.h"
-#include "tracing/agent.h"
+#include "tracing/agent_legacy.h"
 #include "trace_event_common.h"
 #include <atomic>
 
@@ -315,13 +315,12 @@ class TraceEventHelper {
   static v8::TracingController* GetTracingController();
   static void SetTracingController(v8::TracingController* controller);
 
-  static Agent* GetAgent();
-  static void SetAgent(Agent* agent);
-
   static inline const uint8_t* GetCategoryGroupEnabled(const char* group) {
     v8::TracingController* controller = GetTracingController();
     static const uint8_t disabled = 0;
-    if (UNLIKELY(controller == nullptr)) return &disabled;
+    if (controller == nullptr) [[unlikely]] {
+      return &disabled;
+    }
     return controller->GetCategoryGroupEnabled(group);
   }
 };
@@ -483,13 +482,13 @@ static V8_INLINE uint64_t AddTraceEventWithTimestampImpl(
     const char* scope, uint64_t id, uint64_t bind_id, int32_t num_args,
     const char** arg_names, const uint8_t* arg_types,
     const uint64_t* arg_values, unsigned int flags, int64_t timestamp) {
-  std::unique_ptr<v8::ConvertableToTraceFormat> arg_convertables[2];
+  std::unique_ptr<v8::ConvertableToTraceFormat> arg_convertibles[2];
   if (num_args > 0 && arg_types[0] == TRACE_VALUE_TYPE_CONVERTABLE) {
-    arg_convertables[0].reset(reinterpret_cast<v8::ConvertableToTraceFormat*>(
+    arg_convertibles[0].reset(reinterpret_cast<v8::ConvertableToTraceFormat*>(
         static_cast<intptr_t>(arg_values[0])));
   }
   if (num_args > 1 && arg_types[1] == TRACE_VALUE_TYPE_CONVERTABLE) {
-    arg_convertables[1].reset(reinterpret_cast<v8::ConvertableToTraceFormat*>(
+    arg_convertibles[1].reset(reinterpret_cast<v8::ConvertableToTraceFormat*>(
         static_cast<intptr_t>(arg_values[1])));
   }
   // DCHECK_LE(num_args, 2);
@@ -498,7 +497,7 @@ static V8_INLINE uint64_t AddTraceEventWithTimestampImpl(
   if (controller == nullptr) return 0;
   return controller->AddTraceEventWithTimestamp(
       phase, category_group_enabled, name, scope, id, bind_id, num_args,
-      arg_names, arg_types, arg_values, arg_convertables, flags, timestamp);
+      arg_names, arg_types, arg_values, arg_convertibles, flags, timestamp);
 }
 
 static V8_INLINE void AddMetadataEventImpl(
@@ -515,11 +514,12 @@ static V8_INLINE void AddMetadataEventImpl(
         static_cast<intptr_t>(arg_values[1])));
   }
   node::tracing::Agent* agent =
-      node::tracing::TraceEventHelper::GetAgent();
+      node::tracing::Agent::GetInstance();
   if (agent == nullptr) return;
-  return agent->GetTracingController()->AddMetadataEvent(
-      category_group_enabled, name, num_args, arg_names, arg_types, arg_values,
-      arg_convertibles, flags);
+  static_cast<node::tracing::TracingController*>(
+      agent->GetTracingController())
+      ->AddMetadataEvent(category_group_enabled, name, num_args, arg_names,
+                         arg_types, arg_values, arg_convertibles, flags);
 }
 
 // Define SetTraceValue for each allowed type. It stores the type and
