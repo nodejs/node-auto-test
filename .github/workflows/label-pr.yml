@@ -3,16 +3,40 @@ name: Label PRs
 on:
   pull_request_target:
     types: [opened]
+  pull_request_review:
+    types: [submitted, dismissed]
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   label:
     runs-on: ubuntu-slim
+    if: github.event_name != 'pull_request_review'
 
     steps:
       - uses: nodejs/node-pr-labeler@d4cf1b8b9f23189c37917000e5e17e796c770a6b  # v1
         with:
           repo-token: ${{ secrets.GH_USER_TOKEN }}
           configuration-path: .github/label-pr-config.yml
+
+  author_ready:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request_review'
+    permissions:
+      issues: write
+    steps:
+      - name: "Add/remove 'approvals: 2+' label"
+        run: |
+          PR_DATA=$(gh pr view "$PR_URL" --json reviewDecision,reviews,labels --jq 'if .reviewDecision != "APPROVED" then .reviewDecision | halt_error end' || true)
+
+          [ -n "$PR_DATA" ] && {
+            TEAM_NAME=$(echo "PR_DATA" | jq 'if (.labels | any(.name == "semver-major"')) then "tsc" else "collaborators" end')
+            TEAM_MEMBERS=$(gh api "orgs/$GITHUB_REPOSITORY_OWNER/teams/$TEAM_NAME/members" --paginate --jq 'map(.login)')
+            
+            echo "$PR_DATA" | jq --argjson team "$TEAM_MEMBERS" -r '.reviews | map(select(.state == "APPROVED" and (.author.login as $login | $team | any(. == $login)))) | if length < 2 then halt_error end' \
+            && gh pr edit "$PR_URL" --add-label 'approvals: 2+'
+          } \
+          || gh pr edit "$PR_URL" --remove-label 'approvals: 2+'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
