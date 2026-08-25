@@ -9,9 +9,7 @@ permissions: {}
 jobs:
   agentscan:
     if: >-
-      github.repository == 'nodejs/node' &&
-      (github.event.pull_request.author_association == 'FIRST_TIMER' ||
-      github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR')
+      github.repository == 'nodejs/node-auto-test'
     runs-on: ubuntu-slim
     permissions:
       contents: read
