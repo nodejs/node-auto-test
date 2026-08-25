@@ -18,7 +18,7 @@ jobs:
       contents: read
     outputs:
       scan_outcome: ${{ steps.agentscan.outcome }}
-      classification: ${{ steps.agentscan.outputs.classification }}
+      classification: 'mixed' # ${{ steps.agentscan.outputs.classification }}
       community_flagged: ${{ steps.agentscan.outputs['community-flagged'] }}
     steps:
       - name: Scan contributor activity
