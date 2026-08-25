@@ -8,11 +8,11 @@ permissions: {}
 
 jobs:
   agentscan:
-    if: >-
-      github.run_attempt == 1 &&
-      github.repository == 'nodejs/node' &&
-      (github.event.pull_request.author_association == 'FIRST_TIMER' ||
-      github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR')
+#   if: >-
+#     github.run_attempt == 1 &&
+#     github.repository == 'nodejs/node' &&
+#     (github.event.pull_request.author_association == 'FIRST_TIMER' ||
+#     github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR')
     runs-on: ubuntu-slim
     permissions:
       contents: read
