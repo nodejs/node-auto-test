@@ -2755,7 +2755,7 @@ added:
  - v24.18.0
 -->
 
-* Type: {number} represents the requested output length in bits.
+* Type: {number} represents the requested output length in bitsies.
 
 [^secure-curves]: See [Secure Curves in the Web Cryptography API][]
 
