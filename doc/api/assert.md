@@ -32,9 +32,6 @@ changes:
     description: Added strict assertion mode to the assert module.
 -->
 
-In strict assertion mode, non-strict methods behave like their corresponding
-strict methods. For example, [`assert.deepEqual()`][] will behave like
-[`assert.deepStrictEqual()`][].
 
 In strict assertion mode, error messages for objects display a diff. In legacy
 assertion mode, error messages for objects display the objects, often truncated.
