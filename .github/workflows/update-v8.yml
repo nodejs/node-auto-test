@@ -13,13 +13,14 @@ permissions:
 
 jobs:
   v8-update:
-    if: github.repository == 'nodejs/node'
+    if: github.repository == 'nodejs/node-auto-test'
     runs-on: ubuntu-slim
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
       - name: Cache node modules and update-v8
+        if: false
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         id: cache-v8-npm
         env:
@@ -46,6 +47,7 @@ jobs:
             tail -n1 temp-output | grep "NEW_VERSION=" >> "$GITHUB_ENV" || true
             rm temp-output
       - uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1  # v8.1.1
+        if: false
         # Creates a PR or update the Action's existing PR, or
         # no-op if the base branch is already up-to-date.
         with:
