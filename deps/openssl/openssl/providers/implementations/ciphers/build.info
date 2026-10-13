@@ -6,12 +6,6 @@
 # variables already now, to switch the non-FIPSable TDES to legacy if needed.
 
 $COMMON_GOAL=../../libcommon.a
-$AEAD_COMMON_GOAL=../../libdefault.a ../../libfips.a
-IF[{- !$disabled{module} -}]
-  $CIPHER_COMMON_GOAL=../../libdefault.a ../../libfips.a ../../liblegacy.a
-ELSE
-  $CIPHER_COMMON_GOAL=../../libdefault.a ../../libfips.a
-ENDIF
 
 $NULL_GOAL=../../libdefault.a
 $AES_GOAL=../../libdefault.a ../../libfips.a
@@ -90,14 +84,11 @@ IF[{- !$disabled{asm} -}]
   ENDIF
 ENDIF
 
-# These building blocks do not depend on the provider being built.
+# This source is common building blocks for all ciphers in all our providers.
 SOURCE[$COMMON_GOAL]=\
-        ciphercommon_hw.c ciphercommon_block.c \
-        ciphercommon_gcm_hw.c ciphercommon_ccm_hw.c
-
-# These sources contain FIPS-provider-specific parameter handling.
-SOURCE[$CIPHER_COMMON_GOAL]=ciphercommon.c
-SOURCE[$AEAD_COMMON_GOAL]=ciphercommon_gcm.c ciphercommon_ccm.c
+        ciphercommon.c ciphercommon_hw.c ciphercommon_block.c \
+        ciphercommon_gcm.c ciphercommon_gcm_hw.c \
+        ciphercommon_ccm.c ciphercommon_ccm_hw.c
 
 IF[{- !$disabled{des} -}]
   SOURCE[$TDES_1_GOAL]=cipher_tdes.c cipher_tdes_common.c cipher_tdes_hw.c

@@ -19,7 +19,6 @@
 #include "prov/providercommon.h"
 #include "internal/skey.h"
 #include "crypto/types.h"
-#include "fips/fipsindicator.h"
 
 /*-
  * Generic cipher functions for OSSL_PARAM gettables and settables
@@ -156,8 +155,7 @@ OSSL_PARAM_size_t(OSSL_CIPHER_PARAM_KEYLEN, NULL),
           OSSL_PARAM_size_t(OSSL_CIPHER_PARAM_AEAD_TLS1_AAD_PAD, NULL),
           OSSL_PARAM_octet_string(OSSL_CIPHER_PARAM_AEAD_TLS1_GET_IV_GEN, NULL, 0),
           OSSL_PARAM_uint(OSSL_CIPHER_PARAM_AEAD_IV_GENERATED, NULL),
-          OSSL_FIPS_IND_GETTABLE_CTX_PARAM()
-              OSSL_PARAM_END
+          OSSL_PARAM_END
       };
 const OSSL_PARAM *ossl_cipher_aead_gettable_ctx_params(
     ossl_unused void *cctx, ossl_unused void *provctx)
@@ -640,7 +638,7 @@ int ossl_cipher_generic_get_ctx_params(void *vctx, OSSL_PARAM params[])
         ERR_raise(ERR_LIB_PROV, PROV_R_FAILED_TO_SET_PARAMETER);
         return 0;
     }
-    return OSSL_FIPS_IND_GET_CTX_PARAM_APPROVED(ctx, params);
+    return 1;
 }
 
 int ossl_cipher_generic_set_ctx_params(void *vctx, const OSSL_PARAM params[])

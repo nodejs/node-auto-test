@@ -16,7 +16,7 @@
     ],
     'openssl_cflags_VC-WIN32': [
       '/W3 /wd4090 /nologo /O2',
-      '/GF /Gy',
+      '/Gs0 /GF /Gy',
       '/W3 /wd4090 /nologo /O2',
     ],
     'openssl_ex_libs_VC-WIN32': [

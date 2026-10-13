@@ -1,5 +1,5 @@
 /*
- * Copyright 2018-2026 The OpenSSL Project Authors. All Rights Reserved.
+ * Copyright 2018-2025 The OpenSSL Project Authors. All Rights Reserved.
  *
  * Licensed under the Apache License 2.0 (the "License").  You may not use
  * this file except in compliance with the License.  You can obtain a copy
@@ -276,29 +276,23 @@ int ossl_siv128_encrypt(SIV128_CONTEXT *ctx,
     size_t len)
 {
     SIV_BLOCK q;
-    int ret = 0;
-    int final_ret_value = -1;
 
     /* can only do one crypto operation */
     if (ctx->crypto_ok == 0)
-        goto end;
+        return 0;
     ctx->crypto_ok--;
 
     if (!siv128_do_s2v_p(ctx, &q, in, len))
-        goto end;
+        return 0;
 
     memcpy(ctx->tag.byte, &q, SIV_LEN);
     q.byte[8] &= 0x7f;
     q.byte[12] &= 0x7f;
 
     if (!siv128_do_encrypt(ctx->cipher_ctx, out, in, len, &q))
-        goto end;
-
-    ret = 1;
-    final_ret_value = 0;
-end:
-    ctx->final_ret = final_ret_value;
-    return ret;
+        return 0;
+    ctx->final_ret = 0;
+    return 1;
 }
 
 /*
@@ -311,12 +305,10 @@ int ossl_siv128_decrypt(SIV128_CONTEXT *ctx,
     unsigned char *p;
     SIV_BLOCK t, q;
     int i;
-    int ret = 0;
-    int final_ret_value = -1;
 
     /* can only do one crypto operation */
     if (ctx->crypto_ok == 0)
-        goto end;
+        return 0;
     ctx->crypto_ok--;
 
     memcpy(&q, ctx->tag.byte, SIV_LEN);
@@ -325,7 +317,7 @@ int ossl_siv128_decrypt(SIV128_CONTEXT *ctx,
 
     if (!siv128_do_encrypt(ctx->cipher_ctx, out, in, len, &q)
         || !siv128_do_s2v_p(ctx, &t, out, len))
-        goto end;
+        return 0;
 
     p = ctx->tag.byte;
     for (i = 0; i < SIV_LEN; i++)
@@ -333,13 +325,10 @@ int ossl_siv128_decrypt(SIV128_CONTEXT *ctx,
 
     if ((t.word[0] | t.word[1]) != 0) {
         OPENSSL_cleanse(out, len);
-        goto end;
+        return 0;
     }
-    ret = 1;
-    final_ret_value = 0;
-end:
-    ctx->final_ret = final_ret_value;
-    return ret;
+    ctx->final_ret = 0;
+    return 1;
 }
 
 /*
