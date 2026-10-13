@@ -1,6 +1,6 @@
 #!/bin/sh
 set -e
-# Shell script to update OpenSSL in the source tree to a specific version
+# Shell script to update OpenSSL in the source tree to the latest release in a series
 # Based on https://github.com/nodejs/node/blob/main/doc/contributing/maintaining/maintaining-openssl.md
 
 cleanup() {
@@ -10,12 +10,21 @@ cleanup() {
 }
 
 download() {
-  LATEST_TAG_NAME="$("$NODE" --input-type=module <<'EOF'
-const res = await fetch('https://api.github.com/repos/openssl/openssl/git/matching-refs/tags/openssl-3.5');
+  VERSION_H="$DEPS_DIR/openssl/config/archs/linux-x86_64/asm/include/openssl/opensslv.h"
+  CURRENT_VERSION=$(grep "OPENSSL_FULL_VERSION_STR" "$VERSION_H" | sed -n "s/^.*VERSION_STR \"\(.*\)\"/\1/p")
+  OPENSSL_SERIES="${1:-$(echo "$CURRENT_VERSION" | cut -d. -f1,2)}"
+  LATEST_TAG_NAME="$("$NODE" --input-type=module - "$OPENSSL_SERIES" <<'EOF'
+const series = process.argv[2];
+if (!/^\d+\.\d+$/.test(series)) throw new Error(`Invalid OpenSSL series: ${series}`);
+const res = await fetch(`https://api.github.com/repos/openssl/openssl/git/matching-refs/tags/openssl-${series}.`);
 if (!res.ok) throw new Error(`FetchError: ${res.status} ${res.statusText}`, { cause: res });
 const releases = await res.json()
-const latest = releases.at(-1);
-if(!latest) throw new Error(`Could not find latest release`);
+// Exclude prereleases and sort patch versions numerically, not lexicographically.
+const tagPattern = new RegExp(`^refs/tags/openssl-${series.replace('.', '\\.')}\\.(\\d+)$`);
+const latest = releases.filter(({ ref }) => tagPattern.test(ref))
+  .sort((a, b) => Number(a.ref.match(tagPattern)[1]) - Number(b.ref.match(tagPattern)[1]))
+  .at(-1);
+if(!latest) throw new Error(`Could not find a stable OpenSSL ${series} release`);
 console.log(latest.ref.replace('refs/tags/',''));
 EOF
 )"
@@ -25,8 +34,6 @@ EOF
     *quic1) NEW_VERSION_NO_RELEASE="${NEW_VERSION%1}" ;;
     *) NEW_VERSION_NO_RELEASE="$NEW_VERSION" ;;
   esac
-  VERSION_H="./deps/openssl/config/archs/linux-x86_64/asm/include/openssl/opensslv.h"
-  CURRENT_VERSION=$(grep "OPENSSL_FULL_VERSION_STR" $VERSION_H | sed -n "s/^.*VERSION_STR \"\(.*\)\"/\1/p")
   # This function exit with 0 if new version and current version are the same
   compare_dependency_version "openssl" "$NEW_VERSION_NO_RELEASE" "$CURRENT_VERSION"
 
@@ -71,7 +78,7 @@ regenerate() {
 
   make -C "$DEPS_DIR/openssl/config" clean
   # Needed for compatibility with nasm on 32-bit Windows
-  # See https://github.com/nodejs/node/blob/main/doc/contributing/maintaining/maintaining-openssl.md#2-execute-make-in-depsopensslconfig-directory
+  # See https://github.com/nodejs/node/blob/main/doc/contributing/maintaining/maintaining-openssl.md#2-regenerate-platform-specific-files
   sed -i 's/#ifdef/%ifdef/g' "$DEPS_DIR/openssl/openssl/crypto/perlasm/x86asm.pl"
   sed -i 's/#endif/%endif/g' "$DEPS_DIR/openssl/openssl/crypto/perlasm/x86asm.pl"
   make -C "$BASE_DIR" gen-openssl
@@ -86,11 +93,12 @@ regenerate() {
 }
 
 help() {
-    echo "Shell script to update OpenSSL in the source tree to a specific version"
+    echo "Shell script to update OpenSSL in the source tree to the latest release in a series"
     echo "Sub-commands:"
     printf "%-23s %s\n" "help" "show help menu and commands"
-    printf "%-23s %s\n" "download" "download and replace OpenSSL source code with new version"
+    printf "%-23s %s\n" "download [major.minor]" "download the latest stable release (defaults to the checked-out series)"
     printf "%-23s %s\n" "regenerate" "regenerate platform-specific files"
+    echo "Set NODE_DIR to update a checkout other than the one containing this script."
     echo ""
     exit "${1:-0}"
 }
@@ -102,7 +110,7 @@ main() {
 
   trap cleanup INT TERM EXIT
 
-  BASE_DIR=$(cd "$(dirname "$0")/../.." && pwd)
+  BASE_DIR=${NODE_DIR:-$(cd "$(dirname "$0")/../.." && pwd)}
   DEPS_DIR="$BASE_DIR/deps"
 
   [ -z "$NODE" ] && NODE="$BASE_DIR/out/Release/node"

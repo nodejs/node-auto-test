@@ -11,59 +11,90 @@ permissions:
 
 jobs:
   openssl-update:
-    if: github.repository == 'nodejs/node'
+    if: github.repository == 'nodejs/node' || github.event_name == 'workflow_dispatch'
+    name: OpenSSL ${{ matrix.target.series }} (${{ matrix.target.branch }})
     # Cannot use ubuntu-slim here because the update script requires Docker
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          # Move main to 4.2 when it is available, then stay on that LTS series.
+          - branch: main
+            series: '4.1'
+          - branch: v26.x-staging
+            series: '3.5'
+    concurrency:
+      group: openssl-update-${{ matrix.target.branch }}
+      cancel-in-progress: false
+    env:
+      NODE_DIR: ${{ github.workspace }}
+      OPENSSL_SERIES: ${{ matrix.target.series }}
+      TARGET_BRANCH: ${{ matrix.target.branch }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Download updater from the workflow revision
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/contents/tools/dep_updaters/update-openssl.sh?ref=$GITHUB_SHA" \
+            --header 'Accept: application/vnd.github.raw+json' > "$RUNNER_TEMP/update-openssl.sh"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Check out target branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
+          ref: ${{ matrix.target.branch }}
           persist-credentials: false
+      - name: Setup Git config
+        run: |
+          git config user.name "Node.js GitHub Bot"
+          git config user.email "github-bot@iojs.org"
+          if [ "$TARGET_BRANCH" != main ]; then
+            echo "PR_TITLE_PREFIX=[${TARGET_BRANCH%-staging}] " >> "$GITHUB_ENV"
+          fi
       - name: Check and download new OpenSSL version
         run: |
-          ./tools/dep_updaters/update-openssl.sh download > temp-output
-          cat temp-output
-          tail -n1 temp-output | grep "NEW_VERSION=" >> "$GITHUB_ENV" || true
-          rm temp-output
+          sh "$RUNNER_TEMP/update-openssl.sh" download "$OPENSSL_SERIES" > "$RUNNER_TEMP/openssl-output"
+          cat "$RUNNER_TEMP/openssl-output"
+          tail -n1 "$RUNNER_TEMP/openssl-output" | grep "NEW_VERSION=" >> "$GITHUB_ENV" || true
         env:
           GITHUB_TOKEN: ${{ secrets.GH_USER_TOKEN }}
-      - name: Create PR with first commit
-        id: create-pull-request
+      - name: Commit OpenSSL sources
         if: env.NEW_VERSION
-        uses: gr2m/create-or-update-pull-request-action@b65137ca591da0b9f43bad7b24df13050ea45d1b  # v1.10.1
-        # Creates a PR with the new OpenSSL source code committed
-        env:
-          GITHUB_TOKEN: ${{ secrets.GH_USER_TOKEN }}
-        with:
-          author: Node.js GitHub Bot <github-bot@iojs.org>
-          body: This is an automated update of OpenSSL to ${{ env.NEW_VERSION }}.
-          branch: actions/tools-update-openssl  # Custom branch *just* for this Action.
-          commit-message: 'deps: upgrade openssl sources to openssl-${{ env.NEW_VERSION }}'
-          labels: dependencies, openssl
-          title: 'deps: update OpenSSL to ${{ env.NEW_VERSION }}'
-          path: deps/openssl
-          update-pull-request-title-and-body: true
-          draft: true
+        run: |
+          git add -A deps/openssl/openssl
+          git commit -m "deps: upgrade openssl sources to openssl-$NEW_VERSION"
       - name: Regenerate platform specific files
         if: env.NEW_VERSION
         run: |
           sudo apt update && sudo apt install -y nasm libtext-template-perl
-          ./tools/dep_updaters/update-openssl.sh regenerate
+          sh "$RUNNER_TEMP/update-openssl.sh" regenerate
         env:
           GITHUB_TOKEN: ${{ secrets.GH_USER_TOKEN }}
-      - name: Add second commit
-        # Adds a second commit to the PR with the generated platform-dependent files
+      - name: Commit generated files
         if: env.NEW_VERSION
-        uses: gr2m/create-or-update-pull-request-action@b65137ca591da0b9f43bad7b24df13050ea45d1b  # v1.10.1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GH_USER_TOKEN }}
+        run: |
+          git add -A deps/openssl
+          git commit -m "deps: update archs files for openssl-$NEW_VERSION"
+      - name: Create or update PR
+        id: create-pull-request
+        if: env.NEW_VERSION
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1  # v8.1.1
         with:
+          token: ${{ secrets.GH_USER_TOKEN }}
           author: Node.js GitHub Bot <github-bot@iojs.org>
-          branch: actions/tools-update-openssl  # Custom branch *just* for this Action.
-          commit-message: 'deps: update archs files for openssl-${{ env.NEW_VERSION }}'
-          path: deps/openssl
+          committer: Node.js GitHub Bot <github-bot@iojs.org>
+          body: This is an automated update of OpenSSL to ${{ env.NEW_VERSION }} for ${{ matrix.target.branch }}.
+          base: ${{ matrix.target.branch }}
+          branch: actions/${{ matrix.target.branch }}/tools-update-openssl
+          labels: ${{ matrix.target.branch == 'main' && 'dependencies, openssl, dont-land-on-v22.x, dont-land-on-v24.x, dont-land-on-v26.x' || 'dependencies, openssl' }}
+          title: '${{ env.PR_TITLE_PREFIX }}deps: update OpenSSL to ${{ env.NEW_VERSION }}'
+          add-paths: deps/openssl
+          draft: true
       - name: Mark PR as ready for review
-        if: env.NEW_VERSION
+        if: env.NEW_VERSION && steps.create-pull-request.outputs.pull-request-number
         env:
           GITHUB_TOKEN: ${{ secrets.GH_USER_TOKEN }}
           PR_ID: ${{ steps.create-pull-request.outputs.pull-request-number }}
-        run: gh --repo "$GITHUB_REPOSITORY" pr ready "$PR_ID"
+        run: |
+          if [ "$(gh --repo "$GITHUB_REPOSITORY" pr view "$PR_ID" --json isDraft --jq .isDraft)" = true ]; then
+            gh --repo "$GITHUB_REPOSITORY" pr ready "$PR_ID"
+          fi

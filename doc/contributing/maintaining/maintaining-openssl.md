@@ -1,133 +1,127 @@
 # Maintaining OpenSSL
 
-OpenSSL is automatically updated by the [update-openssl-action][].
-There is also a script in `tools/dep_updaters` that can be used to update it.
-This document describes how to manually update `deps/openssl/`.
+Node.js bundles upstream OpenSSL sources in `deps/openssl/openssl/` and generated
+build files in `deps/openssl/config/`. An update has two commits: one imports the
+upstream sources, and the other updates the generated files.
 
-## Requirements
+## Automated updates
 
-* Linux environment.
-* `perl` Only Perl version 5 is tested.
-* `nasm` (<https://www.nasm.us/>) Version 2.11 or higher is needed.
-* GNU `as` in binutils. Version 2.26 or higher is needed.
+The [OpenSSL update workflow][] runs weekly and can also be started manually.
+Both triggers update every branch and OpenSSL series in the workflow matrix.
+Edit the matrix when changing the series maintained on a target branch.
 
-## 0. Check requirements
+Each target has its own update branch and pull request, with the target branch
+as the pull request base. The workflow uses the updater from its own revision,
+so the target branch does not need the latest updater. It imports the latest
+stable patch release in the configured series and skips targets already on that
+version.
 
-```console
-% perl -v
+The workflow commits the upstream sources and generated files separately, then
+opens or updates the pull request after generation succeeds. Release branch pull
+request titles are prefixed with the release line (for example, `[v26.x]` for
+`v26.x-staging`); commit messages are not prefixed. Updates targeting `main` get
+`dont-land-on-v22.x`, `dont-land-on-v24.x`, and `dont-land-on-v26.x` labels.
 
-This is perl 5, version 22, subversion 1 (v5.22.1) built for
-x86_64-linux-gnu-thread-multi
-(with 60 registered patches, see perl -V for more detail)
+The workflow does not build or test Node.js. Review and CI are required before
+landing the update.
 
-% as --version
-GNU assembler (GNU Binutils for Ubuntu) 2.26.1
-Copyright (C) 2015 Free Software Foundation, Inc.
-...
-% nasm -v
-NASM version 2.11.08
-```
+## Local updates
 
-## 1. Obtain and extract new OpenSSL sources
+The [OpenSSL updater][] provides separate `download` and `regenerate` commands.
+Run the following commands from the repository root after checking out the target
+branch.
 
-Get a new source from <https://github.com/openssl/openssl/tree/openssl-3.0.16>
-and copy all files into `deps/openssl/openssl`. Then add all files and commit
-them. (The link above, and the branch, will change with each new OpenSSL
-release).
+For the full procedure, use a Linux environment with:
 
-```bash
-git clone https://github.com/openssl/openssl
-cd openssl
-cd ../node/deps/openssl
-rm -rf openssl
-cp -R ../../../openssl openssl
-rm -rf openssl/.git*
-git add --all openssl
-git commit openssl
-```
+* A Node.js executable with `fetch` support, plus `curl`, `gzip`, `tar`, and `shasum`
+  for downloading and extracting sources.
+* `make` and a working Docker installation for regeneration.
 
-```text
-deps: upgrade openssl sources to openssl-3.0.16
+The updater uses `out/Release/node` if available, otherwise `node` from `PATH`.
+Set `NODE` to an executable path to override that choice. Set `NODE_DIR` to an
+absolute repository path to update a checkout other than the one containing the
+script.
 
-This updates all sources in deps/openssl/openssl by:
-    $ git clone git@github.com:openssl/openssl.git
-    $ cd openssl
-    $ git checkout openssl-3.0.16
-    $ cd ../node/deps/openssl
-    $ rm -rf openssl
-    $ cp -R ../../../openssl openssl
-    $ rm -rf openssl/.git*
-    $ git add --all openssl
-    $ git commit openssl
-```
+### 1. Import and commit upstream sources
 
-## 2. Execute `make` in `deps/openssl/config` directory
-
-Use `make` to regenerate all platform dependent files in
-`deps/openssl/config/archs/`:
+Select the OpenSSL `major.minor` series for the target branch, for example:
 
 ```bash
-# On non-Linux machines
-make gen-openssl
-
-# On Linux machines
-make -C deps/openssl/config clean
-make -C deps/openssl/config
+./tools/dep_updaters/update-openssl.sh download 3.5
 ```
 
-Fix up 32-bit Windows assembler directives. This will allow the commits to be
-cherry-picked to older release lines that still provide binaries on 32-bit Windows.
+Without a series argument, `download` uses the series in the checkout's generated
+OpenSSL version header. It selects the latest stable patch release, excluding
+prereleases, and replaces `deps/openssl/openssl/`. If the version is unchanged,
+it exits without replacing the sources; no regeneration is needed.
+
+To import a specific release manually, replace `deps/openssl/openssl/` with the
+contents of the upstream `openssl-<version>` tag, excluding the clone's `.git`
+directory.
+
+Review and commit the source changes before generating platform files:
 
 ```bash
-make -C deps/openssl/config clean
-# Edit deps/openssl/openssl/crypto/perlasm/x86asm.pl changing
-# #ifdef to %ifdef to make it compatible to nasm on 32-bit Windows.
-# See: https://github.com/nodejs/node/pull/43603#issuecomment-1170670844
-# Reference: https://github.com/openssl/openssl/issues/18459
-```
-
-## 3. Check diffs
-
-Check diffs to ensure updates are right. Even if there are no updates in openssl
-sources, `buildinf.h` files will be updated because they have timestamp
-data in them.
-
-```bash
-git diff -- deps/openssl
-```
-
-_Note_: On Windows, OpenSSL Configure generates a `makefile` that can be
-used for the `nmake` command. The `make` command in step 2 (above) uses
-`Makefile_VC-WIN64A` and `Makefile_VC-WIN32` that are manually
-created. When source files or build options are updated in Windows,
-it needs to change these two Makefiles by hand. If you are not sure,
-please ask @shigeki for details.
-
-## 4. Commit and make test
-
-Update all architecture dependent files. Do not forget to git add or remove
-files if they are changed before committing:
-
-```bash
-git add deps/openssl/config/archs
-git add deps/openssl/openssl
+git diff -- deps/openssl/openssl
+git add -A deps/openssl/openssl
 git commit
 ```
 
-The commit message can be written as (with the openssl version set
-to the relevant value):
+Use the imported version in the commit title:
 
 ```text
-deps: update archs files for openssl-3.0.16
-
-After an OpenSSL source update, all the config files need to be
-regenerated and committed by:
-    $ make -C deps/openssl/config
-    $ git add deps/openssl/config/archs
-    $ git add deps/openssl/openssl
-    $ git commit
+deps: upgrade openssl sources to openssl-<version>
 ```
 
-Finally, build Node.js and run the tests.
+### 2. Regenerate platform-specific files
 
-[update-openssl-action]: ../../../.github/workflows/update-openssl.yml
+```bash
+./tools/dep_updaters/update-openssl.sh regenerate
+```
+
+The script clears the old generated files and adjusts `#ifdef` and `#endif`
+directives in `crypto/perlasm/x86asm.pl` for NASM compatibility on 32-bit Windows.
+It then runs `make gen-openssl`, which generates files for all supported targets
+inside the container defined by `deps/openssl/config/Dockerfile`. This keeps the
+generation toolchain consistent across updates.
+
+Generated output includes assembly, headers, and `.gypi` source lists under
+`deps/openssl/config/archs/`, as well as wrapper headers in `deps/openssl/config/`.
+Node.js checks these files in so that ordinary builds do not need to run
+OpenSSL's Perl-based generation process.
+
+When upgrading to a new OpenSSL series, review the configuration options and
+generator templates for upstream build changes. Windows generation uses the
+hand-maintained `deps/openssl/config/Makefile_VC-WIN*` files, which may also need
+updates when upstream sources or build rules change.
+
+### 3. Review and commit generated files
+
+Review the diff for added or removed sources, generated build lists, and
+architecture-specific changes. Timestamp changes in `buildinf.h` are expected.
+
+```bash
+git diff -- deps/openssl
+git add -A deps/openssl
+git commit
+```
+
+Use the same version in the second commit title:
+
+```text
+deps: update archs files for openssl-<version>
+```
+
+Follow the [commit message guidelines][] for both commits.
+
+### 4. Build and test
+
+Follow [BUILDING.md][] to build Node.js with the bundled OpenSSL. A build using
+shared OpenSSL does not validate the updated dependency. Check
+`process.versions.openssl` in the built binary, run the crypto, Web Crypto, and TLS
+tests, and complete CI across the supported platforms before landing.
+
+[BUILDING.md]: ../../../BUILDING.md
+[OpenSSL update workflow]: ../../../.github/workflows/update-openssl.yml
+[OpenSSL updater]: ../../../tools/dep_updaters/update-openssl.sh
+[commit message guidelines]: ../pull-requests.md#commit-message-guidelines
