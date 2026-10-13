@@ -21,7 +21,7 @@ jobs:
         target:
           # Move main to 4.2 when it is available, then stay on that LTS series.
           - branch: main
-            series: '4.1'
+            series: '4.0'
           - branch: v26.x-staging
             series: '3.5'
     concurrency:
