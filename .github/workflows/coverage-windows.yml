@@ -62,7 +62,7 @@ concurrency:
 env:
   PYTHON_VERSION: '3.15'
   FLAKY_TESTS: keep_retrying
-  RUSTC_VERSION: '1.88'
+  RUSTC_VERSION: '1.100'
 
 permissions:
   contents: read
